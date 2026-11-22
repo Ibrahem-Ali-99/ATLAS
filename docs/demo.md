@@ -34,4 +34,4 @@ n8n on port 5678 is a local integration. The editor should stay on localhost. A 
 7. Open Analytics and Monitoring. The figures are counts and traces already stored for Atlas Demo. A missing conversion rate stays empty instead of becoming zero.
 8. Sign out from the account menu or from Settings.
 
-The browser test in `apps/web/e2e/workspace.spec.ts` follows this path with deterministic providers and an isolated `atlas_e2e` database. Screenshots from that run are in `docs/demo/screenshots/`.
+The browser test in `apps/web/e2e/workspace.spec.ts` follows this path with deterministic providers and an isolated `atlas_e2e` database. Screenshots from that run are in `docs/demo/screenshots/`. The assistant image shows the fixed sentence `Grounded answer from the supplied company records.`, not a hosted model. The workflows image shows `n8n_not_configured` because that test process has an empty webhook URL. A local API with `ATLAS_N8N_LEAD_WEBHOOK_URL` set is a different mode. The Next.js development badge is visible because the shots were taken from the test server.

@@ -20,6 +20,8 @@ HTTP timings against `http://127.0.0.1:8000/api/v1/health` include the client. T
 
 The stored evaluation method is `deterministic_double`. It checks the agent path with stand-ins. It is not live-model accuracy. The lead-score report keeps the held-out comparison from the synthetic training set. The served explanation matches the served model.
 
+A later configuration check read the local settings and printed only whether keys were present. `ATLAS_LLM_API_KEY`, `ATLAS_EMBEDDING_API_KEY`, and both Langfuse keys were unset. No live embedding or chat request was sent.
+
 ## Failure handling
 
 An interrupted agent run is marked failed with `interrupted` on startup. An email whose send result is unknown is not sent again. An SMTP timeout and an n8n timeout are not retried. A missing n8n callback stays incomplete. A Langfuse export failure keeps the local trace. Empty model keys fail the call instead of inventing an answer.

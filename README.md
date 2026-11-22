@@ -67,13 +67,13 @@ The assistant answers from retrieved document excerpts and from CRM records it i
 
 ## Agent runs and approvals
 
-From Agent Runs, choose an inquiry and start a run. The agent classifies it, searches company documents, and looks up the contact through a read-only MCP server bound to the current organization. It then stores proposed actions and pauses. An admin approves or rejects each one in Approvals. Resume the run to apply the approved payload. Rejected actions do not write. The customer response and the appointment request are saved as CRM interactions. They are not emailed and they do not book a calendar.
+From Agent Runs, choose an inquiry and start a run. The agent classifies it, searches company documents, and looks up the contact through a read-only MCP server bound to the current organization. It then stores proposed actions and pauses. An admin approves or rejects each one in Approvals. Resume the run to apply the approved payload. Rejected actions do not write. An approved customer response is sent through the configured email mode, which is sandbox SMTP unless live delivery is turned on, and stored as an email interaction. An approved appointment becomes a simulated calendar booking and a call interaction. Neither one runs before approval.
 
 `ATLAS_APPROVAL_TTL_HOURS` defaults to 24. Changing the stored payload after it was proposed invalidates that approval. An empty `ATLAS_LLM_API_KEY` fails the run with `llm_unconfigured` instead of inventing a classification.
 
 ## Synthetic local accounts
 
-The seed is idempotent. Running it again updates the same rows and resets those passwords to the values in `.env`. It refuses to run when `ATLAS_ENVIRONMENT=production`.
+The seed is idempotent. Running it again updates the same rows and resets those passwords to the values in `.env`. It refuses to run when `ATLAS_ENVIRONMENT=production` or `ATLAS_PUBLIC_DEMO=true`.
 
 | Email | Organization | Role |
 | --- | --- | --- |
