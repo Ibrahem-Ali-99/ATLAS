@@ -24,7 +24,7 @@ Stamp `433129a2` in the admin organization:
 | Lead Acceptance pier 433129a2 | `9234b76b-4480-4416-9756-459fcef9c911` |
 | Inquiry Bonded storage 433129a2 | `e39d7bdf-73c5-4787-b25d-4b44c22f2d71` |
 
-Also left in place: document `acceptance-yard-433129a2` at status `ready`, two assistant conversations, and three failed agent runs for that inquiry. The first failed run id is `f8c7921c-88b9-4b39-80f7-dbb76dd187ab`.
+Also left in place: document `acceptance-yard-433129a2` at status `ready`, two assistant conversations, the failed HTTP starts, and the completed run `12eb9db3-1243-49e7-80f9-798c75b169e4`. The first failed run id is `f8c7921c-88b9-4b39-80f7-dbb76dd187ab`.
 
 ## Scenario A — Customer management
 
@@ -61,21 +61,23 @@ The company list is organization-scoped. Harbor remains because it is a real row
 
 ## Scenario D — Agent execution
 
-**Result: failed before a proposal.**
+**Result: the product API cannot start a run. The decision path works once a run exists.**
 
-Three starts of the acceptance inquiry each returned HTTP 502 `tool_failed` in about four seconds. The stored run shows:
+`POST /agent-runs` on the API serving `127.0.0.1:8000` was tried four times, including once after the successful run below. Each returned HTTP 502 `tool_failed` with `Error executing tool search_company_knowledge`. The stored runs show `load_inquiry` succeeded, Groq `classify` succeeded, and then `run` failed. The message is the MCP crash wrapper. The child exception is not stored.
 
-1. `load_inquiry` succeeded.
-2. `classify` succeeded. Groq recorded category `pricing_inquiry` and contact name `Nora Acceptance`.
-3. `run` failed. `error_message` is `Error executing tool search_company_knowledge`.
+The same `start_run` function, imported by a fresh interpreter against this database, reached `awaiting_approval`. Run `12eb9db3-1243-49e7-80f9-798c75b169e4`:
 
-No approval was created. Approve, reject, resume, and a second execute could not be performed on this run. The lead notes are still "Asked about bonded pallet capacity." No email row was created for the lead.
+| Step | Stored result |
+|---|---|
+| classify | Category `Storage`. Contact name `Nora Acceptance`. |
+| retrieve_knowledge | Cedar brochure and `acceptance-yard-433129a2`. The acceptance excerpt contains the 42-pallet sentence. |
+| lookup_customer | Contact `214a06f2-3ee3-4164-be9b-49ba3d4832db` and lead `9234b76b-4480-4416-9756-459fcef9c911`. |
+| qualify | `qualified`. |
+| propose | `update_lead`, `prepare_customer_response`, `request_appointment`. |
 
-The same MCP tool, called from a fresh interpreter with the same inquiry text, returned 2 hits. Older runs on this database, including "Cedar pallet quote" and an earlier "Bonded storage" inquiry, are `completed`. The graph can finish. This live process currently stops every new start of this inquiry inside the knowledge tool, and the tool crash is replaced with a generic message before it reaches Monitoring.
+Through the HTTP API, an admin approved `update_lead` and rejected the email and the appointment. Staff rejection of the email returned 403. Resume returned 200 and the run status became `completed`. The execute event succeeded. The lead notes changed from "Asked about bonded pallet capacity." to "Nora from Acceptance Yard requests rates for bonded pallet storage (yard note AXYARD-433129a2-PALLETS)." The lead status stayed `qualified`. A second execute returned 409 `already_executed`. No email row was stored for the lead. No calendar booking was stored for the lead.
 
-The classifier stored the contact name without the stamp that makes this contact unique. Lookup did not run, so a wrong-customer write was not observed.
-
-Staff denial was tested on an already pending approval and is recorded in scenario G.
+The classifier name omitted the stamp. Lookup still stored the contact and lead that were created for this inquiry. The knowledge hits list the Cedar brochure beside the acceptance document, with no mark for which hit the proposal used.
 
 ## Scenario E — Automation
 
@@ -106,14 +108,13 @@ Overview uses this analytics snapshot plus the pending-approval and failed-run l
 | Other organization reads the acceptance company | 404 `not_found`. That user is an admin of the other organization. |
 | Provider status | Groq and Ollama readiness only. No key marker in the payload. |
 | Logout, then `GET /auth/me` | 204, then 401 |
-| Second execute of the new lead approval | Not run. The agent never created the approval. The service rejects `already_executed`, and the approval tests passed. |
+| Second execute of the acceptance lead approval | 409 `already_executed`. The lead notes did not change again. |
 
 ## Failed or unavailable capabilities
 
-- Starting an agent run on the acceptance inquiry. Classification works. Knowledge retrieval in the running API does not.
-- Approving an internal write, rejecting the email and appointment, resuming, and proving a single CRM write. Blocked by the failure above.
-- A follow-up approval opened from n8n. The hook was not called.
-- A sandbox email delivery. No execute occurred.
+- Starting an agent run from the API the product is serving. Classification works. The knowledge tool then crashes, and the crash cause is not stored.
+- A follow-up approval opened from n8n. The hook was not called in this pass.
+- A sandbox email delivery. The email proposal was rejected, so no send was attempted. That is the intended gate, and the sandbox path itself was not executed.
 - A user-facing retry of a workflow, a webhook-key install, an organization switch, or a saved setting.
 - An origin filter. The product cannot hide demonstration rows without a new field.
 
@@ -131,14 +132,14 @@ These are deliberate or already bounded, and they are not the broken agent path:
 
 ## Prioritized corrective backlog
 
-### 1. Agent knowledge retrieval crashes inside the running API
+### 1. The serving API cannot start an agent run
 
 - **Severity:** Critical
-- **Business impact:** An operator cannot start the inquiry-to-approval journey. The run is stored as a historical failure, and Monitoring cannot explain it.
-- **Root cause:** After Groq classification, `retrieve_knowledge` calls MCP `search_company_knowledge`. The tool process raises an unexpected exception. `UnexpectedToolError` replaces that exception with `Error executing tool search_company_knowledge` before the API stores `tool_failed`. The same call from a fresh interpreter returns hits, so the documents and the tool function are usable outside this agent invocation.
-- **Frontend:** Show the stored error on the run and in Monitoring. When the message is only the generic tool wrapper, say that the tool crashed and the cause was not returned. Do not add a retry button that calls the same failing start until the backend returns.
-- **Backend:** Preserve the child exception type and a redacted message on the agent run. Make `search_company_knowledge` succeed from the API process that serves `/agent-runs`, using the same inquiry text that already returns hits out of process. Keep the organization id fixed in the child and do not pass the Groq key.
-- **Acceptance:** A new inquiry run reaches `awaiting_approval` with a lead proposal, an email proposal, and an appointment proposal. The knowledge event lists stored hits. A forced tool crash stores a cause an admin can read, without a secret or a database URL.
+- **Business impact:** An operator using the product cannot open the approval journey. The run is stored as a historical failure, and Monitoring cannot explain it. Approve, reject, and resume already work when a run has reached `awaiting_approval`.
+- **Root cause:** `POST /agent-runs` on the process listening at `127.0.0.1:8000` classifies with Groq and then fails in MCP `search_company_knowledge`. The SDK replaces an unexpected tool exception with `Error executing tool search_company_knowledge`, and that is all the run stores. The same `start_run` call from a fresh interpreter, against the same database, stores knowledge hits and pauses for approval. The API process image is the base CPython under `%APPDATA%\uv\python`, which cannot import `mcp` when launched on its own. `server_parameters` uses `sys.executable` and does not pass the virtualenv. A direct spawn of that base interpreter fails earlier, with `ModuleNotFoundError: No module named 'mcp'`, so it is not the whole explanation of the stored wrapper. The serving process and a fresh interpreter do not produce the same tool result.
+- **Frontend:** Show the stored error on the run and in Monitoring. When the message is only the generic tool wrapper, say that the tool crashed and the cause was not returned. Do not add a retry button until a start from this API process succeeds.
+- **Backend:** Spawn the MCP child with the interpreter that has the API dependencies, and pass only the environment the child needs. Store the child exception class and a redacted message on the run. Keep the organization id fixed in the child and do not pass the Groq key.
+- **Acceptance:** `POST /agent-runs` on the serving API reaches `awaiting_approval` with a lead proposal, an email proposal, and an appointment proposal. The knowledge event lists stored hits. A forced tool crash stores a cause an admin can read, without a secret or a database URL.
 
 ### 2. Grounded citations include rows the answer did not need
 
@@ -170,11 +171,11 @@ These are deliberate or already bounded, and they are not the broken agent path:
 ### 5. Classifier contact name dropped the unique suffix
 
 - **Severity:** Minor
-- **Business impact:** The stored contact name is `Nora Acceptance`. The contact that was created is `Nora Acceptance 433129a2`. Lookup did not run, so no wrong lead was written.
-- **Root cause:** The classify step asks the model for a contact name and stores it on the event. It is not constrained to a contact id returned by `find_contact`.
-- **Frontend:** Show the stored contact name as model output, and show the contact id only after lookup returns one.
-- **Backend:** Resolve the name with `find_contact` and store that id. If several contacts match, store no id and let the proposal say the customer was ambiguous.
-- **Acceptance:** A run that reaches lookup either stores the stamped contact id or records that the name was ambiguous. It does not attach an older contact with a similar name.
+- **Business impact:** The stored contact name is `Nora Acceptance`. The contact that was created is `Nora Acceptance 433129a2`. On the successful run, lookup still stored that contact id and the acceptance lead id, so no wrong customer was written.
+- **Root cause:** The classify step asks the model for a contact name and stores it on the event. Lookup then searches by that string and can also fall back to the inquiry's lead id. A similar older name could win the search when the inquiry has no lead id.
+- **Frontend:** Show the stored contact name as model output, and show the contact id from the lookup event beside it.
+- **Backend:** If several contacts match the model name, store no contact id and say the customer was ambiguous. Do not let the model choose the organization.
+- **Acceptance:** A run with one matching contact stores that contact id. A run with two matches stores neither id and does not update the older contact.
 
 ### 6. Settings cannot install the webhook key the API can already create
 
@@ -187,4 +188,4 @@ These are deliberate or already bounded, and they are not the broken agent path:
 
 ## Readiness verdict
 
-ATLAS is not ready to run the inquiry-to-approval operation on this deployment. CRM, knowledge indexing, organization-scoped assistant reads, Groq answers for a grounded question and a rephrase, the n8n lead callback, analytics updates, CSRF, tenant isolation, and the staff approval denial all worked. The agent stops at the knowledge tool, so the approve, reject, resume, and single-write checks could not be completed. Business counts still mix demonstration and operational rows. Treat the product as a working operations shell with a broken agent handoff, not as a closed business workflow.
+ATLAS can record a customer, index a document, answer from that document with Groq, dispatch a lead through n8n, and decide an existing agent proposal. It cannot start that proposal from the API process the product is using. On a run that was created outside that process, an admin approved the CRM write, rejected the email and the appointment, and resume wrote the lead notes once. A second execute was rejected. Staff could not reject. Another organization could not read the company. Business counts still mix demonstration and operational rows. The product is an operations shell with a broken agent start on this deployment, not a closed inquiry-to-approval workflow.
