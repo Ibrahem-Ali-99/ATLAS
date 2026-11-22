@@ -4,15 +4,18 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
+import { ProviderNotice } from "@/components/provider-notice";
 import { MembershipTable } from "@/components/membership-table";
 import { SignOutDialog } from "@/components/sign-out-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { sessionQueryOptions } from "@/lib/api";
+import { useWorkspace } from "@/lib/use-workspace";
 
 export function SettingsScreen() {
   const session = useQuery(sessionQueryOptions);
+  const { organizationId } = useWorkspace();
   const [signOutOpen, setSignOutOpen] = useState(false);
   const user = session.data?.user;
 
@@ -58,6 +61,7 @@ export function SettingsScreen() {
           )}
         </CardContent>
       </Card>
+      {organizationId ? <ProviderNotice organizationId={organizationId} detail /> : null}
       <Card>
         <CardHeader>
           <CardTitle>Organizations</CardTitle>

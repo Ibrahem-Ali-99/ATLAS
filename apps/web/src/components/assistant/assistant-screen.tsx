@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
+import { ProviderNotice } from "@/components/provider-notice";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -83,6 +84,7 @@ function AssistantWorkspace({
       <PageHeader title="AI Assistant">
         Answers use stored documents and CRM records for {organizationName}. A citation is a retrieved row, not a phrase taken from the model text.
       </PageHeader>
+      <ProviderNotice organizationId={organizationId} />
       <div className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
       <aside className="rounded-xl border border-border bg-card p-4">
         <div className="flex items-center justify-between gap-2">
@@ -166,6 +168,9 @@ function AssistantWorkspace({
 function searchNotice(reply: AssistantReply): string | null {
   if (reply.document_search === "unconfigured") {
     return "Document search is unavailable because embeddings are not configured. This answer used CRM records only.";
+  }
+  if (reply.document_search === "unavailable") {
+    return "Document search did not run. The embedding provider was unreachable, refused the request, or the index width does not match. This answer used CRM records only.";
   }
   if (reply.document_search === "empty" && reply.message.sources.every((source) => source.kind !== "document")) {
     return "No company document matched this question.";

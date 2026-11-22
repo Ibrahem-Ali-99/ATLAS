@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { ConfirmButton } from "@/components/confirm-button";
 import { PageHeader } from "@/components/page-header";
+import { ProviderNotice } from "@/components/provider-notice";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,6 +86,7 @@ function KnowledgeWorkspace({
       <PageHeader title="Knowledge">
         PDF and text files for {organizationName}. Indexing runs in the background. Search uses this organization&apos;s ready documents only.
       </PageHeader>
+      <ProviderNotice organizationId={organizationId} />
       <section className="rounded-xl border border-border bg-card p-4">
         <h2 className="text-sm font-medium">Upload</h2>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">PDF and TXT only. Other file types are rejected and nothing is stored.</p>
