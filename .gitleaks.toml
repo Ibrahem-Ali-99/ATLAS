@@ -1,0 +1,23 @@
+title = "ATLAS secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated dependencies, build output, and documented local placeholders"
+paths = [
+  '''apps/api/\.venv/''',
+  '''apps/web/node_modules/''',
+  '''apps/web/\.next/''',
+  '''__pycache__/''',
+  '''\.pytest_cache/''',
+  '''\.ruff_cache/''',
+  '''\.mypy_cache/''',
+]
+regexTarget = "match"
+regexes = [
+  '''replace-with-a-long-random-string''',
+  '''change-me-(admin|staff|outsider)''',
+  '''test-secret-key-must-be-32-chars-min''',
+  '''postgresql\+psycopg://atlas:atlas@''',
+]
