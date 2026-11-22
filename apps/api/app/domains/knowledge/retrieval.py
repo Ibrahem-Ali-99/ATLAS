@@ -1,3 +1,4 @@
+import re
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -11,6 +12,13 @@ from app.domains.knowledge.models import Chunk, Document
 from app.domains.knowledge.vectors import model_clause, vector_column
 from app.integrations.language import EmbeddingClient
 
+# Candidates may sit as far as ATLAS_MAX_COSINE_DISTANCE (0.55).
+# A vector-only hit is evidence only at or below this distance.
+# nomic-embed-text paraphrases with no shared words measured 0.37–0.43.
+# An unsupported address question measured 0.48 against the same passage.
+# Full-text matches stay citable past this line, including an exact code at 0.47.
+VECTOR_ONLY_MAX_DISTANCE = 0.45
+
 
 @dataclass(frozen=True)
 class RetrievedChunk:
@@ -21,6 +29,15 @@ class RetrievedChunk:
     page_number: int | None
     content: str
     score: float
+
+
+@dataclass
+class _Candidate:
+    chunk: Chunk
+    title: str
+    score: float
+    distance: float | None
+    lexical: bool
 
 
 def search_chunks(
@@ -63,56 +80,127 @@ def search_chunks(
         .order_by(rank.desc())
         .limit(20)
     ).all()
-    fused: dict[uuid.UUID, RetrievedChunk] = {}
-    _fuse_vector(fused, vector_rows, get_settings().max_cosine_distance)
+    fused: dict[uuid.UUID, _Candidate] = {}
+    _fuse_vector(fused, vector_rows, settings.max_cosine_distance)
     _fuse_text(fused, text_rows)
+    _mark_shared_terms(fused, query)
     ranked = sorted(fused.values(), key=lambda item: item.score, reverse=True)
+    evidence = [item for item in ranked if _is_evidence(item)]
     from app.domains.observability.tracing import record_operation
 
     record_operation(
         operation="retrieval",
         status="succeeded",
         organization_id=organization_id,
-        detail={"count": len(ranked[:limit])},
+        detail={"count": len(evidence[:limit])},
     )
-    return ranked[:limit]
+    return [_record(item) for item in evidence[:limit]]
+
+
+_CONTENT_TERMS = re.compile(r"[a-z0-9]+")
+_SHARED_TERM_STOP_WORDS = {
+    "what",
+    "when",
+    "where",
+    "which",
+    "about",
+    "with",
+    "from",
+    "that",
+    "this",
+    "have",
+    "does",
+    "your",
+    "their",
+    "into",
+    "only",
+}
+
+
+def _mark_shared_terms(fused: dict[uuid.UUID, _Candidate], query: str) -> None:
+    """A full-text query requires every word. One shared content word is still evidence.
+
+    "What cold storage services does Harbor offer?" does not match a passage that
+    lacks "services" and "offer", even though cold storage is the subject.
+    """
+
+    query_terms = _content_terms(query)
+    if not query_terms:
+        return
+    for candidate in fused.values():
+        if query_terms & _content_terms(candidate.chunk.content):
+            candidate.lexical = True
+
+
+def _content_terms(text: str) -> set[str]:
+    return {
+        word
+        for word in _CONTENT_TERMS.findall(text.lower())
+        if len(word) >= 4 and word not in _SHARED_TERM_STOP_WORDS
+    }
+
+
+def _is_evidence(candidate: _Candidate) -> bool:
+    """A neighbor is not evidence unless the words overlap or the vectors are close.
+
+    Rank position alone is not enough. The nearest passage in a small index can
+    still be about a different subject.
+    """
+
+    if candidate.lexical:
+        return True
+    return candidate.distance is not None and candidate.distance <= VECTOR_ONLY_MAX_DISTANCE
 
 
 def _fuse_vector(
-    fused: dict[uuid.UUID, RetrievedChunk], rows: Sequence[Any], max_distance: float
+    fused: dict[uuid.UUID, _Candidate], rows: Sequence[Any], max_distance: float
 ) -> None:
-    """Ignore distant vector neighbors.
-
-    pgvector cosine distance is 1 - cosine similarity. A full-text match can still
-    cite the same chunk when the wording overlaps but the vectors are far apart.
-    """
-
     for position, row in enumerate(rows, start=1):
         chunk = cast(Chunk, row[0])
-        title = str(row[1])
         if float(row[2]) > max_distance:
             continue
-        score = 1 / (60 + position)
-        current = fused.get(chunk.id)
-        fused[chunk.id] = _record(chunk, title, (current.score if current else 0) + score)
+        _add(fused, chunk, str(row[1]), 1 / (60 + position), distance=float(row[2]), lexical=False)
 
 
-def _fuse_text(fused: dict[uuid.UUID, RetrievedChunk], rows: Sequence[Any]) -> None:
+def _fuse_text(fused: dict[uuid.UUID, _Candidate], rows: Sequence[Any]) -> None:
     for position, row in enumerate(rows, start=1):
         chunk = cast(Chunk, row[0])
-        title = str(row[1])
-        score = 1 / (60 + position)
-        current = fused.get(chunk.id)
-        fused[chunk.id] = _record(chunk, title, (current.score if current else 0) + score)
+        _add(fused, chunk, str(row[1]), 1 / (60 + position), distance=None, lexical=True)
 
 
-def _record(chunk: Chunk, title: str, score: float) -> RetrievedChunk:
+def _add(
+    fused: dict[uuid.UUID, _Candidate],
+    chunk: Chunk,
+    title: str,
+    score: float,
+    *,
+    distance: float | None,
+    lexical: bool,
+) -> None:
+    current = fused.get(chunk.id)
+    if current is None:
+        fused[chunk.id] = _Candidate(
+            chunk=chunk,
+            title=title,
+            score=score,
+            distance=distance,
+            lexical=lexical,
+        )
+        return
+    current.score += score
+    current.lexical = current.lexical or lexical
+    if distance is not None:
+        current.distance = distance
+
+
+def _record(candidate: _Candidate) -> RetrievedChunk:
+    chunk = candidate.chunk
     return RetrievedChunk(
         chunk_id=chunk.id,
         document_id=chunk.document_id,
-        document_title=title,
+        document_title=candidate.title,
         chunk_index=chunk.chunk_index,
         page_number=chunk.page_number,
         content=chunk.content,
-        score=score,
+        score=candidate.score,
     )
