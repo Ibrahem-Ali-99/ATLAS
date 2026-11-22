@@ -33,14 +33,36 @@ The live question "How many bonded pallets does Acceptance Yard store?" returned
 | Approval of that run | The three proposals were rejected. Resume returned 200 and the run completed. No historical lead was rewritten |
 | Diagnostics | Operational failed runs: 0. Legacy and all: 7. The new run's linked traces are `agent_run` and `approval_decision` |
 
+### Real integration
+
+Checked against the API on `127.0.0.1:8000`, n8n in `atlas-n8n-1`, and Mailpit in `atlas-mailpit-1`. The records use stamp `2b39fc62` and origin `operational`. They were left in place. No credential or delivery mode was changed. Mailpit was stopped only for the failure send and then started again.
+
+| Record | Id |
+|---|---|
+| Company Integration Yard 2b39fc62 | `4f0dfdad-90e0-4f99-882a-ed4c66a8c460` |
+| Contact Integration Contact 2b39fc62 | `932e09cf-64f3-4b05-8ae5-c58cd38c07e3` |
+| Lead Integration operational lead 2b39fc62 | `bf5efd70-fdfe-4c9f-9c82-db593c409925` |
+| Inquiry Integration operational inquiry 2b39fc62 | `f9967a55-e707-44c9-b753-96ef13b94527` |
+| Agent run | `d37273a0-f7b2-4347-89b4-e4500c19c9ad` |
+| Workflow run | `e244ce8f-23b2-4c46-bd20-f28df45f9eb4` |
+| Update approval | `19d11a82-2d1f-4266-91a2-c604cb70f961` |
+| Email approval | `5b839945-0936-4443-b4f4-8dfa5e14a5c5` |
+| Appointment approval | `272306d5-2759-4401-a39f-9e2dc57caae0` |
+| Email row | `ed99db4e-3355-46a9-ad90-f30575f146d5` |
+| Email interaction | `b10937a3-21a2-4149-bba6-85fdad86dfd6` |
+| Failure inquiry | `ea4e291e-1eb7-402f-a340-7063a0a19a48` |
+| Failure run | `5680fc74-8dab-4fc6-b8cc-f470e0cd1eaa` |
+| Failed email row | `b05e3214-30ca-4cfd-af40-f8c3054e1b80` |
+
+**Signed n8n callback: passed.** Creating the lead returned 201 and dispatched the active workflow `ATLAS Lead Processing`. n8n execution `16` is mode `webhook`, status `success`, from `2026-11-22 22:18:36.214` to `2026-11-22 22:18:36.293`. Its nodes `Lead webhook`, `Normalize`, and `Call ATLAS` are each `success`. The HTTP node stored the callback response `{"status":"completed","workflow_run_id":"e244ce8f-23b2-4c46-bd20-f28df45f9eb4"}`. The workflow row is `completed`, origin `operational`, with one attempt and no error. The lead stayed operational, titled `Integration operational lead 2b39fc62`, with the original notes. An empty callback returned 401 `webhook_unauthorized`. A callback with a forged key and signature `00` returned 401 `webhook_unauthorized`, and the workflow stayed `completed`.
+
+**Sandbox email: passed.** The response proposal could not execute while pending. Admin approval returned 200, then execute returned 200. The stored row is status `sent`, mode `sandbox`, recipient `inbox@localhost`, subject `Operational Lead`, and the body is the approved payload. Mailpit message `BocUxT7CX3gxMzjTc95wQg` has Message-ID `8c43dd456d18837ffcaf4262@atlas.local`, From `atlas@localhost`, To `inbox@localhost`, the same subject, and the same text aside from SMTP carriage returns. The address is local. A second approved response was executed while Mailpit was stopped: HTTP 502 `delivery_failed`. That row is status `failed`, mode `sandbox`, with no provider message id and error `delivery_failed`. Mailpit's message total stayed 3.
+
+**Idempotent approval execution: passed.** Execute on the pending update returned 409 `invalid_transition`. Staff approval returned 403 `forbidden`. The other organization reading the lead returned 404 `not_found`. Admin approval returned 200. The first execute returned 200 and wrote the lead once: status `qualified`, notes `Inquiry about bonded storage rates`, origin still `operational`. The second execute returned 409 `already_executed`. Interactions, emails, and bookings stayed at 0 across that second call. The appointment was rejected with 200, so no booking exists. Resume returned 200 and the run is `completed`. The successful email then added one interaction and one email. The failure run is `failed`, which matches the refused delivery.
+
 ### Verdict
 
-ATLAS is not release-ready. The local product can sign in, keep organizations apart, answer from a stored document without showing the draft, start an agent from the serving API, and keep operational counts separate from demo, evaluation, and legacy rows. That is not a deployed release. These checks are still required before that claim:
-
-- GitHub Actions on the unpushed commits, including the container build job.
-- A signed n8n callback that completes a workflow on this stack. This pass only proved that a missing signature is rejected.
-- A sandbox email send. This pass did not execute `prepare_customer_response`.
-- A second execute of a live approval that returns 409 without writing again. This pass rejected the live proposal because it would have updated an existing lead. The API suite covers that conflict on `atlas_test`.
+ATLAS is not release-ready. The three integration paths above passed on the running local services. GitHub Actions has not run the unpushed commits, including the container build job, so this is not a deployed release.
 
 ### Unresolved product limits
 
