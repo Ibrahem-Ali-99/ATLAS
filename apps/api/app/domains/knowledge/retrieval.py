@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.domains.knowledge.models import Chunk, Document
+from app.domains.knowledge.vectors import model_clause, vector_column
 from app.integrations.language import EmbeddingClient
 
 
@@ -34,14 +35,17 @@ def search_chunks(
     if len(query) < 2:
         return []
     vector = embedder.embed([query])[0]
-    distance = Chunk.embedding.cosine_distance(vector)
+    settings = get_settings()
+    column = vector_column(settings.embedding_dimensions)
+    distance = column.cosine_distance(vector)
     vector_rows = db.execute(
         select(Chunk, Document.title, distance.label("distance"))
         .join(Document, Document.id == Chunk.document_id)
         .where(
             Chunk.organization_id == organization_id,
             Document.status == "ready",
-            Chunk.embedding.is_not(None),
+            column.is_not(None),
+            model_clause(settings),
         )
         .order_by(distance.asc())
         .limit(20)

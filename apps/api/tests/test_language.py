@@ -85,10 +85,16 @@ def test_embedding_orders_vectors_and_rejects_malformed_payloads(
     assert vectors[0][0] == 0.1
     assert vectors[1][0] == 0.2
     assert len(vectors[0]) == get_settings().embedding_dimensions
-    for _ in range(4):
+    expected = (
+        "embedding_failed",
+        "embedding_dimension_mismatch",
+        "embedding_failed",
+        "embedding_unauthorized",
+    )
+    for code in expected:
         with pytest.raises(AppError) as exc:
             client.embed(["hello"])
-        assert exc.value.code == "embedding_failed"
+        assert exc.value.code == code
 
 
 def test_usage_is_stored_under_the_model_that_produced_it(
@@ -201,3 +207,123 @@ def test_chat_stream_rejects_provider_errors(monkeypatch: pytest.MonkeyPatch) ->
         with pytest.raises(AppError) as exc:
             client.complete("system", "user")
         assert exc.value.code == "llm_failed"
+
+
+def test_ollama_omits_the_api_key_and_the_dimensions_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def post(*_args: object, **kwargs: object) -> _Response:
+        captured["headers"] = kwargs["headers"]
+        captured["json"] = kwargs["json"]
+        return _Response(200, {"data": [{"index": 0, "embedding": [0.1] * 768}]})
+
+    monkeypatch.setattr(httpx, "post", post)
+    settings = get_settings().model_copy(
+        update={
+            "embedding_provider": "ollama",
+            "embedding_api_key": "",
+            "embedding_base_url": "http://127.0.0.1:11434/v1",
+            "embedding_model": "nomic-embed-text",
+            "embedding_dimensions": 768,
+        }
+    )
+    vectors = OpenAICompatibleEmbeddingClient(settings).embed(["harbor"])
+    headers = captured["headers"]
+    body = captured["json"]
+    assert isinstance(headers, dict)
+    assert isinstance(body, dict)
+    assert "Authorization" not in headers
+    assert "dimensions" not in body
+    assert len(vectors[0]) == 768
+
+
+def test_ollama_connect_error_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    def post(*_args: object, **_kwargs: object) -> None:
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(httpx, "post", post)
+    settings = get_settings().model_copy(
+        update={
+            "embedding_provider": "ollama",
+            "embedding_dimensions": 768,
+            "embedding_base_url": "http://127.0.0.1:11434/v1",
+        }
+    )
+    with pytest.raises(AppError) as exc:
+        OpenAICompatibleEmbeddingClient(settings).embed(["harbor"])
+    assert exc.value.code == "embedding_unavailable"
+
+
+def test_groq_asks_for_a_json_object_when_the_prompt_requires_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def stream(*_args: object, **kwargs: object) -> _Stream:
+        captured["json"] = kwargs["json"]
+        return _Stream(
+            200,
+            [
+                'data: {"choices":[{"delta":{"content":"{\\"category\\":\\"warehousing\\"}"}}]}',
+                "data: [DONE]",
+            ],
+        )
+
+    monkeypatch.setattr(httpx, "stream", stream)
+    monkeypatch.setattr(
+        "app.domains.observability.tracing.record_operation", lambda **_kwargs: None
+    )
+    settings = get_settings().model_copy(
+        update={
+            "llm_provider": "groq",
+            "llm_api_key": "test-key",
+            "llm_base_url": "https://api.groq.com/openai/v1",
+            "llm_model": "openai/gpt-oss-20b",
+        }
+    )
+    text = OpenAICompatibleChatClient(settings).complete("Return one JSON object", "hello")
+    body = captured["json"]
+    assert isinstance(body, dict)
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["model"] == "openai/gpt-oss-20b"
+    assert "category" in text
+
+
+def test_chat_retries_a_rate_limit_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"count": 0}
+
+    def stream(*_args: object, **_kwargs: object) -> _Stream:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return _Stream(429, [])
+        return _Stream(200, ['data: {"choices":[{"delta":{"content":"ok"}}]}', "data: [DONE]"])
+
+    monkeypatch.setattr(httpx, "stream", stream)
+    monkeypatch.setattr(
+        "app.domains.observability.tracing.record_operation", lambda **_kwargs: None
+    )
+    client = OpenAICompatibleChatClient(_configured())
+    assert client.complete("system", "user") == "ok"
+    assert calls["count"] == 2
+    calls["count"] = 0
+
+    def always_limited(*_args: object, **_kwargs: object) -> _Stream:
+        calls["count"] += 1
+        return _Stream(429, [])
+
+    monkeypatch.setattr(httpx, "stream", always_limited)
+    with pytest.raises(AppError) as exc:
+        client.complete("system", "user")
+    assert exc.value.code == "llm_rate_limited"
+    assert calls["count"] == 2
+
+
+def test_chat_timeout_is_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
+    def stream(*_args: object, **_kwargs: object) -> None:
+        raise httpx.TimeoutException("slow")
+
+    monkeypatch.setattr(httpx, "stream", stream)
+    client = OpenAICompatibleChatClient(_configured())
+    with pytest.raises(AppError) as exc:
+        client.complete("system", "user")
+    assert exc.value.code == "llm_timeout"

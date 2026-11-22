@@ -11,7 +11,13 @@ def main() -> None:
     os.environ["ATLAS_DATABASE_URL"] = postgres_url("atlas_e2e")
     os.environ["ATLAS_ENVIRONMENT"] = "development"
     os.environ["ATLAS_LLM_PROVIDER"] = "double"
+    os.environ["ATLAS_LLM_API_KEY"] = ""
+    os.environ["ATLAS_LLM_MODEL"] = "gpt-4o-mini"
     os.environ["ATLAS_EMBEDDING_PROVIDER"] = "double"
+    os.environ["ATLAS_EMBEDDING_API_KEY"] = ""
+    os.environ["ATLAS_EMBEDDING_MODEL"] = "text-embedding-3-small"
+    os.environ["ATLAS_EMBEDDING_DIMENSIONS"] = "1536"
+    os.environ["ATLAS_PUBLIC_DEMO"] = "false"
     os.environ["ATLAS_N8N_LEAD_WEBHOOK_URL"] = ""
     os.environ["ATLAS_CORS_ORIGINS"] = "http://127.0.0.1:3010,http://localhost:3010"
     os.environ["ATLAS_EMAIL_MODE"] = "sandbox"

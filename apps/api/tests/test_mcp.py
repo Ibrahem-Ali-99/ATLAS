@@ -18,6 +18,9 @@ def test_mcp_child_receives_the_embedding_provider(monkeypatch) -> None:
     env = server_parameters(uuid.uuid4()).env
     assert env is not None
     assert env["ATLAS_EMBEDDING_PROVIDER"] == "double"
+    assert env["ATLAS_LLM_MODEL"]
+    assert env["ATLAS_PUBLIC_DEMO"] == "false"
+    assert "ATLAS_LLM_API_KEY" not in env
 
 
 def test_mcp_stdio_session_is_read_only_and_organization_scoped(db: Session) -> None:

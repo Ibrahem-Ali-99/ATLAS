@@ -23,7 +23,10 @@ def hash_embedding(text: str, dimensions: int = 1536) -> list[float]:
 
 class DeterministicEmbeddingClient:
     def embed(self, texts: list[str]) -> list[list[float]]:
-        return [hash_embedding(text) for text in texts]
+        from app.core.config import get_settings
+
+        width = get_settings().embedding_dimensions
+        return [hash_embedding(text, width) for text in texts]
 
 
 class DeterministicChatClient:

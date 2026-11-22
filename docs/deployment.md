@@ -56,6 +56,12 @@ Login failures are counted in memory for the email and for the direct client add
 
 Webhook request limits are also per process. They are not a shared store.
 
-## Live model status
+## Live models
 
-`ATLAS_LLM_API_KEY` and `ATLAS_EMBEDDING_API_KEY` are empty in this checkout. Live embedding, grounded chat, and agent classification are blocked. Langfuse keys are empty, so remote traces are unverified. Deterministic providers (`ATLAS_LLM_PROVIDER=double` and `ATLAS_EMBEDDING_PROVIDER=double`) cover local browser tests and are not live accuracy.
+Chat can use Groq's OpenAI-compatible API. In the gitignored `.env`, set `ATLAS_LLM_PROVIDER=groq`, `ATLAS_LLM_BASE_URL=https://api.groq.com/openai/v1`, `ATLAS_LLM_MODEL` to a chat model the account can call, and `ATLAS_LLM_API_KEY` to the key. `.env.example` keeps the key empty. Do not commit it. `ATLAS_PUBLIC_DEMO=true` refuses to start when that key is set, and refuses the Groq client even if the key is later injected.
+
+Embeddings can use a local Ollama server. Install it from https://ollama.com/download, then run `ollama serve` and `ollama pull nomic-embed-text`. On the host, set `ATLAS_EMBEDDING_PROVIDER=ollama`, `ATLAS_EMBEDDING_BASE_URL=http://127.0.0.1:11434/v1`, `ATLAS_EMBEDDING_MODEL=nomic-embed-text`, and `ATLAS_EMBEDDING_DIMENSIONS=768`. A container cannot use `127.0.0.1` to reach Ollama on the host. Use `http://host.docker.internal:11434/v1` there. Ollama does not take an API key. A stopped server returns `embedding_unavailable`. The API does not fall back to hash embeddings.
+
+`nomic-embed-text` returns 768 values. Those are stored in `chunks.embedding_768` with `chunks.embedding_model`. The original `chunks.embedding` column stays `vector(1536)`, so existing rows are not dropped or padded. Search uses only the column and model name that match the current settings. A 1536 row with a null model is the legacy index and is not compared with a 768 query. Reindex a document from Knowledge to rewrite its vectors. Reindex does not run on startup.
+
+OpenAI remains available by setting the provider back to `openai` and a 1536-wide embedding model. Deterministic providers (`double`) cover tests and are not live accuracy. Langfuse stays optional. Cost is stored only when both token prices are set.

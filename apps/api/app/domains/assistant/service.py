@@ -19,6 +19,13 @@ from app.domains.knowledge.retrieval import RetrievedChunk, search_chunks
 from app.integrations.language import ChatClient, EmbeddingClient
 
 NO_RECORDS = "I could not find relevant company documents or CRM records for that question."
+_EMBEDDING_UNAVAILABLE = {
+    "embedding_unavailable",
+    "embedding_unauthorized",
+    "embedding_timeout",
+    "embedding_rate_limited",
+    "embedding_dimension_mismatch",
+}
 SYSTEM_PROMPT = (
     "You are the ATLAS assistant for one organization. "
     "Use only the document excerpts and CRM records in the user message. "
@@ -128,6 +135,8 @@ def prepare_turn(
     except AppError as exc:
         if exc.code == "embedding_unconfigured" and crm_records:
             document_search = "unconfigured"
+        elif exc.code in _EMBEDDING_UNAVAILABLE and crm_records:
+            document_search = "unavailable"
         else:
             record_provider_failure(db, conversation, exc.message)
             raise
@@ -181,7 +190,7 @@ def save_completed_turn(db: Session, turn: PreparedTurn, answer: str) -> ReplyOu
         saved = _save_answer(db, turn.conversation, answer, turn.documents, turn.crm_records)
         message = _message_out(saved, _sources_for(db, saved.id))
     search = turn.document_search
-    if search not in {"ready", "empty", "unconfigured"}:
+    if search not in {"ready", "empty", "unconfigured", "unavailable"}:
         search = "empty"
     return ReplyOut(conversation_id=turn.conversation.id, message=message, document_search=search)  # type: ignore[arg-type]
 

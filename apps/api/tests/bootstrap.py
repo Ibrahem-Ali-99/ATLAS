@@ -46,6 +46,16 @@ MIGRATION_DATABASE_URL = postgres_url("atlas_migration_test")
 ADMIN_DATABASE_URL = postgres_url("postgres")
 
 os.environ["ATLAS_ENVIRONMENT"] = "test"
+os.environ["ATLAS_PUBLIC_DEMO"] = "false"
+os.environ["ATLAS_LLM_PROVIDER"] = "openai"
+os.environ["ATLAS_LLM_BASE_URL"] = "https://api.openai.com/v1"
+os.environ["ATLAS_LLM_API_KEY"] = ""
+os.environ["ATLAS_LLM_MODEL"] = "gpt-4o-mini"
+os.environ["ATLAS_EMBEDDING_PROVIDER"] = "openai"
+os.environ["ATLAS_EMBEDDING_BASE_URL"] = "https://api.openai.com/v1"
+os.environ["ATLAS_EMBEDDING_API_KEY"] = ""
+os.environ["ATLAS_EMBEDDING_MODEL"] = "text-embedding-3-small"
+os.environ["ATLAS_EMBEDDING_DIMENSIONS"] = "1536"
 os.environ["ATLAS_SECRET_KEY"] = "test-secret-key-must-be-32-chars-min"
 os.environ["ATLAS_DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["ATLAS_CORS_ORIGINS"] = "http://127.0.0.1:3000,http://localhost:3000"

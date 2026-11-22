@@ -70,3 +70,5 @@ class Chunk(Base):
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(EMBEDDING_DIMENSIONS), nullable=True
     )
+    embedding_768: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(120), nullable=True)

@@ -48,15 +48,18 @@ class Settings(BaseSettings):
     session_cookie_name: str = "atlas_session"
     session_ttl_hours: int = Field(default=12, ge=1, le=168)
     log_level: str = "INFO"
-    llm_provider: Literal["openai", "double"] = "openai"
+    llm_provider: Literal["openai", "groq", "double"] = "openai"
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
-    embedding_provider: Literal["openai", "double"] = "openai"
+    llm_timeout_seconds: float = Field(default=120, ge=1, le=300)
+    llm_max_output_tokens: int | None = Field(default=None, ge=1, le=32768)
+    embedding_provider: Literal["openai", "ollama", "double"] = "openai"
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
+    embedding_timeout_seconds: float = Field(default=60, ge=1, le=180)
     max_cosine_distance: float = Field(default=0.55, ge=0, le=2)
     max_upload_bytes: int = Field(default=10_485_760, ge=1, le=52_428_800)
     storage_dir: str = ""
@@ -94,8 +97,15 @@ class Settings(BaseSettings):
     @field_validator("embedding_dimensions")
     @classmethod
     def embedding_dimensions_match_schema(cls, value: int) -> int:
-        if value != 1536:
-            raise ValueError("ATLAS_EMBEDDING_DIMENSIONS must be 1536 for the current schema")
+        if value not in {768, 1536}:
+            raise ValueError("ATLAS_EMBEDDING_DIMENSIONS must be 768 or 1536")
+        return value
+
+    @field_validator("llm_max_output_tokens", mode="before")
+    @classmethod
+    def empty_token_limit_is_unset(cls, value: object) -> object:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
         return value
 
     @field_validator("llm_input_usd_per_million", "llm_output_usd_per_million", mode="before")

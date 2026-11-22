@@ -62,6 +62,26 @@ def test_public_demo_blocks_the_paid_chat_client(monkeypatch) -> None:
     assert caught.value.code == "llm_unconfigured"
 
 
+def test_embedding_width_accepts_the_two_stored_columns() -> None:
+    assert _settings(embedding_dimensions=768).embedding_dimensions == 768
+    assert _settings(embedding_dimensions=1536).embedding_dimensions == 1536
+    with pytest.raises(ValidationError):
+        _settings(embedding_dimensions=100)
+
+
+def test_public_demo_blocks_groq(monkeypatch) -> None:
+    from app.core.errors import AppError
+    from app.integrations.language import get_chat_client
+
+    demo = get_settings().model_copy(update={"public_demo": True, "llm_provider": "groq"})
+    monkeypatch.setattr("app.integrations.language.get_settings", lambda: demo)
+    with pytest.raises(AppError) as caught:
+        get_chat_client()
+    assert caught.value.code == "llm_unconfigured"
+    with pytest.raises(ValidationError):
+        _settings(public_demo=True, llm_provider="groq", llm_api_key="gsk-test")
+
+
 def test_production_rejects_deterministic_providers() -> None:
     with pytest.raises(ValidationError):
         _settings(

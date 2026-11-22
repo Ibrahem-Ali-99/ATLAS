@@ -11,6 +11,7 @@ from app.core.errors import AppError
 from app.domains.knowledge.chunking import chunk_pages
 from app.domains.knowledge.extract import extract_text
 from app.domains.knowledge.models import Chunk, Document, DocumentStatus
+from app.domains.knowledge.vectors import store_chunk_embedding
 from app.integrations.language import EmbeddingClient, get_embedding_client
 
 logger = structlog.get_logger(__name__)
@@ -173,17 +174,17 @@ def ingest_document(document_id: uuid.UUID, embedder: EmbeddingClient | None = N
             _record_failure(db, document, "The embedding provider returned an unexpected response")
             return
         db.execute(delete(Chunk).where(Chunk.document_id == document.id))
+        settings = get_settings()
         for piece, vector in zip(pieces, vectors, strict=True):
-            db.add(
-                Chunk(
-                    organization_id=document.organization_id,
-                    document_id=document.id,
-                    chunk_index=piece.index,
-                    page_number=piece.page_number,
-                    content=piece.content,
-                    embedding=vector,
-                )
+            chunk = Chunk(
+                organization_id=document.organization_id,
+                document_id=document.id,
+                chunk_index=piece.index,
+                page_number=piece.page_number,
+                content=piece.content,
             )
+            store_chunk_embedding(chunk, vector, settings)
+            db.add(chunk)
         db.flush()
         db.execute(
             update(Chunk)
