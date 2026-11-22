@@ -4,7 +4,7 @@
 
 This is the current verdict. It was recorded on 22 November 2026 after the local MCP, citation, provenance, and streaming commits. The API was `http://127.0.0.1:8000` and the production web app was `http://127.0.0.1:3000`. Nothing was pushed, deployed, or reset, and no credential was changed. Historical rows were not deleted or relabeled.
 
-`origin/main` is `985c9a5ccd366afdff25b0ccbf820cdc95185583`. Local `main` is ahead of that commit and has not been pushed. GitHub Actions has not run these local commits. The migration chain is linear from `20261122_0001` through `20261122_0011`. `0011` adds `origin` with server default `unknown` and does not update rows by name. `.env.example` still documents Postgres on port 5432, which matches CI. A local `.env` may use another port and is not committed. CI installs the API with `uv sync --frozen` and the web app with `npm ci`. `uv.lock` and `apps/web/package-lock.json` are in the repository. The workflow uses Python 3.12, Node 22, and `pgvector/pgvector:pg17` on port 5432.
+`origin/main` is `985c9a5ccd366afdff25b0ccbf820cdc95185583`. The release candidate is `release/atlas-v2-candidate`. GitHub Actions passed `api`, `web`, `browser`, `containers`, and `secrets` on `9d26b021b3dfe9c7caa643f030a9547dc2847a4d`. The merge recommendation is in `docs/release-review.md`. The migration chain is linear from `20261122_0001` through `20261122_0011`. `0011` adds `origin` with server default `unknown` and does not update rows by name. `.env.example` still documents Postgres on port 5432, which matches CI. A local `.env` may use another port and is not committed. CI installs the API with `uv sync --frozen` and the web app with `npm ci`. `uv.lock` and `apps/web/package-lock.json` are in the repository. The workflow uses Python 3.12, Node 22, and `pgvector/pgvector:pg17` on port 5432.
 
 The API suite does not read the development database. Each test truncates `atlas_test`. Migration tests use `atlas_migration_test`. The skipped test calls Groq and Ollama only when `ATLAS_LIVE_PROVIDERS=yes`. The live numbers below depend on rows already stored in `atlas-demo`, including the earlier acceptance document and the provenance proof rows.
 
@@ -62,7 +62,7 @@ Checked against the API on `127.0.0.1:8000`, n8n in `atlas-n8n-1`, and Mailpit i
 
 ### Verdict
 
-ATLAS is not release-ready. The three integration paths above passed on the running local services. GitHub Actions has not run the unpushed commits, including the container build job, so this is not a deployed release.
+The three integration paths above passed on the running local services. GitHub Actions later passed on `9d26b021b3dfe9c7caa643f030a9547dc2847a4d`, including the container image build. `docs/release-review.md` recommends a human merge. That is not approval for public production deployment. The container job does not start the images.
 
 ### Unresolved product limits
 
@@ -267,4 +267,4 @@ These are deliberate or already bounded, and they are not the broken agent path:
 
 ## Readiness verdict
 
-Superseded by the release acceptance section at the top. That section is the current verdict: the local product separates those records and can start an agent, and it is not release-ready until the unpushed commits pass GitHub Actions and the live n8n, sandbox email, and repeat-execute checks have been run.
+Superseded by the release acceptance section at the top and by `docs/release-review.md`. The local integration paths passed, and GitHub Actions passed on the release-candidate head. The product limits in that section still apply.
