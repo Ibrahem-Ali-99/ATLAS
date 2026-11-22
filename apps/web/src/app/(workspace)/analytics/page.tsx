@@ -1,16 +1,11 @@
 import type { Metadata } from "next";
 
-import { UnavailableModule } from "@/components/unavailable-module";
+import { AnalyticsScreen } from "@/components/analytics/analytics-screen";
 
 export const metadata: Metadata = {
   title: "Analytics",
 };
 
 export default function AnalyticsPage() {
-  return (
-    <UnavailableModule
-      title="Analytics"
-      description="Operational analytics are not available in this release."
-    />
-  );
+  return <AnalyticsScreen />;
 }

@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getAgentRun, listAgentRuns, resumeAgentRun, startAgentRun } from "@/lib/agent-api";
 import { executionSummary, type AgentRunDetail, type RunStatus } from "@/lib/agent";
+import { getDiagnosticRun } from "@/lib/intelligence";
 import { listInquiries } from "@/lib/records-api";
 import { useWorkspace } from "@/lib/use-workspace";
 
@@ -131,6 +132,7 @@ function AgentRunsBody({
         {!selectedId ? <p className="text-sm text-muted-foreground">Select a run to inspect its steps.</p> : null}
         {detail.data ? (
           <RunDetail
+            organizationId={organizationId}
             detail={detail.data}
             pending={resume.isPending}
             error={resume.error}
@@ -152,16 +154,22 @@ function AgentRunsBody({
 }
 
 function RunDetail({
+  organizationId,
   detail,
   pending,
   error,
   onResume,
 }: {
+  organizationId: string;
   detail: AgentRunDetail;
   pending: boolean;
   error: unknown;
   onResume: () => void;
 }) {
+  const trace = useQuery({
+    queryKey: ["diagnostic-run", organizationId, detail.run.id],
+    queryFn: () => getDiagnosticRun(organizationId, detail.run.id),
+  });
   const waiting = detail.approvals.some((item) => item.status === "pending");
   const canResume = detail.run.status === "awaiting_approval" || detail.run.status === "running";
   return (
@@ -185,6 +193,18 @@ function RunDetail({
             <p className="text-sm text-muted-foreground">An admin has to approve or reject the proposed actions.</p>
           ) : null}
           {error ? <RequestError error={error} /> : null}
+        </div>
+      ) : null}
+      {trace.data ? (
+        <div>
+          <h3 className="mb-2 text-sm font-medium">Recorded operations</h3>
+          <p className="mb-2 text-sm text-muted-foreground">{trace.data.hint_notice}</p>
+          {trace.data.traces.length === 0 ? <p className="text-sm text-muted-foreground">No operation trace is stored for this run.</p> : null}
+          {trace.data.traces.map((item, index) => (
+            <p key={`${item.operation}-${index}`} className="text-sm text-muted-foreground">
+              {item.operation} {item.status}. Latency: {item.latency_ms ?? "unavailable"} ms. Tokens: {item.tokens_in ?? "unavailable"}/{item.tokens_out ?? "unavailable"}. Cost: {item.cost_usd ?? "unavailable"}. Langfuse: {item.langfuse_status}
+            </p>
+          ))}
         </div>
       ) : null}
       <div>

@@ -16,6 +16,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { ApiError } from "@/lib/api";
+import { getLeadPrediction, scoreLead } from "@/lib/intelligence";
 import {
   addInteraction,
   createLead,
@@ -264,6 +266,7 @@ function LeadDetail({
         <Button type="submit" form="lead-edit" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
         <Button type="button" variant="outline" disabled={remove.isPending} onClick={() => remove.mutate()}>Delete</Button>
       </div>
+      <LeadScore organizationId={organizationId} leadId={lead.id} />
       <div className="border-t border-border pt-4">
         <h3 className="text-sm font-medium">Interaction history</h3>
         {history.isPending ? <Skeleton className="mt-3 h-16 w-full" /> : null}
@@ -293,6 +296,51 @@ function LeadDetail({
         </form>
       </div>
     </aside>
+  );
+}
+
+function LeadScore({ organizationId, leadId }: { organizationId: string; leadId: string }) {
+  const queryClient = useQueryClient();
+  const prediction = useQuery({
+    queryKey: ["lead-prediction", organizationId, leadId],
+    queryFn: () => getLeadPrediction(organizationId, leadId),
+    retry: false,
+  });
+  const score = useMutation({
+    mutationFn: () => scoreLead(organizationId, leadId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["lead-prediction", organizationId, leadId] });
+    },
+  });
+  const missing = prediction.error instanceof ApiError && prediction.error.status === 404;
+  return (
+    <div className="border-t border-border pt-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">Lead score</h3>
+        <Button type="button" variant="outline" disabled={score.isPending} onClick={() => score.mutate()}>
+          {score.isPending ? "Scoring" : "Score lead"}
+        </Button>
+      </div>
+      {prediction.isPending ? <Skeleton className="mt-3 h-16 w-full" /> : null}
+      {missing ? <p className="mt-3 text-sm text-muted-foreground">No prediction is stored for this lead.</p> : null}
+      {prediction.isError && !missing ? <div className="mt-3"><RequestError error={prediction.error} /></div> : null}
+      {score.isError ? <div className="mt-3"><RequestError error={score.error} /></div> : null}
+      {prediction.data ? (
+        <div className="mt-3 space-y-2 text-sm">
+          <p>{prediction.data.label}. Confidence: {prediction.data.confidence ?? "unavailable"}</p>
+          <p className="text-muted-foreground">{prediction.data.notice}</p>
+          {prediction.data.contributions.length === 0 ? (
+            <p className="text-muted-foreground">Feature influence is unavailable for this model.</p>
+          ) : (
+            <ul className="space-y-1 text-muted-foreground">
+              {prediction.data.contributions.map((item) => (
+                <li key={item.feature}>{item.feature}: {item.contribution}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

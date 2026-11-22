@@ -1,4 +1,5 @@
 import {
+  Activity,
   BarChart3,
   BookOpen,
   Bot,
@@ -25,6 +26,7 @@ export const navigation: NavItem[] = [
   { href: "/agent-runs", label: "Agent Runs", icon: Bot },
   { href: "/workflows", label: "Workflows", icon: Workflow },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/monitoring", label: "Monitoring", icon: Activity },
   { href: "/approvals", label: "Approvals", icon: CheckCheck },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

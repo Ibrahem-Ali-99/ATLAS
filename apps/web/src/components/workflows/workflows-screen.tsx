@@ -8,12 +8,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cancelBooking, getAutomations } from "@/lib/automations";
+import { getAnalytics } from "@/lib/intelligence";
 import { useWorkspace } from "@/lib/use-workspace";
 
 export function WorkflowsScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
   const queryClient = useQueryClient();
+  const analytics = useQuery({
+    queryKey: ["analytics", organizationId],
+    queryFn: () => getAnalytics(organizationId ?? ""),
+    enabled: Boolean(organizationId),
+  });
   const automations = useQuery({
     queryKey: ["automations", organizationId],
     queryFn: () => getAutomations(organizationId ?? ""),
@@ -44,6 +50,16 @@ export function WorkflowsScreen() {
           bookings wait for an admin approval. Simulated bookings are stored in ATLAS.
         </p>
       </div>
+      {analytics.data ? (
+        <p className="text-sm text-muted-foreground">
+          Automation success rate:{" "}
+          {analytics.data.automation.success_rate === null
+            ? "unavailable"
+            : analytics.data.automation.success_rate}{" "}
+          . {analytics.data.automation.definition} Follow-up requests: {analytics.data.follow_ups.approval_requests}.
+          Sandbox email sent: {analytics.data.email.sandbox_sent}. Calendar bookings: {analytics.data.calendar.booked}.
+        </p>
+      ) : null}
       <div className="flex flex-wrap gap-2">
         <Badge>{emailLabel}</Badge>
         <Badge variant="secondary">{calendarLabel}</Badge>

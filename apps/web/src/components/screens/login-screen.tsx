@@ -76,7 +76,7 @@ export function LoginScreen() {
         <div className="max-w-md">
           <h1 className="text-4xl font-semibold tracking-tight">Business operations command center</h1>
           <p className="mt-4 text-sm leading-6 text-muted-foreground">
-            Sign in to the workspace foundation. CRM, agents, workflows, analytics, and approvals are not part of this release.
+            Sign in to review CRM records, agent runs, approvals, workflows, and analytics for your organization.
           </p>
         </div>
         <p className="text-xs text-muted-foreground">Local seed accounts are listed in the project README.</p>
