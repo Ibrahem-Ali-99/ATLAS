@@ -9,6 +9,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ARG NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_STANDALONE=1
 RUN npm run build
 
 FROM node:22-alpine AS run
