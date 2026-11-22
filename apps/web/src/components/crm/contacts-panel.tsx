@@ -68,7 +68,7 @@ export function ContactsPanel({ organizationId }: { organizationId: string }) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
-      <section className="rounded-xl border border-border bg-card">
+      <section className="rounded-[10px] bg-muted">
         <div className="flex flex-col gap-3 p-4 sm:flex-row">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search contacts" aria-label="Search contacts" />
           <Button type="button" onClick={() => setOpen(true)}>New contact</Button>
@@ -117,7 +117,7 @@ export function ContactsPanel({ organizationId }: { organizationId: string }) {
           }}
         />
       ) : (
-        <aside className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+        <aside className="rounded-[10px] bg-muted p-6 text-sm text-muted-foreground">
           Select a contact to view and edit it.
         </aside>
       )}
@@ -207,7 +207,7 @@ function ContactEditor({
   });
   const remove = useMutation({ mutationFn: () => deleteContact(organizationId, contact.id), onSuccess: onDeleted });
   return (
-    <aside className="rounded-xl border border-border bg-card p-6">
+    <aside className="rounded-[10px] bg-muted p-6">
       <h2 className="text-base font-semibold">{contact.full_name}</h2>
       <div className="mt-4">
         <ContactFields form={form} formId="contact-edit" companies={companies} onSubmit={(values) => save.mutate(values)} />

@@ -7,8 +7,8 @@ import { CompaniesPanel } from "@/components/crm/companies-panel";
 import { ContactsPanel } from "@/components/crm/contacts-panel";
 import { InquiriesPanel } from "@/components/crm/inquiries-panel";
 import { LeadsPanel } from "@/components/crm/leads-panel";
-import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/lib/use-workspace";
 
 const tabs = [
@@ -31,18 +31,27 @@ export function CrmScreen() {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
-      <PageHeader title="CRM" eyebrow={organizationName ?? undefined}>
-        Browse companies and contacts, then work a lead without leaving the record. Every row belongs to this organization.
-      </PageHeader>
-      <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1" role="tablist" aria-label="CRM records">
+      <header>
+        <h1 className="text-[31px] leading-none text-foreground">Customer records</h1>
+        <p className="mt-3 max-w-3xl text-sm text-muted-foreground">
+          Companies, contacts, leads, and inquiries for {organizationName ?? "this organization"}.
+        </p>
+        <p className="mt-2 max-w-3xl text-xs leading-5 text-subtle">
+          Companies and contacts are alphabetical. Leads and inquiries are newest first. A lead score appears only after a stored prediction exists.
+        </p>
+      </header>
+      <div className="flex max-w-full flex-wrap gap-2" role="tablist" aria-label="CRM records">
         {tabs.map((item) => (
           <Button
             key={item.id}
-            className="shrink-0"
+            className={cn(
+              "h-10 shrink-0 rounded-[10px] px-4",
+              tab === item.id ? "bg-accent text-foreground" : "text-muted-foreground",
+            )}
             type="button"
             role="tab"
             aria-selected={tab === item.id}
-            variant={tab === item.id ? "default" : "ghost"}
+            variant="ghost"
             onClick={() => setTab(item.id)}
           >
             {item.label}

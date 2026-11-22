@@ -70,7 +70,7 @@ export function CompaniesPanel({ organizationId }: { organizationId: string }) {
 
   return (
     <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
-      <section className="rounded-xl border border-border bg-card">
+      <section className="rounded-[10px] bg-muted">
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
           <Input
             value={search}
@@ -206,7 +206,7 @@ function CompanyEditor({
 }) {
   if (!company) {
     return (
-      <aside className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+      <aside className="rounded-[10px] bg-muted p-6 text-sm text-muted-foreground">
         Select a company to view and edit it.
       </aside>
     );
@@ -241,7 +241,7 @@ function CompanyEditorForm({
   const remove = useMutation({ mutationFn: () => deleteCompany(organizationId, company.id), onSuccess: onDeleted });
 
   return (
-    <aside className="rounded-xl border border-border bg-card p-6">
+    <aside className="rounded-[10px] bg-muted p-6">
       <h2 className="text-base font-semibold">{company.name}</h2>
       <p className="mt-1 text-sm text-muted-foreground">Updated {new Date(company.updated_at).toLocaleString()}</p>
       <div className="mt-4">

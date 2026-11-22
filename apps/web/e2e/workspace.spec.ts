@@ -73,6 +73,13 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByRole("button", { name: "Create" }).click();
   await page.getByLabel("Search companies").fill(companyName);
   await expect(page.getByRole("button", { name: companyName })).toBeVisible();
+  await page.getByRole("button", { name: companyName }).click();
+  await page.getByLabel("Industry").fill("Warehousing");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved.")).toBeVisible();
+  await page.getByRole("button", { name: "Delete" }).click();
+  await page.getByRole("button", { name: "Confirm delete" }).click();
+  await expect(page.getByRole("button", { name: companyName })).toHaveCount(0);
 
   await page.getByRole("tab", { name: "Leads" }).click();
   const seededLeads = page.waitForResponse(
@@ -103,6 +110,15 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   });
   const documentRow = page.getByRole("row", { name: documentTitle });
   await expect(documentRow).toBeVisible();
+  await expect(documentRow.getByRole("cell", { name: "ready" })).toBeVisible({ timeout: 30_000 });
+  await page.getByLabel("Search documents").fill(`bonded-yard-${stamp}`);
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByText(`Harbor warehousing includes cold storage and bonded-yard-${stamp}.`).first()).toBeVisible();
+  const reindexed = page.waitForResponse(
+    (response) => response.request().method() === "POST" && response.url().includes("/reindex") && response.ok(),
+  );
+  await documentRow.getByRole("button", { name: "Reindex" }).click();
+  await reindexed;
   await expect(documentRow.getByRole("cell", { name: "ready" })).toBeVisible({ timeout: 30_000 });
   await shot(page, "03-knowledge.png");
 
@@ -321,4 +337,30 @@ test("narrow viewport opens every page without a missing chunk", async ({ page }
   await expect(page.getByLabel("Filter approvals")).toBeVisible();
   expect(failedChunks).toEqual([]);
   expect(pageErrors).toEqual([]);
+});
+
+test("staff can use CRM and another organization cannot see Harbor records", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("staff@example.com");
+  await page.getByLabel("Password").fill("change-me-staff");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await page.goto("/crm");
+  await expect(page.getByRole("heading", { name: "Customer records" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New company" })).toBeVisible();
+  await page.getByRole("button", { name: /staff@example.com/ }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+
+  await page.getByLabel("Email").fill("outsider@example.org");
+  await page.getByLabel("Password").fill("change-me-outsider");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await page.goto("/crm");
+  await page.getByLabel("Search companies").fill("Harbor");
+  await expect(page.getByRole("cell", { name: "Harbor & Co." })).toHaveCount(0);
+  await page.goto("/knowledge");
+  await expect(page.getByRole("heading", { name: "Company knowledge" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Harbor/ })).toHaveCount(0);
 });

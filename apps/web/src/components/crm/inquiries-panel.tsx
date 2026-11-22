@@ -63,7 +63,7 @@ export function InquiriesPanel({ organizationId }: { organizationId: string }) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.8fr)]">
-      <section className="rounded-xl border border-border bg-card">
+      <section className="rounded-[10px] bg-muted">
         <div className="flex flex-col gap-3 p-4 sm:flex-row">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search inquiries" aria-label="Search inquiries" />
           <Button type="button" onClick={() => setOpen(true)}>New inquiry</Button>
@@ -108,7 +108,7 @@ export function InquiriesPanel({ organizationId }: { organizationId: string }) {
           }}
         />
       ) : (
-        <aside className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+        <aside className="rounded-[10px] bg-muted p-6 text-sm text-muted-foreground">
           Select an inquiry to read and update it.
         </aside>
       )}
@@ -192,7 +192,7 @@ function InquiryEditor({
   });
   const remove = useMutation({ mutationFn: () => deleteInquiry(organizationId, inquiry.id), onSuccess: onDeleted });
   return (
-    <aside className="rounded-xl border border-border bg-card p-6">
+    <aside className="rounded-[10px] bg-muted p-6">
       <h2 className="text-base font-semibold">{inquiry.subject}</h2>
       <div className="mt-4">
         <InquiryFields form={form} formId="inquiry-edit" companies={companies} onSubmit={(values) => save.mutate(values)} />
