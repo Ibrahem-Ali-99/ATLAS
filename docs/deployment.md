@@ -46,6 +46,16 @@ Render and Railway container services are typically a few dollars a month after 
 
 `GET /api/v1/health` answers without the database. `GET /api/v1/ready` checks the database. The API container health check uses `/ready`, so Compose waits until migrations and the database are usable.
 
+## Public demo, rate limits, and key rotation
+
+Set `ATLAS_PUBLIC_DEMO=true` for a shared demo. The process then refuses to start with a paid model key, a live email mode, or an n8n webhook URL. Anonymous requests still need a session for CRM, documents, the assistant, and agents. The seed command resets the three development passwords and exits when the environment is production or the public-demo flag is set.
+
+Login failures are counted in memory for the email and for the direct client address. The default is 8 failures per email and 40 per address inside 15 minutes. A second API process has its own counters. The address is the TCP peer, not `X-Forwarded-For`. Behind one reverse proxy, the address limit is shared by everyone who reaches that process.
+
+`ATLAS_SECRET_KEY` signs session cookies and seals webhook secrets. Replacing it signs everyone out. Previously sealed webhook secrets cannot be opened with the new key. Create a new webhook key after a rotation. There is no second active key.
+
+Webhook request limits are also per process. They are not a shared store.
+
 ## Live model status
 
 `ATLAS_LLM_API_KEY` and `ATLAS_EMBEDDING_API_KEY` are empty in this checkout. Live embedding, grounded chat, and agent classification are blocked. Langfuse keys are empty, so remote traces are unverified. Deterministic providers (`ATLAS_LLM_PROVIDER=double` and `ATLAS_EMBEDDING_PROVIDER=double`) cover local browser tests and are not live accuracy.

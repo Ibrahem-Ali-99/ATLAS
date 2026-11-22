@@ -6,11 +6,13 @@ ATLAS is a modular monolith. Day 1 is the platform shell. Day 2 adds CRM, docume
 
 `apps/api` is a FastAPI application. HTTP routes live under `/api/v1`. Domain code lives in `app/domains/identity`, `app/domains/crm`, `app/domains/knowledge`, `app/domains/assistant`, `app/domains/agents`, `app/domains/approvals`, and `app/domains/automation`. Shared configuration, database sessions, logging, errors, and session cookies live in `app/core`. OpenAI-compatible chat and embedding clients, the SMTP transport, the simulated calendar, and the n8n client live in `app/integrations`. The read-only MCP server is `python -m app.mcp_server`.
 
-n8n is an external workflow runner. It receives lead events and calls ATLAS webhooks. n8n answers that delivery before it calls back, so a restart marks an accepted lead run `needs_attention` until the matching callback completes it. The scheduled follow-up lists organization-scoped leads and opens a pending approval. It does not send email. LangGraph still owns inquiry reasoning and the approval pause. ML, analytics, and a monitoring product are still reserved. Success and failure of an external action are stored on the execution record.
+n8n is an external workflow runner. It receives lead events and calls ATLAS webhooks. n8n answers that delivery before it calls back, so a restart marks an accepted lead run `needs_attention` until the matching callback completes it. The scheduled follow-up lists organization-scoped leads and opens a pending approval. It does not send email. LangGraph still owns inquiry reasoning and the approval pause. Lead scores, analytics, and local traces are stored for the caller's organization. Success and failure of an external action are stored on the execution record.
 
 Webhook signing secrets are sealed with a key derived from `ATLAS_SECRET_KEY` before they are stored. The create response returns the secret once. Later reads, including the automations snapshot, do not include it. Rotating `ATLAS_SECRET_KEY` makes an existing sealed secret unreadable until the integration key is created again. A value stored before sealing still verifies, and it should be replaced.
 
-The webhook rate limit counts requests in the API process that received them. The default is 30 requests per minute for each integration key. That count is not shared with any other process or machine, so it is not a control for a deployment that runs more than one API instance.
+The webhook rate limit counts requests in the API process that received them. The default is 30 requests per minute for each integration key. Failed logins are counted the same way: 8 per email and 40 per direct client address inside 15 minutes. Neither counter is shared with another process. The login address is the TCP peer, not `X-Forwarded-For`.
+
+`ATLAS_PUBLIC_DEMO=true` refuses a paid model key, live email, an n8n URL, and the development seed. The seed also refuses `ATLAS_ENVIRONMENT=production` because it resets the example passwords.
 
 ## Authorization
 
@@ -40,7 +42,7 @@ A customer response or appointment is an external action. Approval first stores 
 
 ## Lead scores, analytics, and diagnostics
 
-Lead scoring trains on a documented synthetic dataset (`lead-synthetic-1`). The label uses a hidden budget band that is not a model feature, and lead status is not a feature. Logistic regression and a shallow decision tree are compared with a referral rule on a held-out fold. The served probability is sigmoid-calibrated on the training fold when that fit succeeds. The artifact lives under `var/atlas-models`, outside the upload directory, and the API does not return its path. A stored prediction is advisory. It does not change the lead, create an approval, or authorize an external action. The score is a synthetic-data demonstration, not a measurement of real conversion.
+Lead scoring trains on a documented synthetic dataset (`lead-synthetic-1`). The label uses a hidden budget band that is not a model feature, and lead status is not a feature. Logistic regression and a shallow decision tree are compared with a referral rule on a held-out fold. The served probability is sigmoid-calibrated on the training fold when that fit succeeds. The artifact lives under `var/atlas-models`, outside the upload directory, and the API does not return its path. A stored prediction is advisory. It does not change the lead, create an approval, or authorize an external action. The score is a synthetic-data demonstration, not a measurement of real conversion. The explanation describes the model that produced the label. A decision tree contributes the splits on the served path. Logistic coefficients are shown only when that model is the one being served. Uploaded documents are not loaded as model artifacts.
 
 Analytics reads the caller's organization. Conversion is won divided by won plus lost. Open leads are excluded, and the rate is absent when that denominator is zero. The lead trend is the last 30 UTC days, including days with zero. There is no revenue metric.
 
@@ -52,4 +54,38 @@ Operation traces are stored locally. Langfuse export runs only when both keys ar
 
 ## Engineering standards
 
-Cursor rules in `.cursor/rules` record the boundaries above. The review procedure is `.cursor/skills/engineering-review/SKILL.md`. Ruff, mypy, pytest, ESLint, the Next.js build, TypeScript, and gitleaks run in `.github/workflows/ci.yml` and `scripts/check.ps1`.
+Cursor rules in `.cursor/rules` record the boundaries above. The review procedure is `.cursor/skills/engineering-review/SKILL.md`. Ruff, mypy, pytest, ESLint, the Next.js build, TypeScript, and gitleaks run in `.github/workflows/ci.yml` and `scripts/check.ps1`. The browser walkthrough is `npm run e2e` in `apps/web`. Deployment, the demo script, and the case study are in `docs/deployment.md`, `docs/demo.md`, and `docs/case-study.md`.
+
+## Diagrams
+
+```mermaid
+flowchart LR
+  browser[Browser]
+  web[Next.js]
+  api[FastAPI]
+  db[(PostgreSQL)]
+  n8n[n8n]
+  mail[Sandbox SMTP]
+  browser --> web
+  browser --> api
+  api --> db
+  api --> n8n
+  api --> mail
+```
+
+```mermaid
+flowchart TD
+  inquiry[Inquiry]
+  agent[LangGraph agent]
+  mcp[MCP read tools]
+  approval[Stored proposal]
+  admin[Admin decision]
+  crm[CRM write]
+  workflow[n8n and sandbox email]
+  inquiry --> agent
+  agent --> mcp
+  agent --> approval
+  approval --> admin
+  admin --> crm
+  crm --> workflow
+```

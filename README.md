@@ -1,8 +1,10 @@
 # ATLAS AI
 
-ATLAS is a business operations command center: a Next.js dashboard, a FastAPI modular monolith, and PostgreSQL with pgvector.
+ATLAS is an operations workspace for a consulting team that should not let a model change customer records on its own.
 
-Day 1 covers authentication, organizations, memberships, and the dashboard shell. Day 2 adds organization-scoped CRM, document ingestion with hybrid retrieval, and a read-only assistant. Day 3 adds an inquiry agent. It proposes CRM changes and waits for an admin to approve them. Day 4 runs n8n workflows, signed webhooks, sandbox email through Mailpit, and simulated calendar bookings. Outbound email and bookings still wait for approval. Day 5 adds a synthetic lead-score model, SQL analytics, local operation traces, and a deterministic evaluation suite. A prediction does not authorize a CRM write or an external action. Langfuse export stays off unless both keys are set. The assistant still does not create or change CRM records.
+A salesperson receives an inquiry. ATLAS keeps the company, the documents, and the proposed next step in one organization. The assistant answers from retrieved passages and CRM rows. An agent can draft a lead update, an email, and a calendar hold, then stop. An admin approves the exact payload before anything is written. n8n, sandbox email, and a simulated calendar run only after that approval. A lead score is advisory and is trained on synthetic data.
+
+The implementation is one Next.js app and one FastAPI process, with PostgreSQL and pgvector. It is a portfolio system with a local demo, not a hosted production service. Live model calls and Langfuse export stay off until keys are configured. See `docs/deployment.md` for hosting, `docs/architecture.md` for the data flow, and `docs/demo.md` for the walkthrough.
 
 ## Stack
 
@@ -106,15 +108,22 @@ npm run e2e
 
 `npm run e2e` starts an API on port 8010 against the `atlas_e2e` database and the web dev server on port 3010. It does not call a paid model.
 
+## Demonstration
+
+`uv run python -m app.scripts.seed` from `apps/api` creates Atlas Demo and Northwind and resets the three development passwords. It is idempotent. It refuses `ATLAS_ENVIRONMENT=production` and `ATLAS_PUBLIC_DEMO=true`. The walkthrough, including what is deterministic, sandbox, or simulated, is `docs/demo.md`.
+
 ## Security boundaries in this release
 
-- Passwords are hashed with Argon2. The API does not return password hashes.
+- Passwords are hashed with Argon2. The API does not return password hashes. Unknown, wrong, and inactive accounts share one login error.
+- Failed logins are limited per email and per direct client address inside this process. A second process does not share the counters.
 - The session cookie is HttpOnly and SameSite=Lax. `ATLAS_COOKIE_SECURE` must be true in production, and a placeholder secret is rejected there.
 - Logout revokes the server session. A signed cookie whose session row is missing or revoked is rejected.
 - State-changing requests other than login require the CSRF token returned by login and `/api/v1/auth/me`.
 - Organization routes load the membership for the authenticated user. They do not treat a client-supplied organization id or role as authorization.
+- `ATLAS_PUBLIC_DEMO=true` refuses paid model keys, live email, an n8n URL, and the development seed.
+- Uploaded files must be PDF or TXT. Model artifacts are loaded only from the model directory, not from uploads.
 
-Webhook callbacks are rate limited inside each API process. Login attempts are not. Change the seed passwords before any shared environment, and leave model keys and the n8n URL empty on a public demo. Playwright covers the signed-in workspace in `apps/web/e2e`. That run uses deterministic providers and is not a penetration test. Do not treat this list as a completed security audit.
+Webhook callbacks are rate limited inside each API process. The seeded passwords in `.env.example` are for local development. Playwright covers the signed-in workspace in `apps/web/e2e` with deterministic providers. That is not a penetration test. `docs/case-study.md` records the engineering limits.
 
 ## Layout
 
