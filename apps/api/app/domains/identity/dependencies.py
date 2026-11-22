@@ -79,6 +79,13 @@ def require_member(organization_id: uuid.UUID, user: CurrentUser, db: DbSession)
 Member = Annotated[MemberContext, Depends(require_member)]
 
 
+def require_member_csrf(_csrf: CsrfSession, member: Member) -> MemberContext:
+    return member
+
+
+CsrfMember = Annotated[MemberContext, Depends(require_member_csrf)]
+
+
 def _role_value(role: MembershipRole | str) -> str:
     if isinstance(role, MembershipRole):
         return role.value

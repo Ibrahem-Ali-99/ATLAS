@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import get_settings
 from app.db.base import Base
+from app.domains.crm import models as crm_models  # noqa: F401
 from app.domains.identity import models  # noqa: F401
 
 config = context.config

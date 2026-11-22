@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.config import ENV_FILE, get_settings
 from app.core.database import SessionLocal
 from app.core.logging import configure_logging
+from app.domains.crm.sample_data import seed_sample_crm
 from app.domains.identity.models import MembershipRole
 from app.domains.identity.service import upsert_membership, upsert_organization, upsert_user
 
@@ -75,6 +76,7 @@ def seed_identity(db: Session, settings: SeedSettings) -> None:
     upsert_membership(db, user=admin, organization=atlas, role=MembershipRole.admin)
     upsert_membership(db, user=staff, organization=atlas, role=MembershipRole.staff)
     upsert_membership(db, user=outsider, organization=northwind, role=MembershipRole.admin)
+    seed_sample_crm(db, atlas=atlas, northwind=northwind, admin=admin, outsider=outsider)
     db.commit()
 
 

@@ -25,7 +25,13 @@ def test_migrations_upgrade_downgrade_and_reupgrade() -> None:
 
     engine = create_engine(MIGRATION_DATABASE_URL, pool_pre_ping=True)
     tables = set(inspect(engine).get_table_names())
-    assert {"users", "organizations", "memberships", "sessions"} <= tables
+    assert {
+        "users",
+        "organizations",
+        "memberships",
+        "sessions",
+        "companies",
+    } <= tables
     with engine.connect() as connection:
         vector_installed = connection.execute(
             text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")

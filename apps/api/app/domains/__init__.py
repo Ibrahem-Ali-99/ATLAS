@@ -1,8 +1,9 @@
 """Domain packages for the ATLAS modular monolith.
 
-Implemented in this release:
+Implemented:
 - identity: users, organizations, memberships, sessions, and authorization.
+- crm: companies, contacts, leads, inquiries, and interaction history.
 
-Reserved for later sprints and intentionally not implemented:
-- crm, knowledge, agents, automation, approvals, ml, analytics, monitoring.
+Reserved and intentionally not implemented:
+- knowledge, assistant, agents, automation, approvals, ml, analytics, monitoring.
 """
