@@ -97,11 +97,14 @@ function ApprovalsBody({
   });
   const execute = useMutation({
     mutationFn: (approvalId: string) => executeApproval(organizationId, approvalId),
-    onSuccess: async () => {
+    onSuccess: async (approval) => {
       onNotice("Executed. The stored result is on this approval.");
       await queryClient.invalidateQueries({ queryKey: ["approvals", organizationId] });
       await queryClient.invalidateQueries({ queryKey: ["agent-runs", organizationId] });
       await queryClient.invalidateQueries({ queryKey: ["automations", organizationId] });
+      if (approval.action_type === "create_lead" || approval.action_type === "update_lead") {
+        await queryClient.invalidateQueries({ queryKey: ["leads", organizationId] });
+      }
     },
   });
 
