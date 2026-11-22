@@ -37,7 +37,8 @@ def clean_tables() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE TABLE chunks, documents, interactions, inquiries, leads, contacts, companies, "
+                "TRUNCATE TABLE message_sources, messages, conversations, chunks, documents, "
+                "interactions, inquiries, leads, contacts, companies, "
                 "sessions, memberships, users, organizations "
                 "RESTART IDENTITY CASCADE"
             )
