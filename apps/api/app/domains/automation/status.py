@@ -65,7 +65,7 @@ def snapshot(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
             {
                 "name": "Follow-up",
                 "trigger": "schedule",
-                "description": "n8n lists follow-up leads. Sending waits for an admin.",
+                "description": "n8n opens a follow-up approval. Sending waits for an admin.",
             },
         ],
         "runs": [

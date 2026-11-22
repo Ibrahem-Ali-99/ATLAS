@@ -6,7 +6,11 @@ ATLAS is a modular monolith. Day 1 is the platform shell. Day 2 adds CRM, docume
 
 `apps/api` is a FastAPI application. HTTP routes live under `/api/v1`. Domain code lives in `app/domains/identity`, `app/domains/crm`, `app/domains/knowledge`, `app/domains/assistant`, `app/domains/agents`, `app/domains/approvals`, and `app/domains/automation`. Shared configuration, database sessions, logging, errors, and session cookies live in `app/core`. OpenAI-compatible chat and embedding clients, the SMTP transport, the simulated calendar, and the n8n client live in `app/integrations`. The read-only MCP server is `python -m app.mcp_server`.
 
-n8n is an external workflow runner. It receives lead events and calls ATLAS webhooks. LangGraph still owns inquiry reasoning and the approval pause. ML, analytics, and a monitoring product are still reserved. Success and failure of an external action are stored on the execution record.
+n8n is an external workflow runner. It receives lead events and calls ATLAS webhooks. n8n answers that delivery before it calls back, so a restart marks an accepted lead run `needs_attention` until the matching callback completes it. The scheduled follow-up lists organization-scoped leads and opens a pending approval. It does not send email. LangGraph still owns inquiry reasoning and the approval pause. ML, analytics, and a monitoring product are still reserved. Success and failure of an external action are stored on the execution record.
+
+Webhook signing secrets are sealed with a key derived from `ATLAS_SECRET_KEY` before they are stored. The create response returns the secret once. Later reads, including the automations snapshot, do not include it. Rotating `ATLAS_SECRET_KEY` makes an existing sealed secret unreadable until the integration key is created again. A value stored before sealing still verifies, and it should be replaced.
+
+The webhook rate limit counts requests in the API process that received them. The default is 30 requests per minute for each integration key. That count is not shared with any other process or machine, so it is not a control for a deployment that runs more than one API instance.
 
 ## Authorization
 

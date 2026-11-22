@@ -95,6 +95,8 @@ services:
       ATLAS_PUBLIC_API_URL: ${ATLAS_PUBLIC_API_URL:-http://host.docker.internal:8000}
       ATLAS_HOOK_SECRET: ${ATLAS_HOOK_SECRET:-}
       ATLAS_HOOK_KEY_ID: ${ATLAS_HOOK_KEY_ID:-}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
