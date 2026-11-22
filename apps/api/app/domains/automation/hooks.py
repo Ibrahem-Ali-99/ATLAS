@@ -16,7 +16,12 @@ from app.domains.agents.models import AgentEvent, AgentRun, RunStatus
 from app.domains.approvals.models import ActionType
 from app.domains.approvals.service import create_approval
 from app.domains.automation.models import WebhookEvent, WebhookKey
-from app.domains.automation.signatures import sign_webhook, signatures_match
+from app.domains.automation.signatures import (
+    open_webhook_secret,
+    seal_webhook_secret,
+    sign_webhook,
+    signatures_match,
+)
 from app.domains.automation.workflows import complete_lead_callback
 from app.domains.crm import service as crm
 from app.domains.crm.models import Inquiry, Lead, LeadStatus
@@ -51,7 +56,9 @@ def create_webhook_key(db: Session, organization_id: uuid.UUID) -> tuple[Webhook
     if existing is not None:
         raise AppError(409, "already_exists", "This organization already has a webhook key")
     secret = secrets.token_urlsafe(32)
-    key = WebhookKey(organization_id=organization_id, name="n8n", secret=secret)
+    key = WebhookKey(
+        organization_id=organization_id, name="n8n", secret=seal_webhook_secret(secret)
+    )
     db.add(key)
     db.commit()
     db.refresh(key)
@@ -155,7 +162,8 @@ def _authenticated(db: Session, headers: Any, body: bytes) -> tuple[WebhookKey, 
     except ValueError as exc:
         raise AppError(401, "webhook_unauthorized", "Webhook authentication failed") from exc
     key = db.get(WebhookKey, parsed_id)
-    expected = "" if key is None else sign_webhook(key.secret, timestamp, idempotency_key, body)
+    opened = "" if key is None else open_webhook_secret(key.secret)
+    expected = "" if key is None else sign_webhook(opened, timestamp, idempotency_key, body)
     if key is None or not signatures_match(expected, signature):
         raise AppError(401, "webhook_unauthorized", "Webhook authentication failed")
     skew = abs(int(time.time()) - int(timestamp))
@@ -170,6 +178,7 @@ def _header(headers: Any, name: str) -> str:
 
 
 def _limited(key_id: str) -> bool:
+    # The counters below live in this process. Another API process does not share them.
     now = time.monotonic()
     recent = [stamp for stamp in _calls.get(key_id, []) if now - stamp < 60]
     if len(recent) >= get_settings().webhook_rate_limit:

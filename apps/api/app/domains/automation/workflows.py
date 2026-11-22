@@ -19,7 +19,7 @@ from app.domains.automation.models import (
     WorkflowRun,
     WorkflowStatus,
 )
-from app.domains.automation.signatures import sign_webhook
+from app.domains.automation.signatures import open_webhook_secret, sign_webhook
 from app.integrations.n8n import post_webhook
 from app.integrations.outcomes import DeliveryFailed, OutcomeUncertain
 
@@ -74,7 +74,11 @@ def dispatch_workflow(db: Session, organization_id: uuid.UUID, run_id: uuid.UUID
     if not settings.n8n_lead_webhook_url or key is None:
         _finish(db, run.id, WorkflowStatus.not_configured, "n8n_not_configured", None)
         return
-    envelope = _envelope(run, key)
+    try:
+        envelope = _envelope(run, key)
+    except AppError:
+        _finish(db, run.id, WorkflowStatus.failed, "webhook_key_unreadable", None)
+        return
     last_error = "n8n_unreachable"
     for _attempt in range(_MAX_ATTEMPTS):
         attempt = _start_attempt(db, run.id, organization_id)
@@ -111,7 +115,13 @@ def complete_lead_callback(
             WorkflowRun.id == workflow_run_id,
             WorkflowRun.organization_id == organization_id,
             WorkflowRun.lead_id == lead_id,
-            WorkflowRun.status.in_([WorkflowStatus.dispatching, WorkflowStatus.accepted]),
+            WorkflowRun.status.in_(
+                [
+                    WorkflowStatus.dispatching,
+                    WorkflowStatus.accepted,
+                    WorkflowStatus.needs_attention,
+                ]
+            ),
         )
         .values(status=WorkflowStatus.completed, last_error=None)
     )
@@ -131,12 +141,19 @@ def complete_lead_callback(
 
 
 def recover_workflows(db: Session) -> None:
-    stuck = list(
-        db.scalars(select(WorkflowRun).where(WorkflowRun.status == WorkflowStatus.dispatching))
+    # n8n acknowledges a lead event before its callback. A restart cannot tell whether that
+    # callback still arrived, so the run waits for review until a matching callback completes it.
+    uncertain = list(
+        db.scalars(
+            select(WorkflowRun).where(
+                WorkflowRun.status.in_([WorkflowStatus.dispatching, WorkflowStatus.accepted])
+            )
+        )
     )
-    for run in stuck:
+    for run in uncertain:
+        missing_callback = run.status == WorkflowStatus.accepted
         run.status = WorkflowStatus.needs_attention
-        run.last_error = "execution_uncertain"
+        run.last_error = "callback_missing" if missing_callback else "execution_uncertain"
     db.commit()
     org_ids = list(
         db.scalars(
@@ -161,7 +178,8 @@ def _envelope(run: WorkflowRun, key: WebhookKey) -> dict[str, object]:
         separators=(",", ":"),
     ).encode()
     timestamp = str(int(time.time()))
-    signature = sign_webhook(key.secret, timestamp, run.idempotency_key, body)
+    secret = open_webhook_secret(key.secret)
+    signature = sign_webhook(secret, timestamp, run.idempotency_key, body)
     settings = get_settings()
     return {
         "callback_url": f"{settings.public_api_url.rstrip('/')}/api/v1/hooks/lead-processed",

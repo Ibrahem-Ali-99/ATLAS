@@ -90,7 +90,7 @@ class WebhookKey(Base):
         Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(80), nullable=False)
-    secret: Mapped[str] = mapped_column(String(128), nullable=False)
+    secret: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

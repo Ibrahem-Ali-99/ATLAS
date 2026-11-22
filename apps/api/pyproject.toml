@@ -5,6 +5,7 @@ description = "ATLAS AI operations API"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.14",
+    "cryptography>=50.0.2",
     "email-validator>=2.2",
     "fastapi>=0.115",
     "httpx>=0.28",

@@ -34,6 +34,11 @@ from app.domains.automation.models import (
     WorkflowStatus,
 )
 from app.domains.automation.signatures import sign_webhook
+from app.domains.automation.workflows import (
+    complete_lead_callback,
+    recover_workflows,
+    stage_lead_created,
+)
 from app.domains.crm.service import create_inquiry, create_lead
 from app.domains.identity.models import MembershipRole, Organization, User
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
@@ -213,6 +218,47 @@ def test_simulated_booking_and_cancellation(client: TestClient, db: Session) -> 
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancelled"
     assert cancelled.json()["provider"] == "simulation"
+
+
+def test_webhook_secret_is_sealed_and_absent_from_reads(client: TestClient, db: Session) -> None:
+    admin = make_user(db, "ada@example.com")
+    atlas = make_organization(db, "Atlas Demo", "atlas-demo")
+    make_membership(db, admin, atlas, MembershipRole.admin)
+    key, secret = create_webhook_key(db, atlas.id)
+    assert key.secret.startswith("enc:v1:")
+    assert secret not in key.secret
+    ada = login(client, "ada@example.com", PASSWORD)
+    snapshot = client.get(f"/api/v1/organizations/{atlas.id}/automations")
+    assert snapshot.status_code == 200
+    assert secret not in snapshot.text
+    listed = client.get(
+        f"/api/v1/organizations/{atlas.id}/integrations/webhook-keys",
+        headers={"X-CSRF-Token": str(ada["csrf_token"])},
+    )
+    assert listed.status_code == 405
+    assert secret not in listed.text
+
+
+def test_missing_callback_waits_until_the_callback_arrives(db: Session) -> None:
+    admin = make_user(db, "ada@example.com")
+    atlas = make_organization(db, "Atlas Demo", "atlas-demo")
+    make_membership(db, admin, atlas, MembershipRole.admin)
+    lead = create_lead(db, atlas.id, admin.id, {"title": "Harbor", "status": "new"})
+    create_webhook_key(db, atlas.id)
+    stage_lead_created(db, atlas.id, lead.id, None)
+    db.commit()
+    run = db.scalar(select(WorkflowRun))
+    assert run is not None
+    run.status = WorkflowStatus.accepted
+    db.commit()
+    recover_workflows(db)
+    db.expire_all()
+    waiting = db.get(WorkflowRun, run.id)
+    assert waiting is not None
+    assert waiting.status == WorkflowStatus.needs_attention
+    assert waiting.last_error == "callback_missing"
+    completed = complete_lead_callback(db, atlas.id, run.id, lead.id)
+    assert completed["status"] == "completed"
 
 
 def test_webhook_auth_replay_and_cross_organization(client: TestClient, db: Session) -> None:
