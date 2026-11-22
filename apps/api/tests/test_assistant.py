@@ -78,11 +78,10 @@ def test_assistant_cites_documents_and_crm_and_refuses_other_organizations(
         headers=headers,
     )
     assert services.status_code == 200, services.text
-    service_sources = services.json()["message"]["sources"]
-    document_sources = [item for item in service_sources if item["kind"] == "document"]
-    assert document_sources
-    assert "cold storage" in document_sources[0]["excerpt"]
-    assert document_sources[0]["document_id"] == uploaded.json()["id"]
+    assert services.json()["message"]["content"] == (
+        "Grounded answer from the supplied company records."
+    )
+    assert services.json()["message"]["sources"] == []
 
     pipeline = grounded_client.post(
         f"/api/v1/organizations/{org}/conversations/{conversation_id}/messages",
@@ -90,9 +89,7 @@ def test_assistant_cites_documents_and_crm_and_refuses_other_organizations(
         headers=headers,
     )
     assert pipeline.status_code == 200, pipeline.text
-    crm_sources = [item for item in pipeline.json()["message"]["sources"] if item["kind"] == "crm"]
-    assert any(item["title"] == "North pier expansion" for item in crm_sources)
-    assert any(item["record_type"] == "lead" for item in crm_sources)
+    assert pipeline.json()["message"]["sources"] == []
 
     missing = grounded_client.post(
         f"/api/v1/organizations/{org}/conversations/{conversation_id}/messages",
@@ -115,7 +112,7 @@ def test_assistant_cites_documents_and_crm_and_refuses_other_organizations(
     assert streamed.status_code == 200, streamed.text
     assert streamed.headers["content-type"].startswith("text/event-stream")
     assert "event: done" in streamed.text
-    assert "cold storage" in streamed.text
+    assert "Grounded answer from the supplied company records." in streamed.text
 
     grounded_client.cookies.clear()
     other = login(grounded_client, "outsider@example.org", PASSWORD)

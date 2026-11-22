@@ -59,6 +59,8 @@ def build_server(organization_id: uuid.UUID) -> MCPServer:
         return json.dumps(
             [
                 {
+                    "document_id": str(hit.document_id),
+                    "chunk_id": str(hit.chunk_id),
                     "document_title": hit.document_title,
                     "content": hit.content[:500],
                     "score": hit.score,

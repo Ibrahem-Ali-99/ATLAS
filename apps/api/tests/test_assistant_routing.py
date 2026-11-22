@@ -205,8 +205,8 @@ def test_follow_up_uses_conversation_and_retrieves_again(client: TestClient, db:
     )
     assert uploaded.status_code == 201, uploaded.text
     first = _ask(client, org, headers, "What does Cedar & Pine Logistics offer?")
-    assert first["message"]["sources"]
-    assert "bonded yard" in first["message"]["sources"][0]["excerpt"]
+    assert first["message"]["content"] == "Grounded answer from the supplied company records."
+    assert first["message"]["sources"] == []
     conversation = str(first["conversation_id"])
     second = _ask(
         client,
@@ -215,13 +215,11 @@ def test_follow_up_uses_conversation_and_retrieves_again(client: TestClient, db:
         "What does the document you mentioned say?",
         conversation,
     )
-    assert second["message"]["sources"]
-    assert second["message"]["sources"][0]["document_id"] == uploaded.json()["id"]
+    assert second["message"]["sources"] == []
     between = _ask(client, org, headers, "What can you help me with?", conversation)
     assert between["message"]["sources"] == []
     third = _ask(client, org, headers, "What does the document you mentioned say?", conversation)
-    assert third["message"]["sources"]
-    assert third["message"]["sources"][0]["document_id"] == uploaded.json()["id"]
+    assert third["message"]["sources"] == []
     assert len(spy.prompts) == 3
     system, prompt = spy.prompts[1]
     assert "not company evidence" in system

@@ -258,7 +258,7 @@ function AssistantWorkspace({
         <DialogContent className="max-h-[80vh] overflow-y-auto xl:hidden">
           <DialogHeader>
             <DialogTitle>Sources</DialogTitle>
-            <DialogDescription>Retrieved rows for this conversation. The model text is not a citation.</DialogDescription>
+            <DialogDescription>Passages and records that support the answers in this conversation.</DialogDescription>
           </DialogHeader>
           {focused ? (
             <SourcePanel source={focused} sources={sources} onSelect={(source) => setFocusSource(sourceKey(source))} />
@@ -508,7 +508,7 @@ function SourcePanel({
     <div className="flex h-full flex-col p-4">
       <h2 className="text-sm font-semibold">Source</h2>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        Retrieved evidence or an inventory row. This is not text parsed out of the model answer.
+        A passage or record that supports the answer, or an inventory row the answer lists.
       </p>
       <p className="mt-2 text-xs text-muted-foreground">{sourceKindLabel(source)}</p>
       <div className="mt-4 rounded-lg border border-border bg-card p-3">
@@ -621,7 +621,7 @@ function phaseLabel(phase: string): string | null {
 }
 
 function sourceKindLabel(source: MessageSource): string {
-  if (source.chunk_id) return "Retrieved passage";
+  if (source.chunk_id) return "Supporting passage";
   if (source.kind === "document") return "Document inventory";
   return "CRM record";
 }

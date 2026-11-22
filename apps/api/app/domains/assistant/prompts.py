@@ -15,6 +15,7 @@ GROUNDED_SYSTEM = (
     "Do not treat a previous assistant sentence as a source. "
     "If the excerpts and records do not support a fact, say it was not found. "
     "Do not invent names, numbers, addresses, citations, or records. "
+    "Do not print record identifiers. "
     "Do not claim that you changed any record."
 )
 

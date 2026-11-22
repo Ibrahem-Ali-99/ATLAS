@@ -41,6 +41,7 @@ from app.domains.assistant.routing import (
 )
 from app.domains.assistant.schemas import MessageOut, ReplyOut, SourceOut
 from app.domains.crm.service import search_records
+from app.domains.knowledge.attribution import attribute_answer
 from app.domains.knowledge.models import Chunk
 from app.domains.knowledge.retrieval import RetrievedChunk, search_chunks
 from app.integrations.language import ChatClient, EmbeddingClient
@@ -68,6 +69,7 @@ class PreparedTurn:
     refusal: str | None = None
     phases: list[str] = field(default_factory=list)
     inventory_documents: list[InventoryDocument] = field(default_factory=list)
+    question: str = ""
 
 
 def conversation_title(content: str) -> str:
@@ -209,7 +211,10 @@ def save_completed_turn(db: Session, turn: PreparedTurn, answer: str) -> ReplyOu
     if turn.refusal is not None:
         message = _latest_assistant(db, turn.conversation.id)
     else:
-        saved = _save_answer(db, turn.conversation, answer, turn.documents, turn.crm_records)
+        answer, documents, crm_records = _cited_context(
+            turn.question, answer, turn.documents, turn.crm_records
+        )
+        saved = _save_answer(db, turn.conversation, answer, documents, crm_records)
         message = _message_out(saved, _sources_for(db, saved.id))
     search = turn.document_search
     if search not in {"ready", "empty", "unconfigured", "unavailable", "skipped"}:
@@ -269,8 +274,15 @@ def _grounded_turn(
         documents = search_chunks(db, organization_id, content, embedder)
         if not documents and _referenced_kind(content) == SourceKind.document.value:
             documents = _prior_document_chunks(db, organization_id, conversation.id)
-        if not documents and expand and titles:
-            documents = search_chunks(db, organization_id, "\n".join(titles), embedder)
+        if not documents and expand:
+            checked = 0
+            for role, text in reversed(history):
+                if role != "user" or not text.strip():
+                    continue
+                documents = search_chunks(db, organization_id, text, embedder)
+                checked += 1
+                if documents or checked == 4:
+                    break
         document_search = "ready" if documents else "empty"
     except AppError as exc:
         if exc.code == "embedding_unconfigured" and crm_records:
@@ -290,6 +302,7 @@ def _grounded_turn(
             crm_records=crm_records,
             document_search=document_search,
             phases=phases,
+            question=content,
         )
     if allows_ungrounded_chat(content) and not unsupported_without_evidence(content):
         return _general_turn(conversation, content, history, "skipped", phases)
@@ -523,6 +536,33 @@ def _role(message: Message) -> str:
     if isinstance(message.role, MessageRole):
         return message.role.value
     return str(message.role)
+
+
+def _cited_context(
+    question: str,
+    answer: str,
+    documents: list[RetrievedChunk],
+    crm_records: list[dict[str, str]],
+) -> tuple[str, list[RetrievedChunk], list[dict[str, str]]]:
+    if not documents and not crm_records:
+        return answer, documents, crm_records
+    passages = [(str(excerpt.chunk_id), excerpt.content) for excerpt in documents]
+    passages.extend(
+        (
+            f"{record['record_type']}:{record['record_id']}",
+            f"{record['title']}. {record['excerpt']}",
+        )
+        for record in crm_records
+    )
+    stored, cited = attribute_answer(question, answer, passages)
+    cited_ids = set(cited)
+    kept_documents = [excerpt for excerpt in documents if str(excerpt.chunk_id) in cited_ids]
+    kept_records = [
+        record
+        for record in crm_records
+        if f"{record['record_type']}:{record['record_id']}" in cited_ids
+    ]
+    return stored, kept_documents, kept_records
 
 
 def _save_answer(

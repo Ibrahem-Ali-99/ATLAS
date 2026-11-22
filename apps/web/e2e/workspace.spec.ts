@@ -128,7 +128,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByRole("button", { name: "Send" }).click();
   const answer = page.getByRole("article").filter({ hasText: "Grounded answer from the supplied company records." });
   await expect(answer.getByText("Grounded answer from the supplied company records.")).toBeVisible();
-  await expect(answer.getByText(documentTitle)).toBeVisible();
+  await expect(answer.getByText(documentTitle)).toHaveCount(0);
   await shot(page, "04-assistant.png");
 
   await page.getByPlaceholder("Ask about records, documents or your organization…").fill("What can you help me with?");
@@ -142,8 +142,11 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
 
   await page.getByPlaceholder("Ask about records, documents or your organization…").fill("What does the document you mentioned say?");
   await page.getByRole("button", { name: "Send" }).click();
-  const followUp = page.getByRole("article").filter({ hasText: documentTitle });
-  await expect(followUp.getByText("Grounded answer from the supplied company records.")).toHaveCount(2);
+  const answers = page.getByRole("article").filter({
+    hasText: "Grounded answer from the supplied company records.",
+  });
+  await expect(answers).toHaveCount(2);
+  await expect(answers.nth(1).getByText(documentTitle)).toHaveCount(0);
 
   await page.getByRole("link", { name: "CRM", exact: true }).click();
   await page.getByRole("tab", { name: "Inquiries" }).click();
