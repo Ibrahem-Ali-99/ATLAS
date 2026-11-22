@@ -38,6 +38,13 @@ services:
       ATLAS_MAX_COSINE_DISTANCE: ${ATLAS_MAX_COSINE_DISTANCE:-0.55}
       ATLAS_MAX_UPLOAD_BYTES: ${ATLAS_MAX_UPLOAD_BYTES:-10485760}
       ATLAS_STORAGE_DIR: /var/lib/atlas/storage
+      ATLAS_PUBLIC_API_URL: ${ATLAS_PUBLIC_API_URL:-http://api:8000}
+      ATLAS_N8N_LEAD_WEBHOOK_URL: ${ATLAS_N8N_LEAD_WEBHOOK_URL:-http://n8n:5678/webhook/atlas-lead}
+      ATLAS_EMAIL_MODE: ${ATLAS_EMAIL_MODE:-sandbox}
+      ATLAS_SMTP_HOST: mailpit
+      ATLAS_SMTP_PORT: 1025
+      ATLAS_SMTP_FROM: ${ATLAS_SMTP_FROM:-atlas@localhost}
+      ATLAS_CALENDAR_MODE: simulation
     volumes:
       - atlas_uploads:/var/lib/atlas/storage
     ports:
@@ -45,6 +52,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     healthcheck:
       test:
         [
@@ -59,6 +68,42 @@ services:
       start_period: 40s
     restart: on-failure
 
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    environment:
+      MP_DATABASE: /data/mailpit.db
+    volumes:
+      - atlas_mailpit_data:/data
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:1.70.3
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      N8N_HOST: 127.0.0.1
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://127.0.0.1:5678/
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-replace-with-a-long-random-string}
+      GENERIC_TIMEZONE: UTC
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_SECURE_COOKIE: "false"
+      ATLAS_PUBLIC_API_URL: ${ATLAS_PUBLIC_API_URL:-http://host.docker.internal:8000}
+      ATLAS_HOOK_SECRET: ${ATLAS_HOOK_SECRET:-}
+      ATLAS_HOOK_KEY_ID: ${ATLAS_HOOK_KEY_ID:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - atlas_n8n_data:/home/node/.n8n
+      - ./n8n:/workflows:ro
+    restart: unless-stopped
+
 volumes:
   atlas_postgres_data:
   atlas_uploads:
+  atlas_mailpit_data:
+  atlas_n8n_data:

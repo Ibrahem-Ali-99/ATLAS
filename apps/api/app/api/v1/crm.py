@@ -155,6 +155,11 @@ def list_leads(
 @router.post("/leads", response_model=LeadOut, status_code=201)
 def create_lead(body: LeadCreate, member: CsrfMember, db: DbSession) -> LeadOut:
     lead = service.create_lead(db, member.organization.id, member.user.id, body.model_dump())
+    from app.domains.automation.workflows import dispatch_pending, stage_lead_created
+
+    stage_lead_created(db, member.organization.id, lead.id, None)
+    db.commit()
+    dispatch_pending(db, member.organization.id)
     return LeadOut.model_validate(lead)
 
 

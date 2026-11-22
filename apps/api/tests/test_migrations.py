@@ -36,6 +36,11 @@ def test_migrations_upgrade_downgrade_and_reupgrade() -> None:
         "agent_runs",
         "agent_events",
         "approvals",
+        "webhook_keys",
+        "execution_intents",
+        "workflow_runs",
+        "email_messages",
+        "calendar_bookings",
     } <= tables
     with engine.connect() as connection:
         vector_installed = connection.execute(

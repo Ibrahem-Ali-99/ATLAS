@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.database import SessionLocal
 from app.core.errors import AppError
 from app.domains.agents.models import AgentRun, RunStatus
 from app.domains.approvals.models import ActionType, Approval, ApprovalStatus
@@ -17,7 +18,6 @@ from app.domains.approvals.service import (
     execute_approved,
     execute_decisions,
 )
-from app.core.database import SessionLocal
 from app.domains.crm.models import Interaction, Lead
 from app.domains.crm.service import create_inquiry
 from app.domains.identity.models import MembershipRole, Organization
@@ -251,7 +251,12 @@ def test_interaction_crash_does_not_commit_the_history_row(db: Session) -> None:
         run_id=approval.run_id,
         requested_by=approval.requested_by,
         action_type=ActionType.prepare_customer_response,
-        payload={"lead_id": lead_id, "body": "We can discuss bonded storage."},
+        payload={
+            "lead_id": lead_id,
+            "to": "inbox@localhost",
+            "subject": "Bonded storage",
+            "body": "We can discuss bonded storage.",
+        },
         position=1,
     )
     decide(

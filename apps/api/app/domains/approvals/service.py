@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.domains.approvals.models import ActionType, Approval, ApprovalStatus
 from app.domains.crm import service as crm
-from app.domains.crm.models import InteractionKind, LeadStatus
+from app.domains.crm.models import LeadStatus
 
 
 def payload_hash(payload: Mapping[str, Any]) -> str:
@@ -29,6 +29,7 @@ def create_approval(
     action_type: ActionType,
     payload: dict[str, Any],
     position: int,
+    commit: bool = True,
 ) -> Approval:
     approval = Approval(
         organization_id=organization_id,
@@ -42,7 +43,10 @@ def create_approval(
         expires_at=datetime.now(UTC) + timedelta(hours=get_settings().approval_ttl_hours),
     )
     db.add(approval)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(approval)
     return approval
 
@@ -131,19 +135,21 @@ def execute_approved(
     if approval.status == ApprovalStatus.executed:
         raise AppError(409, "already_executed", "This action was already executed")
     if approval.status == ApprovalStatus.needs_attention:
-        raise AppError(
-            409, "needs_attention", "The outcome of this action could not be determined"
-        )
+        raise AppError(409, "needs_attention", "The outcome of this action could not be determined")
     _reject_if_stale(db, approval)
     if approval.status == ApprovalStatus.executing:
+        if approval.action_type in _EXTERNAL_ACTIONS:
+            from app.domains.automation.intents import resume_intent
+
+            return resume_intent(db, approval)
         approval.status = ApprovalStatus.needs_attention
         approval.execution_error = "execution_uncertain"
         db.commit()
-        raise AppError(
-            409, "needs_attention", "The outcome of this action could not be determined"
-        )
+        raise AppError(409, "needs_attention", "The outcome of this action could not be determined")
     if approval.status != ApprovalStatus.approved:
         raise AppError(409, "invalid_transition", "This approval cannot be executed")
+    if approval.action_type in _EXTERNAL_ACTIONS:
+        return _execute_external(db, approval)
     try:
         result = _apply(db, organization_id, approval)
     except AppError as exc:
@@ -153,12 +159,38 @@ def execute_approved(
         failed.execution_error = exc.message[:500]
         db.commit()
         raise
+    if approval.action_type == ActionType.create_lead:
+        from app.domains.automation.workflows import stage_lead_created
+
+        stage_lead_created(
+            db,
+            organization_id,
+            _uuid_value(result.get("lead_id")),
+            approval.run_id,
+        )
     approval.status = ApprovalStatus.executed
     approval.execution_result = result
     approval.executed_at = datetime.now(UTC)
     approval.execution_error = None
     db.commit()
+    from app.domains.automation.workflows import dispatch_pending
+
+    dispatch_pending(db, organization_id)
     return result
+
+
+_EXTERNAL_ACTIONS = {ActionType.prepare_customer_response, ActionType.request_appointment}
+
+
+def _execute_external(db: Session, approval: Approval) -> dict[str, Any]:
+    from app.domains.automation.intents import dispatch_intent, stage_intent
+
+    payload = dict(approval.payload)
+    payload["lead_id"] = str(_resolve_lead(db, approval, payload))
+    intent = stage_intent(db, approval, payload)
+    approval.status = ApprovalStatus.executing
+    db.commit()
+    return dispatch_intent(db, approval.organization_id, intent.id)
 
 
 def execute_decisions(
@@ -242,31 +274,6 @@ def _apply(db: Session, organization_id: uuid.UUID, approval: Approval) -> dict[
             commit=False,
         )
         return {"lead_id": str(lead.id)}
-    if approval.action_type in {
-        ActionType.prepare_customer_response,
-        ActionType.request_appointment,
-    }:
-        lead_id = _resolve_lead(db, approval, payload)
-        kind = (
-            InteractionKind.email
-            if approval.action_type == ActionType.prepare_customer_response
-            else InteractionKind.call
-        )
-        body = payload.get("body")
-        if not isinstance(body, str) or not body.strip():
-            raise AppError(
-                409, "approval_invalid", "The action payload no longer matches the approval"
-            )
-        author = approval.decided_by or approval.requested_by
-        interaction = crm.add_interaction(
-            db,
-            organization_id,
-            lead_id,
-            author,
-            {"kind": kind, "body": body.strip()[:4000]},
-            commit=False,
-        )
-        return {"lead_id": str(lead_id), "interaction_id": str(interaction.id)}
     raise AppError(422, "invalid_action", "This action type is not supported")
 
 

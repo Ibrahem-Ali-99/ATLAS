@@ -7,7 +7,8 @@ Implemented:
 - assistant: grounded chat over documents and read-only CRM records.
 - agents: LangGraph inquiry workflow over CRM and knowledge.
 - approvals: human decisions required before an agent writes CRM records.
+- automation: webhooks, execution intents, sandbox email, and simulated calendar bookings.
 
 Reserved and intentionally not implemented:
-- automation, ml, analytics, monitoring.
+- ml, analytics, monitoring.
 """

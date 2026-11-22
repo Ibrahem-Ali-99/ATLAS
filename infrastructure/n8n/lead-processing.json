@@ -1,0 +1,64 @@
+[
+  {
+    "name": "ATLAS Lead Processing",
+    "active": true,
+    "settings": { "executionOrder": "v1" },
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "atlas-lead",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "id": "c0a1e5a0-6b1a-4a1a-9a11-0a1a1a1a1a11",
+        "name": "Lead webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [260, 300],
+        "webhookId": "atlas-lead"
+      },
+      {
+        "parameters": {
+          "jsCode": "const input = $input.first().json;\nconst source = input.body_text ? input : (input.body && input.body.body_text ? input.body : input);\nreturn [{ json: source }];"
+        },
+        "id": "c0a1e5a0-6b1a-4a1a-9a11-0a1a1a1a1a12",
+        "name": "Normalize",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [500, 300]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $json.callback_url }}",
+          "sendHeaders": true,
+          "specifyHeaders": "keypair",
+          "headerParameters": {
+            "parameters": [
+              { "name": "Content-Type", "value": "application/json" },
+              { "name": "X-ATLAS-Key-Id", "value": "={{ $json.headers['X-ATLAS-Key-Id'] }}" },
+              { "name": "X-ATLAS-Timestamp", "value": "={{ $json.headers['X-ATLAS-Timestamp'] }}" },
+              { "name": "X-ATLAS-Idempotency-Key", "value": "={{ $json.headers['X-ATLAS-Idempotency-Key'] }}" },
+              { "name": "X-ATLAS-Signature", "value": "={{ $json.headers['X-ATLAS-Signature'] }}" }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ $json.body_text }}",
+          "options": {}
+        },
+        "id": "c0a1e5a0-6b1a-4a1a-9a11-0a1a1a1a1a13",
+        "name": "Call ATLAS",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [740, 300]
+      }
+    ],
+    "connections": {
+      "Lead webhook": { "main": [[{ "node": "Normalize", "type": "main", "index": 0 }]] },
+      "Normalize": { "main": [[{ "node": "Call ATLAS", "type": "main", "index": 0 }]] }
+    }
+  }
+]

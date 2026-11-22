@@ -1,7 +1,7 @@
 import uuid
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
@@ -216,6 +216,7 @@ def propose(state: AgentState) -> dict[str, Any]:
     position = max((item.position for item in existing), default=-1) + 1
     lead_status = "qualified" if state.get("qualification") == "qualified" else "unqualified"
     lead_action, lead_payload = _lead_proposal(state, lead_status)
+    appointment_start = _appointment_start()
     proposals = [
         (lead_action, lead_payload),
         (
@@ -223,6 +224,8 @@ def propose(state: AgentState) -> dict[str, Any]:
             {
                 "attach_to": "run_lead",
                 "lead_id": state.get("existing_lead_id"),
+                "to": "inbox@localhost",
+                "subject": state["lead_title"][:200],
                 "body": state["draft_response"],
             },
         ),
@@ -232,6 +235,8 @@ def propose(state: AgentState) -> dict[str, Any]:
                 "attach_to": "run_lead",
                 "lead_id": state.get("existing_lead_id"),
                 "body": f"Appointment requested: {state['summary']}"[:4000],
+                "starts_at": appointment_start.isoformat(),
+                "ends_at": (appointment_start + timedelta(minutes=30)).isoformat(),
             },
         ),
     ]
@@ -356,6 +361,10 @@ def _lead_proposal(state: AgentState, lead_status: str) -> tuple[ActionType, dic
         "source": "agent",
         "notes": state["summary"],
     }
+
+
+def _appointment_start() -> datetime:
+    return (datetime.now(UTC) + timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
 
 
 def _hit_summary(hit: dict[str, Any]) -> dict[str, Any]:

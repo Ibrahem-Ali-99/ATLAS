@@ -38,6 +38,8 @@ def clean_tables() -> None:
         connection.execute(
             text(
                 "TRUNCATE TABLE message_sources, messages, conversations, chunks, documents, "
+                "email_messages, calendar_bookings, execution_attempts, execution_intents, "
+                "workflow_runs, webhook_events, webhook_keys, "
                 "agent_events, approvals, agent_runs, "
                 "interactions, inquiries, leads, contacts, companies, "
                 "sessions, memberships, users, organizations "

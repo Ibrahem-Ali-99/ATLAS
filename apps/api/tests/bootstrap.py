@@ -8,6 +8,8 @@ from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, text
 
+from tests.smtp_sink import start_process_sink
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 API_ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,6 +51,12 @@ os.environ["ATLAS_DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["ATLAS_CORS_ORIGINS"] = "http://127.0.0.1:3000,http://localhost:3000"
 os.environ["ATLAS_COOKIE_SECURE"] = "false"
 os.environ["ATLAS_LOG_LEVEL"] = "WARNING"
+
+_smtp_sink = start_process_sink()
+os.environ["ATLAS_SMTP_HOST"] = "127.0.0.1"
+os.environ["ATLAS_SMTP_PORT"] = str(_smtp_sink.port)
+os.environ["ATLAS_EMAIL_MODE"] = "sandbox"
+os.environ["ATLAS_N8N_LEAD_WEBHOOK_URL"] = ""
 
 
 def ensure_database(name: str) -> None:

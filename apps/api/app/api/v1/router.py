@@ -1,6 +1,17 @@
 from fastapi import APIRouter
 
-from app.api.v1 import agents, approvals, assistant, auth, crm, health, knowledge, organizations
+from app.api.v1 import (
+    agents,
+    approvals,
+    assistant,
+    auth,
+    automation,
+    crm,
+    health,
+    hooks,
+    knowledge,
+    organizations,
+)
 
 router = APIRouter()
 router.include_router(health.router, tags=["health"])
@@ -11,3 +22,5 @@ router.include_router(knowledge.router)
 router.include_router(assistant.router)
 router.include_router(agents.router)
 router.include_router(approvals.router)
+router.include_router(automation.router)
+router.include_router(hooks.router)

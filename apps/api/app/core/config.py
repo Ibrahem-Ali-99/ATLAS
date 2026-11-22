@@ -22,6 +22,11 @@ def find_repo_root() -> Path | None:
 
 REPO_ROOT = find_repo_root()
 ENV_FILE = REPO_ROOT / ".env" if REPO_ROOT is not None else None
+_LOCAL_SMTP_HOSTS = frozenset({"127.0.0.1", "localhost", "mailpit", "::1"})
+
+
+def _local_smtp_host(host: str) -> bool:
+    return host.strip().lower() in _LOCAL_SMTP_HOSTS
 
 
 class Settings(BaseSettings):
@@ -53,6 +58,19 @@ class Settings(BaseSettings):
     max_upload_bytes: int = Field(default=10_485_760, ge=1, le=52_428_800)
     storage_dir: str = ""
     approval_ttl_hours: int = Field(default=24, ge=1, le=168)
+    public_api_url: str = "http://host.docker.internal:8000"
+    n8n_lead_webhook_url: str = ""
+    n8n_timeout_seconds: float = Field(default=5, ge=0.2, le=30)
+    email_mode: Literal["sandbox", "live"] = "sandbox"
+    email_live_enabled: bool = False
+    smtp_host: str = "127.0.0.1"
+    smtp_port: int = Field(default=1025, ge=1, le=65535)
+    smtp_from: str = "atlas@localhost"
+    smtp_timeout_seconds: float = Field(default=5, ge=0.2, le=60)
+    calendar_mode: Literal["simulation"] = "simulation"
+    webhook_max_bytes: int = Field(default=65_536, ge=32, le=1_048_576)
+    webhook_skew_seconds: int = Field(default=300, ge=30, le=3600)
+    webhook_rate_limit: int = Field(default=30, ge=1, le=300)
 
     @field_validator("database_url")
     @classmethod
@@ -86,6 +104,10 @@ class Settings(BaseSettings):
                 raise ValueError("ATLAS_SECRET_KEY placeholder is not allowed in production")
             if not self.cookie_secure:
                 raise ValueError("ATLAS_COOKIE_SECURE must be true in production")
+        if self.email_mode == "live" and not self.email_live_enabled:
+            raise ValueError("ATLAS_EMAIL_LIVE_ENABLED must be true when ATLAS_EMAIL_MODE is live")
+        if self.email_mode == "sandbox" and not _local_smtp_host(self.smtp_host):
+            raise ValueError("ATLAS_SMTP_HOST must be local while email mode is sandbox")
         return self
 
     @property

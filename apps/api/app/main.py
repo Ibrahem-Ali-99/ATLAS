@@ -27,6 +27,19 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             logger.info("ingestion_resumed", documents=resumed)
     except Exception:
         logger.error("ingestion_resume_failed")
+    try:
+        from app.core.database import SessionLocal
+        from app.domains.automation.intents import recover_intents
+        from app.domains.automation.workflows import recover_workflows
+
+        session = SessionLocal()
+        try:
+            recover_intents(session)
+            recover_workflows(session)
+        finally:
+            session.close()
+    except Exception:
+        logger.error("automation_recovery_failed")
     yield
     logger.info("shutdown")
 

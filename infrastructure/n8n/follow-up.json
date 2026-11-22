@@ -1,0 +1,86 @@
+[
+  {
+    "name": "ATLAS Follow-up",
+    "active": true,
+    "settings": { "executionOrder": "v1" },
+    "nodes": [
+      {
+        "parameters": {
+          "rule": { "interval": [{ "field": "days", "daysInterval": 1, "triggerAtHour": 9 }] }
+        },
+        "id": "d1b2e6b0-7c2b-4b2b-8b22-1b2b2b2b2b21",
+        "name": "Daily follow-up",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [260, 160]
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "atlas-follow-up",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "id": "d1b2e6b0-7c2b-4b2b-8b22-1b2b2b2b2b22",
+        "name": "Follow-up webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [260, 400],
+        "webhookId": "atlas-follow-up"
+      },
+      {
+        "parameters": {
+          "jsCode": "const input = $input.first().json;\nconst source = input.body_text ? input : (input.body && input.body.body_text ? input.body : input);\nreturn [{ json: source }];"
+        },
+        "id": "d1b2e6b0-7c2b-4b2b-8b22-1b2b2b2b2b23",
+        "name": "Normalize",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [520, 400]
+      },
+      {
+        "parameters": {
+          "jsCode": "const secret = $env.ATLAS_HOOK_SECRET || '';\nconst keyId = $env.ATLAS_HOOK_KEY_ID || '';\nconst api = $env.ATLAS_PUBLIC_API_URL || 'http://host.docker.internal:8000';\nif (!secret || !keyId) {\n  throw new Error('ATLAS hook credentials are not configured');\n}\nconst crypto = require('crypto');\nconst body = '{}';\nconst timestamp = Math.floor(Date.now() / 1000).toString();\nconst idem = `follow-up-${timestamp}`;\nconst signature = crypto.createHmac('sha256', secret).update(`${timestamp}.${idem}.${body}`).digest('hex');\nreturn [{ json: { callback_url: api + '/api/v1/hooks/follow-ups', headers: { 'X-ATLAS-Key-Id': keyId, 'X-ATLAS-Timestamp': timestamp, 'X-ATLAS-Idempotency-Key': idem, 'X-ATLAS-Signature': signature }, body_text: body } }];"
+        },
+        "id": "d1b2e6b0-7c2b-4b2b-8b22-1b2b2b2b2b25",
+        "name": "Sign schedule",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [520, 160]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ $json.callback_url }}",
+          "sendHeaders": true,
+          "specifyHeaders": "keypair",
+          "headerParameters": {
+            "parameters": [
+              { "name": "Content-Type", "value": "application/json" },
+              { "name": "X-ATLAS-Key-Id", "value": "={{ $json.headers['X-ATLAS-Key-Id'] }}" },
+              { "name": "X-ATLAS-Timestamp", "value": "={{ $json.headers['X-ATLAS-Timestamp'] }}" },
+              { "name": "X-ATLAS-Idempotency-Key", "value": "={{ $json.headers['X-ATLAS-Idempotency-Key'] }}" },
+              { "name": "X-ATLAS-Signature", "value": "={{ $json.headers['X-ATLAS-Signature'] }}" }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ $json.body_text }}",
+          "options": {}
+        },
+        "id": "d1b2e6b0-7c2b-4b2b-8b22-1b2b2b2b2b24",
+        "name": "Request follow-ups",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [800, 280]
+      }
+    ],
+    "connections": {
+      "Daily follow-up": { "main": [[{ "node": "Sign schedule", "type": "main", "index": 0 }]] },
+      "Sign schedule": { "main": [[{ "node": "Request follow-ups", "type": "main", "index": 0 }]] },
+      "Follow-up webhook": { "main": [[{ "node": "Normalize", "type": "main", "index": 0 }]] },
+      "Normalize": { "main": [[{ "node": "Request follow-ups", "type": "main", "index": 0 }]] }
+    }
+  }
+]

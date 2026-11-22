@@ -1,0 +1,66 @@
+import uuid
+from datetime import datetime
+
+from pydantic import BaseModel
+
+
+class WebhookKeyOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    secret: str
+
+
+class AttemptOut(BaseModel):
+    outcome: str
+    error: str | None
+    external_id: str | None
+    started_at: datetime
+
+
+class WorkflowRunOut(BaseModel):
+    id: uuid.UUID
+    kind: str
+    status: str
+    lead_id: uuid.UUID | None
+    agent_run_id: uuid.UUID | None
+    attempt_count: int
+    last_error: str | None
+    created_at: datetime
+    attempts: list[AttemptOut]
+
+
+class EmailDeliveryOut(BaseModel):
+    id: uuid.UUID
+    lead_id: uuid.UUID | None
+    status: str
+    mode: str
+    provider_message_id: str | None
+    error: str | None
+    sent_at: datetime | None
+
+
+class BookingOut(BaseModel):
+    id: uuid.UUID
+    lead_id: uuid.UUID
+    status: str
+    provider: str
+    starts_at: datetime
+    ends_at: datetime
+    provider_event_id: str | None
+
+
+class AutomationCard(BaseModel):
+    name: str
+    trigger: str
+    description: str
+
+
+class AutomationSnapshot(BaseModel):
+    email_mode: str
+    calendar_provider: str
+    n8n_configured: bool
+    webhook_configured: bool
+    automations: list[AutomationCard]
+    runs: list[WorkflowRunOut]
+    emails: list[EmailDeliveryOut]
+    bookings: list[BookingOut]
