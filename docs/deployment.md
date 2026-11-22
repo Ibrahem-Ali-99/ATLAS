@@ -12,7 +12,7 @@ Postgres, Mailpit, and n8n come from Compose. The API and web stay on the host s
 docker compose up -d postgres mailpit n8n
 ```
 
-`POSTGRES_PORT` in `.env` overrides the host port. This machine uses 5434 because another Postgres already owns 5432. Leave that override in place.
+`POSTGRES_PORT` in `.env` overrides the host port. The example uses 5432. If another Postgres already owns that port, set `POSTGRES_PORT` and the same port in `ATLAS_DATABASE_URL`. Do not commit that local override.
 
 Run the API from `apps/api` with `uv run uvicorn app.main:app --host 127.0.0.1 --port 8000`. Run the web from `apps/web` with `npm run dev` or `npm run start`. Do not also start the Compose `api` or `web` services while those host processes are running. They publish the same ports.
 

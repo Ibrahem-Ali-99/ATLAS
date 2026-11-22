@@ -4,7 +4,7 @@ Numbers below are from commands run on this workstation. They are not a hosted l
 
 ## Quality checks
 
-`.\scripts\check.ps1` runs Ruff, format, mypy, pytest, ESLint, the Next.js production build, TypeScript, and gitleaks. On 22 Nov 2026 that script reported 87 pytest tests passed and mypy clean for 94 files. Gitleaks is run again after the commits for this milestone. The browser test passed in 17.8 seconds.
+`.\scripts\check.ps1` runs Ruff, format, mypy, pytest, ESLint, the Next.js production build, TypeScript, and gitleaks. On 22 Nov 2026 that script reported 90 pytest tests passed, mypy clean for 94 files, and gitleaks with no leaks. The browser test is not part of that script. An earlier `npm run e2e` run passed in 17.8 seconds and was not repeated in this pass.
 
 `npm run e2e` in `apps/web` is the browser test. It uses database `atlas_e2e`, ports 8010 and 3010, and deterministic providers. It does not call a paid model.
 
