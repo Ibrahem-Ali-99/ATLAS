@@ -1,5 +1,62 @@
 # ATLAS product acceptance
 
+## Release acceptance
+
+This is the current verdict. It was recorded on 22 November 2026 after the local MCP, citation, provenance, and streaming commits. The API was `http://127.0.0.1:8000` and the production web app was `http://127.0.0.1:3000`. Nothing was pushed, deployed, or reset, and no credential was changed. Historical rows were not deleted or relabeled.
+
+`origin/main` is `985c9a5ccd366afdff25b0ccbf820cdc95185583`. Local `main` is ahead of that commit and has not been pushed. GitHub Actions has not run these local commits. The migration chain is linear from `20261122_0001` through `20261122_0011`. `0011` adds `origin` with server default `unknown` and does not update rows by name. `.env.example` still documents Postgres on port 5432, which matches CI. A local `.env` may use another port and is not committed. CI installs the API with `uv sync --frozen` and the web app with `npm ci`. `uv.lock` and `apps/web/package-lock.json` are in the repository. The workflow uses Python 3.12, Node 22, and `pgvector/pgvector:pg17` on port 5432.
+
+The API suite does not read the development database. Each test truncates `atlas_test`. Migration tests use `atlas_migration_test`. The skipped test calls Groq and Ollama only when `ATLAS_LIVE_PROVIDERS=yes`. The live numbers below depend on rows already stored in `atlas-demo`, including the earlier acceptance document and the provenance proof rows.
+
+### Streaming
+
+A grounded reply is no longer sent token by token before citation checks. The server reads the model stream, checks the completed draft against the retrieved rows, and emits one token whose text is the stored message. The production assistant shows "Checking the answer against company records" and then the stored answer. A turn with no retrieved rows still sends tokens as they arrive.
+
+The live question "How many bonded pallets does Acceptance Yard store?" returned one token, equal to the saved message "Acceptance Yard stores 42 bonded pallets." The only source title was `acceptance-yard-433129a2`. The production page showed the checking state and then that sentence with that source.
+
+### Checks run
+
+| Check | Result |
+|---|---|
+| Ruff check and format | Passed |
+| mypy | No issues in 108 source files |
+| pytest | 129 passed, 1 skipped |
+| ESLint, `next build`, `tsc --noEmit` | Passed. The build emitted 15 static routes |
+| Playwright `e2e/workspace.spec.ts` | 4 passed, including the narrow viewport walk |
+| gitleaks v8.30.1 | 73 commits scanned after the streaming commits, no leaks |
+| Sign-in, then logout | `GET /auth/me` was 200, logout was 204, the next `GET /auth/me` was 401 |
+| Staff list, staff approve, other organization | 200, 403, 404 |
+| Analytics scopes against SQL | No mismatch. Operational 1 lead and 0 inquiries. Demo 1 and 0. Evaluation 0 and 1. Legacy 8 and 10. All 10 and 11 |
+| Unsigned lead callback | 401 `webhook_unauthorized` |
+| Email mode and calendar | `sandbox` and `simulation` |
+| Agent start on this API | 201, status `awaiting_approval`, origin `evaluation`, knowledge step stored |
+| Approval of that run | The three proposals were rejected. Resume returned 200 and the run completed. No historical lead was rewritten |
+| Diagnostics | Operational failed runs: 0. Legacy and all: 7. The new run's linked traces are `agent_run` and `approval_decision` |
+
+### Verdict
+
+ATLAS is not release-ready. The local product can sign in, keep organizations apart, answer from a stored document without showing the draft, start an agent from the serving API, and keep operational counts separate from demo, evaluation, and legacy rows. That is not a deployed release. These checks are still required before that claim:
+
+- GitHub Actions on the unpushed commits, including the container build job.
+- A signed n8n callback that completes a workflow on this stack. This pass only proved that a missing signature is rejected.
+- A sandbox email send. This pass did not execute `prepare_customer_response`.
+- A second execute of a live approval that returns 409 without writing again. This pass rejected the live proposal because it would have updated an existing lead. The API suite covers that conflict on `atlas_test`.
+
+### Unresolved product limits
+
+These are not the reason the streaming or provenance work failed. They remain outside a release claim:
+
+- Rows that existed before `20261122_0011` stay `unknown` until a later explicit write. The operational view does not include them.
+- Operation traces have no origin. Diagnostic latency and cost use the latest traces in the organization, not the selected scope.
+- An MCP tool trace is stored without `agent_run_id`, so the run view does not list `mcp_tool`. The agent event still records `retrieve_knowledge`.
+- The approval queue is not filtered by origin, so a demo proposal stays decidable.
+- Calendar bookings are local simulation. Live email requires sandbox to be turned off and the live-send flag to be set.
+- Delivery is at-least-once with `needs_attention`. It is not exactly-once.
+- Citation checks compare the answer text with the retrieved rows. They are not a proof that every sentence is supported.
+- Settings does not install a webhook key.
+
+The sections below are the earlier pass from the same day, before the MCP interpreter fix, citation repair, provenance, and this streaming change.
+
 Acceptance pass on 22 November 2026. The API was `http://127.0.0.1:8000` and the production web app was `http://127.0.0.1:3000`. No page was redesigned, no database was reset, and no credential was changed. Records created for the scenarios were left in place.
 
 The capability map is `docs/product-audit.md`.
@@ -188,4 +245,4 @@ These are deliberate or already bounded, and they are not the broken agent path:
 
 ## Readiness verdict
 
-ATLAS can record a customer, index a document, answer from that document with Groq, dispatch a lead through n8n, and decide an existing agent proposal. It cannot start that proposal from the API process the product is using. On a run that was created outside that process, an admin approved the CRM write, rejected the email and the appointment, and resume wrote the lead notes once. A second execute was rejected. Staff could not reject. Another organization could not read the company. Business counts still mix demonstration and operational rows. The product is an operations shell with a broken agent start on this deployment, not a closed inquiry-to-approval workflow.
+Superseded by the release acceptance section at the top. That section is the current verdict: the local product separates those records and can start an agent, and it is not release-ready until the unpushed commits pass GitHub Actions and the live n8n, sandbox email, and repeat-execute checks have been run.
