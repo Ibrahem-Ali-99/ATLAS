@@ -8,8 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import type { Approval, ApprovalStatus } from "@/lib/agent";
-import { decideApproval, listApprovals, resumeAgentRun } from "@/lib/agent-api";
+import { executionSummary, type Approval, type ApprovalStatus } from "@/lib/agent";
+import { decideApproval, executeApproval, listApprovals, resumeAgentRun } from "@/lib/agent-api";
 import { useWorkspace } from "@/lib/use-workspace";
 
 const selectClass =
@@ -83,6 +83,14 @@ function ApprovalsBody({
       await queryClient.invalidateQueries({ queryKey: ["agent-runs", organizationId] });
     },
   });
+  const execute = useMutation({
+    mutationFn: (approvalId: string) => executeApproval(organizationId, approvalId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["approvals", organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ["agent-runs", organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ["automations", organizationId] });
+    },
+  });
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.9fr)]">
@@ -99,7 +107,9 @@ function ApprovalsBody({
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
             <option value="executed">Executed</option>
+            <option value="executing">Executing</option>
             <option value="failed">Failed</option>
+            <option value="needs_attention">Needs attention</option>
             <option value="expired">Expired</option>
           </select>
         </div>
@@ -134,9 +144,11 @@ function ApprovalsBody({
             onNote={onNote}
             deciding={decide.isPending}
             resuming={resume.isPending}
-            error={decide.error ?? resume.error}
+            executing={execute.isPending}
+            error={decide.error ?? resume.error ?? execute.error}
             onDecide={(decision) => decide.mutate(decision)}
             onResume={() => resume.mutate(selected.run_id)}
+            onExecute={() => execute.mutate(selected.id)}
           />
         ) : null}
       </section>
@@ -151,9 +163,11 @@ function ApprovalDetail({
   onNote,
   deciding,
   resuming,
+  executing,
   error,
   onDecide,
   onResume,
+  onExecute,
 }: {
   approval: Approval;
   isAdmin: boolean;
@@ -161,9 +175,11 @@ function ApprovalDetail({
   onNote: (note: string) => void;
   deciding: boolean;
   resuming: boolean;
+  executing: boolean;
   error: unknown;
   onDecide: (decision: "approve" | "reject") => void;
   onResume: () => void;
+  onExecute: () => void;
 }) {
   return (
     <div className="space-y-4">
@@ -182,11 +198,8 @@ function ApprovalDetail({
         {approval.decision_note ? <div>Note: {approval.decision_note}</div> : null}
       </dl>
       <pre className="overflow-x-auto rounded-md bg-background p-3 text-xs">{JSON.stringify(approval.payload, null, 2)}</pre>
-      {approval.execution_result ? (
-        <p className="text-sm text-muted-foreground">
-          Lead {approval.execution_result.lead_id ?? "not recorded"}
-          {approval.execution_result.interaction_id ? `, interaction ${approval.execution_result.interaction_id}` : ""}
-        </p>
+      {executionSummary(approval.execution_result) ? (
+        <p className="text-sm text-muted-foreground">{executionSummary(approval.execution_result)}</p>
       ) : null}
       {approval.execution_error ? <p className="text-sm text-red-300">{approval.execution_error}</p> : null}
       {approval.status === "pending" && isAdmin ? (
@@ -204,6 +217,11 @@ function ApprovalDetail({
       ) : null}
       {approval.status === "pending" && !isAdmin ? (
         <p className="text-sm text-muted-foreground">An admin has to approve or reject this action.</p>
+      ) : null}
+      {approval.status === "approved" && isAdmin ? (
+        <Button type="button" disabled={executing} onClick={onExecute}>
+          {executing ? "Executing" : "Execute"}
+        </Button>
       ) : null}
       {approval.status !== "pending" ? (
         <Button type="button" variant="outline" disabled={resuming} onClick={onResume}>

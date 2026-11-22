@@ -9,7 +9,8 @@ export type ApprovalStatus =
   | "executing"
   | "executed"
   | "failed"
-  | "expired";
+  | "expired"
+  | "needs_attention";
 
 export type ActionType =
   | "create_lead"
@@ -44,7 +45,37 @@ export type AgentRun = {
 export type ExecutionResult = {
   lead_id?: string;
   interaction_id?: string;
+  email_id?: string;
+  message_id?: string;
+  email_mode?: string;
+  booking_id?: string;
+  provider?: string;
 };
+
+export function executionSummary(result: ExecutionResult | null): string | null {
+  if (!result) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (result.lead_id) {
+    parts.push(`Lead ${result.lead_id}`);
+  }
+  if (result.interaction_id) {
+    parts.push(`interaction ${result.interaction_id}`);
+  }
+  if (result.email_id) {
+    const mode = result.email_mode === "live" ? "live email" : "sandbox email";
+    parts.push(`${mode} ${result.email_id}`);
+  }
+  if (result.message_id) {
+    parts.push(`message ${result.message_id}`);
+  }
+  if (result.booking_id) {
+    const calendar = result.provider === "simulation" ? "simulated calendar" : "calendar";
+    parts.push(`${calendar} booking ${result.booking_id}`);
+  }
+  return parts.length > 0 ? parts.join(", ") : null;
+}
 
 export type Approval = {
   id: string;

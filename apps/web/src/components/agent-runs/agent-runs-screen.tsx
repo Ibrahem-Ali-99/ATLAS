@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getAgentRun, listAgentRuns, resumeAgentRun, startAgentRun } from "@/lib/agent-api";
-import type { AgentRunDetail, RunStatus } from "@/lib/agent";
+import { executionSummary, type AgentRunDetail, type RunStatus } from "@/lib/agent";
 import { listInquiries } from "@/lib/records-api";
 import { useWorkspace } from "@/lib/use-workspace";
 
@@ -215,11 +215,8 @@ function RunDetail({
                 <Badge variant="secondary">{approval.status}</Badge>
               </div>
               <pre className="overflow-x-auto rounded-md bg-background p-2 text-xs">{JSON.stringify(approval.payload, null, 2)}</pre>
-              {approval.execution_result ? (
-                <p className="mt-2 text-muted-foreground">
-                  Lead {approval.execution_result.lead_id ?? "not recorded"}
-                  {approval.execution_result.interaction_id ? `, interaction ${approval.execution_result.interaction_id}` : ""}
-                </p>
+              {executionSummary(approval.execution_result) ? (
+                <p className="mt-2 text-muted-foreground">{executionSummary(approval.execution_result)}</p>
               ) : null}
               {approval.execution_error ? <p className="mt-2 text-red-300">{approval.execution_error}</p> : null}
             </article>

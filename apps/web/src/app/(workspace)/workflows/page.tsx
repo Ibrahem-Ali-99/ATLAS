@@ -1,16 +1,11 @@
 import type { Metadata } from "next";
 
-import { UnavailableModule } from "@/components/unavailable-module";
+import { WorkflowsScreen } from "@/components/workflows/workflows-screen";
 
 export const metadata: Metadata = {
   title: "Workflows",
 };
 
 export default function WorkflowsPage() {
-  return (
-    <UnavailableModule
-      title="Workflows"
-      description="Workflow automation is not available in this release."
-    />
-  );
+  return <WorkflowsScreen />;
 }
