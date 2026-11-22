@@ -32,9 +32,7 @@ def server_parameters(organization_id: uuid.UUID) -> StdioServerParameters:
         "ATLAS_DATABASE_URL": _env("ATLAS_DATABASE_URL", settings.database_url),
         "ATLAS_SECRET_KEY": _env("ATLAS_SECRET_KEY", settings.secret_key),
         "ATLAS_ENVIRONMENT": _env("ATLAS_ENVIRONMENT", settings.environment),
-        "ATLAS_EMBEDDING_PROVIDER": _env(
-            "ATLAS_EMBEDDING_PROVIDER", settings.embedding_provider
-        ),
+        "ATLAS_EMBEDDING_PROVIDER": _env("ATLAS_EMBEDDING_PROVIDER", settings.embedding_provider),
         "ATLAS_LLM_PROVIDER": _env("ATLAS_LLM_PROVIDER", settings.llm_provider),
         "ATLAS_EMBEDDING_API_KEY": _env("ATLAS_EMBEDDING_API_KEY", settings.embedding_api_key),
         "ATLAS_EMBEDDING_BASE_URL": _env("ATLAS_EMBEDDING_BASE_URL", settings.embedding_base_url),
