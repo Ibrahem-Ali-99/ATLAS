@@ -1,0 +1,19 @@
+---
+description: Naming, function shape, and comments for ATLAS
+alwaysApply: true
+---
+
+# Code quality and naming
+
+Name a function or type for the business responsibility it owns. Prefer the domain word already used in the code (`membership`, `session`, `organization`) over `Manager`, `Helper`, `Processor`, or `Utils`.
+
+- Keep a function on one job. Split it when a reader has to jump between unrelated steps, not because a line budget says so.
+- Match existing names and module layout. Do not rename working code for taste.
+- Comments explain a non-obvious business rule or a constraint the code cannot show. Do not narrate the next line.
+- Do not add an abstraction only to shorten a file. Duplicate a short, stable expression until a real caller needs the same behavior.
+- Do not commit generated caches, lockfile churn without a dependency change, or boilerplate that nothing imports.
+
+```python
+def get_active_session(db: Session, session_id: uuid.UUID) -> UserSession | None:
+    ...
+```

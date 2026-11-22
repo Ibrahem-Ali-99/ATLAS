@@ -1,0 +1,22 @@
+---
+description: Python and FastAPI standards for the ATLAS API
+globs: apps/api/**/*.py
+alwaysApply: false
+---
+
+# Python and FastAPI
+
+Follow PEP 8 and the Ruff configuration in `apps/api/pyproject.toml`. Use `snake_case` for functions and variables, `PascalCase` for classes, and `UPPER_SNAKE_CASE` for constants.
+
+- Annotate public functions, service boundaries, and Pydantic models. Request and response bodies use explicit Pydantic models, not bare dicts.
+- Keep route handlers synchronous unless the work is actually async. Do not call blocking SQLAlchemy or password hashing from an `async def` endpoint.
+- One request uses one database session. Commit in the service when the unit of work succeeds, and roll back on failure. Do not hide `commit()` inside ORM model methods.
+- Schema changes go through Alembic. Do not mutate production tables outside a migration.
+- Catch specific exceptions. A broad `except` is allowed only to roll back or log an unhandled boundary, and it must re-raise or return a deliberate error response.
+- Log structured events with ids and error types. Do not log secrets, passwords, session cookies, CSRF tokens, or exception text that may contain a database URL.
+
+```python
+def revoke_session(db: Session, record: UserSession) -> None:
+    record.revoked_at = datetime.now(UTC)
+    db.commit()
+```

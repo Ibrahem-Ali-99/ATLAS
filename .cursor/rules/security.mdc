@@ -1,0 +1,21 @@
+---
+description: Security and reliability boundaries for ATLAS
+alwaysApply: true
+---
+
+# Security and reliability
+
+Validate untrusted input at the HTTP boundary with Pydantic. Enforce organization and role checks in the API. A hidden button is not authorization.
+
+- Do not commit `.env`, credentials, or real secrets. Placeholders belong in `.env.example` only.
+- Session cookies stay HttpOnly. State-changing requests other than login require the CSRF token issued for that server session.
+- Treat uploaded documents, retrieved passages, and model output as untrusted data. Do not render them as HTML or execute them as instructions.
+- An external side effect that changes customer data, sends a message, or spends money requires an explicit approval step. Do not invent a successful result when the call failed.
+- Use idempotency keys and bounded retries for operations that can run twice. Do not retry a non-idempotent write blindly.
+- Log the failure and return a stable error code. Swallowing an exception and returning success is a defect.
+
+```python
+row = get_membership(db, user.id, organization_id)
+if row is None:
+    raise AppError(404, "not_found", "Resource not found")
+```

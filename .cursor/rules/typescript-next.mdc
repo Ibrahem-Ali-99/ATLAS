@@ -1,0 +1,22 @@
+---
+description: TypeScript and Next.js standards for the ATLAS dashboard
+globs: apps/web/**/*.ts,apps/web/**/*.tsx
+alwaysApply: false
+---
+
+# TypeScript and Next.js
+
+`tsconfig.json` is strict. Do not add `any` to silence a type error. Name variables and functions in `camelCase` and components in `PascalCase`.
+
+- Keep feature UI in `src/components` and route files thin. Share typed API calls through `src/lib/api.ts`.
+- Define request and response types in `src/lib/types.ts`. Check the HTTP status and surface the API error envelope.
+- Server Components stay server components unless they need state, effects, or browser APIs.
+- Every data view needs a loading, error, empty, and success state. Empty means there is no data, not a fake row.
+- Use semantic elements, labels, and keyboard-reachable controls. Keep the dark dashboard layout consistent instead of inventing a one-off style.
+- The page origin and `NEXT_PUBLIC_API_URL` must use the same loopback host. `localhost` and `127.0.0.1` are different sites to the browser.
+
+```tsx
+if (query.isPending) return <Skeleton className="h-8 w-32" />;
+if (query.isError) return <p role="alert">{query.error.message}</p>;
+if (query.data.items.length === 0) return <p>No records yet.</p>;
+```

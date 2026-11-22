@@ -1,0 +1,22 @@
+---
+description: How to test ATLAS behavior, authorization, and regressions
+globs: apps/api/tests/**/*.py,apps/web/**/*.test.ts,apps/web/**/*.test.tsx,apps/web/**/*.spec.ts,apps/web/**/*.spec.tsx
+alwaysApply: false
+---
+
+# Testing
+
+Test what a caller can observe: status codes, error codes, persisted rows, and response bodies. Do not assert private call order.
+
+- Include the negative path. Authentication, CSRF, role, and organization boundaries need a denied case, not only a happy path.
+- Build fixtures in `tests/factories.py`. Tests must not depend on execution order or on the developer database contents.
+- Truncate only `atlas_test`. Refuse to run destructive setup against any other database name.
+- When a defect is fixed, add a regression test that failed before the fix.
+- Do not mock the function under test. Mock an external boundary only when the test cannot run it.
+- Keep existing tests. A new implementation that requires deleting a behavior test needs a replacement that covers the same behavior.
+- Never claim a test passed unless that command was executed and its result was seen.
+
+```python
+assert response.status_code == 404
+assert response.json()["error"]["code"] == "not_found"
+```
