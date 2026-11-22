@@ -2,7 +2,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { useState } from "react";
 
+import { DataScopeControl } from "@/components/data-scope";
 import { RequestError } from "@/components/request-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Approval } from "@/lib/agent";
@@ -10,6 +12,7 @@ import { listAgentRuns, listApprovals } from "@/lib/agent-api";
 import { getHealth, getReady } from "@/lib/api";
 import { getAutomations, type WorkflowRun } from "@/lib/automations";
 import { getAnalytics, type AnalyticsSnapshot, type StatusCount } from "@/lib/intelligence";
+import type { DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
 
 const PIPELINE = [
@@ -21,9 +24,10 @@ const PIPELINE = [
 export function OverviewScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
+  const [scope, setScope] = useState<DataScope>("operational");
   const analytics = useQuery({
-    queryKey: ["analytics", organizationId],
-    queryFn: () => getAnalytics(organizationId ?? ""),
+    queryKey: ["analytics", organizationId, scope],
+    queryFn: () => getAnalytics(organizationId ?? "", scope),
     enabled: Boolean(organizationId),
   });
   const approvals = useQuery({
@@ -32,13 +36,13 @@ export function OverviewScreen() {
     enabled: Boolean(organizationId),
   });
   const failures = useQuery({
-    queryKey: ["inbox-runs", organizationId, "failed"],
-    queryFn: () => listAgentRuns(organizationId ?? "", { status: "failed" }),
+    queryKey: ["inbox-runs", organizationId, "failed", scope],
+    queryFn: () => listAgentRuns(organizationId ?? "", { status: "failed", scope }),
     enabled: Boolean(organizationId),
   });
   const automations = useQuery({
-    queryKey: ["automations", organizationId],
-    queryFn: () => getAutomations(organizationId ?? ""),
+    queryKey: ["automations", organizationId, scope],
+    queryFn: () => getAutomations(organizationId ?? "", scope),
     enabled: Boolean(organizationId),
   });
   const health = useQuery({ queryKey: ["health"], queryFn: getHealth, retry: false });
@@ -51,8 +55,9 @@ export function OverviewScreen() {
         <p className="mt-3 max-w-3xl text-[13px] text-muted-foreground">
           Decisions, customer activity and execution health
         </p>
+        <DataScopeControl value={scope} onChange={setScope} />
         {analytics.data ? (
-          <p className="mt-2 max-w-3xl text-xs leading-5 text-subtle">{analytics.data.synthetic_notice}</p>
+          <p className="mt-2 max-w-3xl text-xs leading-5 text-subtle">{analytics.data.provenance_notice}</p>
         ) : null}
       </header>
       {analytics.isPending ? <Skeleton className="h-36 w-full" /> : null}

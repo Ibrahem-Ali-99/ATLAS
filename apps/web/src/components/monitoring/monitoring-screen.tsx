@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { DataScopeControl } from "@/components/data-scope";
 import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getDiagnosticRun, getDiagnostics, listEvaluations, startEvaluation, type DiagnosticRun } from "@/lib/intelligence";
+import type { DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
 
 export function MonitoringScreen() {
@@ -17,9 +19,10 @@ export function MonitoringScreen() {
   const queryClient = useQueryClient();
   const requestedRun = useSearchParams().get("run");
   const [runId, setRunId] = useState<string | null>(requestedRun);
+  const [scope, setScope] = useState<DataScope>("operational");
   const diagnostics = useQuery({
-    queryKey: ["diagnostics", organizationId],
-    queryFn: () => getDiagnostics(organizationId ?? ""),
+    queryKey: ["diagnostics", organizationId, scope],
+    queryFn: () => getDiagnostics(organizationId ?? "", scope),
     enabled: Boolean(organizationId),
   });
   const evaluations = useQuery({
@@ -55,6 +58,7 @@ export function MonitoringScreen() {
     <div className="w-full space-y-6">
       <div>
         <h1 className="text-[31px] leading-none text-foreground">Monitoring</h1>
+        <DataScopeControl value={scope} onChange={setScope} />
         <p className="mt-3 max-w-3xl text-sm text-muted-foreground">{data.hint_notice}</p>
         <p className="mt-2 max-w-3xl text-xs leading-5 text-subtle">
           Failed runs are historical records. Needs attention and integration failures are outcomes that still need a look.

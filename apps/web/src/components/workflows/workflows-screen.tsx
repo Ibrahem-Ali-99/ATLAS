@@ -4,10 +4,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
+import { DataScopeControl } from "@/components/data-scope";
 import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cancelBooking, getAutomations, type AutomationSnapshot, type WorkflowRun } from "@/lib/automations";
+import type { DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
 
 export function WorkflowsScreen() {
@@ -15,9 +17,10 @@ export function WorkflowsScreen() {
   const organizationId = workspace.organizationId;
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<string | null>(null);
+  const [scope, setScope] = useState<DataScope>("operational");
   const automations = useQuery({
-    queryKey: ["automations", organizationId],
-    queryFn: () => getAutomations(organizationId ?? ""),
+    queryKey: ["automations", organizationId, scope],
+    queryFn: () => getAutomations(organizationId ?? "", scope),
     enabled: Boolean(organizationId),
   });
   const cancel = useMutation({
@@ -35,6 +38,8 @@ export function WorkflowsScreen() {
   return (
     <WorkflowsBody
       data={automations.data}
+      scope={scope}
+      onScope={setScope}
       kind={kind}
       onKind={setKind}
       isAdmin={workspace.role === "admin"}
@@ -47,6 +52,8 @@ export function WorkflowsScreen() {
 
 function WorkflowsBody({
   data,
+  scope,
+  onScope,
   kind,
   onKind,
   isAdmin,
@@ -55,6 +62,8 @@ function WorkflowsBody({
   onCancel,
 }: {
   data: AutomationSnapshot;
+  scope: DataScope;
+  onScope: (scope: DataScope) => void;
   kind: string | null;
   onKind: (kind: string | null) => void;
   isAdmin: boolean;
@@ -72,6 +81,7 @@ function WorkflowsBody({
           Installed business processes, observable outcomes and safe recovery actions.
         </p>
         <p className="mt-2 max-w-4xl text-xs leading-5 text-subtle">{configurationCopy(data)}</p>
+        <DataScopeControl value={scope} onChange={onScope} />
       </header>
       <section className="grid gap-4 lg:grid-cols-2">
         {data.automations.map((automation) => (

@@ -2,19 +2,23 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { useState } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { DataScopeControl } from "@/components/data-scope";
 import { RequestError } from "@/components/request-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAnalytics, type AnalyticsSnapshot, type StatusCount } from "@/lib/intelligence";
+import type { DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
 
 export function AnalyticsScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
+  const [scope, setScope] = useState<DataScope>("operational");
   const analytics = useQuery({
-    queryKey: ["analytics", organizationId],
-    queryFn: () => getAnalytics(organizationId ?? ""),
+    queryKey: ["analytics", organizationId, scope],
+    queryFn: () => getAnalytics(organizationId ?? "", scope),
     enabled: Boolean(organizationId),
   });
   if (!organizationId || analytics.isPending) {
@@ -23,10 +27,18 @@ export function AnalyticsScreen() {
   if (analytics.isError) {
     return <RequestError error={analytics.error} />;
   }
-  return <AnalyticsBody data={analytics.data} />;
+  return <AnalyticsBody data={analytics.data} scope={scope} onScope={setScope} />;
 }
 
-function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
+function AnalyticsBody({
+  data,
+  scope,
+  onScope,
+}: {
+  data: AnalyticsSnapshot;
+  scope: DataScope;
+  onScope: (scope: DataScope) => void;
+}) {
   const rate = data.conversion.rate === null ? "Not enough closed leads" : `${Math.round(data.conversion.rate * 1000) / 10}%`;
   const automation =
     data.automation.success_rate === null ? "No completed or failed runs" : `${Math.round(data.automation.success_rate * 1000) / 10}%`;
@@ -34,19 +46,20 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
     <div className="flex w-full min-w-0 flex-col gap-6">
       <div>
         <h1 className="text-[31px] leading-none text-foreground">Analytics</h1>
-        <p className="mt-3 max-w-3xl text-sm text-muted-foreground">{data.synthetic_notice}</p>
+        <DataScopeControl value={scope} onChange={onScope} />
+        <p className="mt-3 max-w-3xl text-sm text-muted-foreground">{data.provenance_notice}</p>
         <p className="mt-2 max-w-3xl text-xs leading-5 text-subtle">
           Lead creation counts use the last {data.window_days} days, including days with zero. The window is fixed by the API.
         </p>
       </div>
       {data.leads_total === 0 && data.inquiries_total === 0 ? (
         <p className="rounded-[10px] bg-muted p-4 text-sm text-muted-foreground">
-          No leads or inquiries are stored for this organization yet.
+          No leads or inquiries are stored in this scope.
         </p>
       ) : null}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Leads" value={String(data.leads_total)} detail="All stored leads." />
-        <Metric label="Inquiries" value={String(data.inquiries_total)} detail="All stored inquiries." />
+        <Metric label="Leads" value={String(data.leads_total)} detail="Leads in the selected scope." />
+        <Metric label="Inquiries" value={String(data.inquiries_total)} detail="Inquiries in the selected scope." />
         <Metric
           label="Won or lost"
           value={rate}

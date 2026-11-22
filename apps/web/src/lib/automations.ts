@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import type { DataScope } from "@/lib/provenance";
 
 export type WorkflowAttempt = {
   outcome: string;
@@ -66,8 +67,11 @@ function organizationPath(organizationId: string, path: string): string {
   return `/api/v1/organizations/${organizationId}${path}`;
 }
 
-export function getAutomations(organizationId: string): Promise<AutomationSnapshot> {
-  return apiFetch(organizationPath(organizationId, "/automations"));
+export function getAutomations(
+  organizationId: string,
+  scope: DataScope = "operational",
+): Promise<AutomationSnapshot> {
+  return apiFetch(organizationPath(organizationId, `/automations?scope=${scope}`));
 }
 
 export function cancelBooking(organizationId: string, bookingId: string): Promise<CalendarBooking> {

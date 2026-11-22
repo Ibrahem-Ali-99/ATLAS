@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { DataScopeControl } from "@/components/data-scope";
 import { Pager } from "@/components/pager";
 import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { getAgentRun, listAgentRuns, resumeAgentRun, startAgentRun } from "@/lib
 import { executionSummary, type AgentEvent, type AgentRunDetail, type RunStatus } from "@/lib/agent";
 import { getDiagnosticRun } from "@/lib/intelligence";
 import { listInquiries } from "@/lib/records-api";
+import type { DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
 
 const selectClass =
@@ -62,11 +64,12 @@ function AgentRunsBody({
   onOpen: (open: boolean) => void;
 }) {
   const queryClient = useQueryClient();
+  const [scope, setScope] = useState<DataScope>("operational");
   const [page, setPage] = useState(1);
   const [inquiryQuery, setInquiryQuery] = useState("");
   const runs = useQuery({
-    queryKey: ["agent-runs", organizationId, status, page],
-    queryFn: () => listAgentRuns(organizationId, { status, page }),
+    queryKey: ["agent-runs", organizationId, status, page, scope],
+    queryFn: () => listAgentRuns(organizationId, { status, page, scope }),
   });
   const detail = useQuery({
     queryKey: ["agent-run", organizationId, selectedId],
@@ -94,6 +97,7 @@ function AgentRunsBody({
       <p className="mt-3 max-w-3xl text-sm text-muted-foreground">
         One inquiry, stored steps, and proposals that wait for a person. Nothing is written until an approval is executed.
       </p>
+      <DataScopeControl value={scope} onChange={setScope} />
     </header>
     <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
       <section className="min-w-0 overflow-x-auto rounded-[10px] bg-muted">
