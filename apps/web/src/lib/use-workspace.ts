@@ -10,6 +10,7 @@ export function useWorkspace() {
   return {
     organizationId: membership?.organization_id ?? null,
     organizationName: membership?.organization_name ?? null,
+    role: membership?.role ?? null,
     userId: session.data?.user.id ?? null,
   };
 }
