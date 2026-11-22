@@ -42,12 +42,28 @@ class Settings(BaseSettings):
     session_cookie_name: str = "atlas_session"
     session_ttl_hours: int = Field(default=12, ge=1, le=168)
     log_level: str = "INFO"
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_api_key: str = ""
+    llm_model: str = "gpt-4o-mini"
+    embedding_base_url: str = "https://api.openai.com/v1"
+    embedding_api_key: str = ""
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+    max_upload_bytes: int = Field(default=10_485_760, ge=1, le=52_428_800)
+    storage_dir: str = ""
 
     @field_validator("database_url")
     @classmethod
     def database_url_must_be_postgres(cls, value: str) -> str:
         if not value.startswith("postgresql"):
             raise ValueError("ATLAS_DATABASE_URL must be a PostgreSQL URL")
+        return value
+
+    @field_validator("embedding_dimensions")
+    @classmethod
+    def embedding_dimensions_match_schema(cls, value: int) -> int:
+        if value != 1536:
+            raise ValueError("ATLAS_EMBEDDING_DIMENSIONS must be 1536 for the current schema")
         return value
 
     @field_validator("log_level")
@@ -77,6 +93,14 @@ class Settings(BaseSettings):
     @property
     def session_max_age_seconds(self) -> int:
         return self.session_ttl_hours * 60 * 60
+
+    @property
+    def upload_storage_dir(self) -> Path:
+        if self.storage_dir.strip():
+            return Path(self.storage_dir).expanduser()
+        if REPO_ROOT is not None:
+            return REPO_ROOT / "var" / "atlas-storage"
+        return Path("var") / "atlas-storage"
 
 
 @lru_cache
