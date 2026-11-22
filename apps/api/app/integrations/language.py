@@ -95,12 +95,16 @@ class OpenAICompatibleChatClient:
                 if not line.startswith("data:"):
                     continue
                 data = line.removeprefix("data:").strip()
+                if not data:
+                    continue
                 if data == "[DONE]":
                     break
                 try:
                     payload = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
+                except json.JSONDecodeError as exc:
+                    raise AppError(
+                        502, "llm_failed", "The language model returned an unexpected response"
+                    ) from exc
                 if not isinstance(payload, dict):
                     raise AppError(
                         502, "llm_failed", "The language model returned an unexpected response"

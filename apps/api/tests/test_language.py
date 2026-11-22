@@ -129,9 +129,39 @@ def test_usage_is_stored_under_the_model_that_produced_it(
     assert recorded[1]["model_name"] == settings.llm_model
 
 
-def test_chat_stream_keeps_tokens_and_rejects_provider_errors(
+def test_chat_stream_yields_tokens_and_ignores_non_content_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "app.domains.observability.tracing.record_operation",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        httpx,
+        "stream",
+        lambda *_args, **_kwargs: _Stream(
+            200,
+            [
+                ": keep-alive",
+                "event: message",
+                "",
+                "data:",
+                'data: {"choices":[{"delta":{"role":"assistant"}}]}',
+                'data: {"choices":[{"delta":{"content":"Cold"}}]}',
+                'data: {"choices":[{"delta":{"content":" storage"}}]}',
+                'data: {"choices":[]}',
+                'data: {"usage":{"prompt_tokens":2,"completion_tokens":2}}',
+                "data: [DONE]",
+                'data: {"choices":[{"delta":{"content":"ignored"}}]}',
+            ],
+        ),
+    )
+    client = OpenAICompatibleChatClient(_configured())
+    assert list(client.stream("system", "user")) == ["Cold", " storage"]
+    assert client.complete("system", "user") == "Cold storage"
+
+
+def test_malformed_stream_data_is_a_provider_error(monkeypatch: pytest.MonkeyPatch) -> None:
     streams = iter(
         [
             _Stream(
@@ -139,10 +169,27 @@ def test_chat_stream_keeps_tokens_and_rejects_provider_errors(
                 [
                     'data: {"choices":[{"delta":{"content":"Cold"}}]}',
                     "data: not-json",
-                    'data: {"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}',
-                    "data: [DONE]",
+                    'data: {"choices":[{"delta":{"content":" storage"}}]}',
                 ],
             ),
+            _Stream(200, ["data: {"]),
+        ]
+    )
+    monkeypatch.setattr(httpx, "stream", lambda *_args, **_kwargs: next(streams))
+    client = OpenAICompatibleChatClient(_configured())
+    chunks = client.stream("system", "user")
+    assert next(chunks) == "Cold"
+    with pytest.raises(AppError) as streamed:
+        next(chunks)
+    assert streamed.value.code == "llm_failed"
+    with pytest.raises(AppError) as completed:
+        client.complete("system", "user")
+    assert completed.value.code == "llm_failed"
+
+
+def test_chat_stream_rejects_provider_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    streams = iter(
+        [
             _Stream(200, ['data: {"error":{"message":"bad"}}']),
             _Stream(200, ['data: ["nope"]']),
             _Stream(502, ["data: {}"]),
@@ -150,7 +197,6 @@ def test_chat_stream_keeps_tokens_and_rejects_provider_errors(
     )
     monkeypatch.setattr(httpx, "stream", lambda *_args, **_kwargs: next(streams))
     client = OpenAICompatibleChatClient(_configured())
-    assert client.complete("system", "user") == "Cold"
     for _ in range(3):
         with pytest.raises(AppError) as exc:
             client.complete("system", "user")
