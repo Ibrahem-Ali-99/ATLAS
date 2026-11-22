@@ -47,9 +47,11 @@ class Settings(BaseSettings):
     session_cookie_name: str = "atlas_session"
     session_ttl_hours: int = Field(default=12, ge=1, le=168)
     log_level: str = "INFO"
+    llm_provider: Literal["openai", "double"] = "openai"
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
+    embedding_provider: Literal["openai", "double"] = "openai"
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"
@@ -121,6 +123,10 @@ class Settings(BaseSettings):
             raise ValueError("ATLAS_EMAIL_LIVE_ENABLED must be true when ATLAS_EMAIL_MODE is live")
         if self.email_mode == "sandbox" and not _local_smtp_host(self.smtp_host):
             raise ValueError("ATLAS_SMTP_HOST must be local while email mode is sandbox")
+        if self.environment == "production" and (
+            self.llm_provider == "double" or self.embedding_provider == "double"
+        ):
+            raise ValueError("Deterministic providers are not allowed in production")
         return self
 
     @property

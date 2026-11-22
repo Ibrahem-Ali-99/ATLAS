@@ -42,6 +42,16 @@ def test_production_requires_secure_cookies() -> None:
         )
 
 
+def test_production_rejects_deterministic_providers() -> None:
+    with pytest.raises(ValidationError):
+        _settings(
+            environment="production",
+            secret_key="a-real-production-secret-key-value",
+            cookie_secure=True,
+            llm_provider="double",
+        )
+
+
 def test_secure_cookie_flag_follows_configuration() -> None:
     settings = get_settings().model_copy(update={"cookie_secure": True})
     response = Response()
@@ -49,3 +59,4 @@ def test_secure_cookie_flag_follows_configuration() -> None:
     header = response.headers["set-cookie"].lower()
     assert "secure" in header
     assert "httponly" in header
+    assert "samesite=lax" in header

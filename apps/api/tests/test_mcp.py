@@ -13,6 +13,13 @@ from app.integrations.business_mcp import server_parameters
 from tests.factories import make_membership, make_organization, make_user
 
 
+def test_mcp_child_receives_the_embedding_provider(monkeypatch) -> None:
+    monkeypatch.setenv("ATLAS_EMBEDDING_PROVIDER", "double")
+    env = server_parameters(uuid.uuid4()).env
+    assert env is not None
+    assert env["ATLAS_EMBEDDING_PROVIDER"] == "double"
+
+
 def test_mcp_stdio_session_is_read_only_and_organization_scoped(db: Session) -> None:
     """Uses a stdio MCP client and server. This is not a direct Python call."""
 

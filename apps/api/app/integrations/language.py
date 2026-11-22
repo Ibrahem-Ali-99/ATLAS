@@ -172,8 +172,18 @@ def _log_usage(event: str, payload: dict[str, Any]) -> None:
 
 
 def get_embedding_client() -> EmbeddingClient:
-    return OpenAICompatibleEmbeddingClient(get_settings())
+    settings = get_settings()
+    if settings.embedding_provider == "double":
+        from app.integrations.doubles import DeterministicEmbeddingClient
+
+        return DeterministicEmbeddingClient()
+    return OpenAICompatibleEmbeddingClient(settings)
 
 
 def get_chat_client() -> ChatClient:
-    return OpenAICompatibleChatClient(get_settings())
+    settings = get_settings()
+    if settings.llm_provider == "double":
+        from app.integrations.doubles import DeterministicChatClient
+
+        return DeterministicChatClient()
+    return OpenAICompatibleChatClient(settings)
