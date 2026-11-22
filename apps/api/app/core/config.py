@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     webhook_max_bytes: int = Field(default=65_536, ge=32, le=1_048_576)
     webhook_skew_seconds: int = Field(default=300, ge=30, le=3600)
     webhook_rate_limit: int = Field(default=30, ge=1, le=300)
+    model_dir: str = ""
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = ""
+    llm_input_usd_per_million: float | None = None
+    llm_output_usd_per_million: float | None = None
 
     @field_validator("database_url")
     @classmethod
@@ -84,6 +90,13 @@ class Settings(BaseSettings):
     def embedding_dimensions_match_schema(cls, value: int) -> int:
         if value != 1536:
             raise ValueError("ATLAS_EMBEDDING_DIMENSIONS must be 1536 for the current schema")
+        return value
+
+    @field_validator("llm_input_usd_per_million", "llm_output_usd_per_million", mode="before")
+    @classmethod
+    def empty_price_is_unavailable(cls, value: object) -> object:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
         return value
 
     @field_validator("log_level")
@@ -117,6 +130,14 @@ class Settings(BaseSettings):
     @property
     def session_max_age_seconds(self) -> int:
         return self.session_ttl_hours * 60 * 60
+
+    @property
+    def model_storage_dir(self) -> Path:
+        if self.model_dir.strip():
+            return Path(self.model_dir).expanduser()
+        if REPO_ROOT is not None:
+            return REPO_ROOT / "var" / "atlas-models"
+        return Path("var") / "atlas-models"
 
     @property
     def upload_storage_dir(self) -> Path:

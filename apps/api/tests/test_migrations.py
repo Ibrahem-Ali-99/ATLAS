@@ -41,6 +41,10 @@ def test_migrations_upgrade_downgrade_and_reupgrade() -> None:
         "workflow_runs",
         "email_messages",
         "calendar_bookings",
+        "model_versions",
+        "lead_predictions",
+        "operation_traces",
+        "evaluation_runs",
     } <= tables
     with engine.connect() as connection:
         vector_installed = connection.execute(
