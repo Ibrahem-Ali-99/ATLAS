@@ -86,6 +86,8 @@ class Settings(BaseSettings):
     langfuse_host: str = ""
     llm_input_usd_per_million: float | None = None
     llm_output_usd_per_million: float | None = None
+    # Empty uses the active virtualenv interpreter. An explicit path is checked at startup.
+    mcp_python: str = ""
 
     @field_validator("database_url")
     @classmethod
@@ -114,6 +116,16 @@ class Settings(BaseSettings):
         if value is None or (isinstance(value, str) and not value.strip()):
             return None
         return value
+
+    @field_validator("mcp_python")
+    @classmethod
+    def mcp_python_must_exist(cls, value: str) -> str:
+        configured = value.strip()
+        if not configured:
+            return ""
+        if not Path(configured).is_file():
+            raise ValueError("ATLAS_MCP_PYTHON must be an existing executable")
+        return configured
 
     @field_validator("log_level")
     @classmethod

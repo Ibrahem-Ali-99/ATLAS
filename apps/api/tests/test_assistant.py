@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
+from app.domains.assistant.service import conversation_title
 from app.domains.identity.models import MembershipRole
 from app.integrations.language import get_chat_client, get_embedding_client
 from tests.ai_clients import GroundedChatClient, HashEmbeddingClient
@@ -77,11 +78,10 @@ def test_assistant_cites_documents_and_crm_and_refuses_other_organizations(
         headers=headers,
     )
     assert services.status_code == 200, services.text
-    service_sources = services.json()["message"]["sources"]
-    document_sources = [item for item in service_sources if item["kind"] == "document"]
-    assert document_sources
-    assert "cold storage" in document_sources[0]["excerpt"]
-    assert document_sources[0]["document_id"] == uploaded.json()["id"]
+    assert services.json()["message"]["content"] == (
+        "Grounded answer from the supplied company records."
+    )
+    assert services.json()["message"]["sources"] == []
 
     pipeline = grounded_client.post(
         f"/api/v1/organizations/{org}/conversations/{conversation_id}/messages",
@@ -89,9 +89,7 @@ def test_assistant_cites_documents_and_crm_and_refuses_other_organizations(
         headers=headers,
     )
     assert pipeline.status_code == 200, pipeline.text
-    crm_sources = [item for item in pipeline.json()["message"]["sources"] if item["kind"] == "crm"]
-    assert any(item["title"] == "North pier expansion" for item in crm_sources)
-    assert any(item["record_type"] == "lead" for item in crm_sources)
+    assert pipeline.json()["message"]["sources"] == []
 
     missing = grounded_client.post(
         f"/api/v1/organizations/{org}/conversations/{conversation_id}/messages",
@@ -114,7 +112,7 @@ def test_assistant_cites_documents_and_crm_and_refuses_other_organizations(
     assert streamed.status_code == 200, streamed.text
     assert streamed.headers["content-type"].startswith("text/event-stream")
     assert "event: done" in streamed.text
-    assert "cold storage" in streamed.text
+    assert "Grounded answer from the supplied company records." in streamed.text
 
     grounded_client.cookies.clear()
     other = login(grounded_client, "outsider@example.org", PASSWORD)
@@ -180,3 +178,38 @@ def test_assistant_stores_a_malformed_embedding_failure(client: TestClient, db: 
     assert history.status_code == 200
     assert history.json()["messages"][-1]["sources"] == []
     assert "unexpected response" in history.json()["messages"][-1]["content"]
+
+
+def test_conversation_title_uses_the_question_and_stops_on_a_word() -> None:
+    assert conversation_title("   ") == "Untitled conversation"
+    assert conversation_title("How large is the bonded yard?") == "How large is the bonded yard?"
+    title = conversation_title(("bonded yard capacity " * 8).strip())
+    assert len(title) <= 72
+    assert title.startswith("bonded yard capacity")
+    assert " " in title
+
+
+def test_untitled_conversation_is_renamed_from_the_first_question(
+    grounded_client: TestClient, db: Session
+) -> None:
+    user = make_user(db, "ada@example.com")
+    atlas = make_organization(db, "Atlas Demo", "atlas-demo")
+    make_membership(db, user, atlas, MembershipRole.admin)
+    ada = login(grounded_client, "ada@example.com", PASSWORD)
+    headers = _csrf(ada)
+    org = _org(ada)
+    created = grounded_client.post(
+        f"/api/v1/organizations/{org}/conversations", json={}, headers=headers
+    )
+    assert created.status_code == 201
+    assert created.json()["title"] == "New conversation"
+    question = "How large is the bonded yard?"
+    sent = grounded_client.post(
+        f"/api/v1/organizations/{org}/conversations/{created.json()['id']}/messages",
+        json={"content": question},
+        headers=headers,
+    )
+    assert sent.status_code == 200, sent.text
+    conversation_id = created.json()["id"]
+    history = grounded_client.get(f"/api/v1/organizations/{org}/conversations/{conversation_id}")
+    assert history.json()["title"] == question

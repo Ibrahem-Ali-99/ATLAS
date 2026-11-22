@@ -1,5 +1,6 @@
 import { apiFetch } from "@/lib/api";
 import type { AgentRunDetail, AgentRunPage, Approval, ApprovalPage, ApprovalStatus, RunStatus } from "@/lib/agent";
+import type { DataScope } from "@/lib/provenance";
 
 function organizationPath(organizationId: string, path: string): string {
   return `/api/v1/organizations/${organizationId}${path}`;
@@ -7,10 +8,11 @@ function organizationPath(organizationId: string, path: string): string {
 
 export function listAgentRuns(
   organizationId: string,
-  params: { status?: RunStatus | ""; page?: number } = {},
+  params: { status?: RunStatus | ""; page?: number; scope?: DataScope } = {},
 ): Promise<AgentRunPage> {
   const search = new URLSearchParams();
   search.set("page", String(params.page ?? 1));
+  search.set("scope", params.scope ?? "operational");
   if (params.status) {
     search.set("status", params.status);
   }

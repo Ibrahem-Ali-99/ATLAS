@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.domains.crm.schemas import Page
 from app.domains.knowledge.models import DocumentStatus
+from app.domains.provenance.origin import Origin
 
 
 class DocumentOut(BaseModel):
@@ -18,6 +19,7 @@ class DocumentOut(BaseModel):
     media_type: str
     byte_size: int
     status: DocumentStatus
+    origin: Origin
     error_message: str | None
     created_at: datetime
     updated_at: datetime

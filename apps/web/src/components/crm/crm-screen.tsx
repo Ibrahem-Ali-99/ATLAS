@@ -1,13 +1,14 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { CompaniesPanel } from "@/components/crm/companies-panel";
 import { ContactsPanel } from "@/components/crm/contacts-panel";
 import { InquiriesPanel } from "@/components/crm/inquiries-panel";
 import { LeadsPanel } from "@/components/crm/leads-panel";
-import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/lib/use-workspace";
 
 const tabs = [
@@ -21,25 +22,36 @@ type TabId = (typeof tabs)[number]["id"];
 
 export function CrmScreen() {
   const { organizationId, organizationName } = useWorkspace();
-  const [tab, setTab] = useState<TabId>("companies");
+  const requested = useSearchParams().get("tab");
+  const initial = tabs.some((item) => item.id === requested) ? (requested as TabId) : "companies";
+  const [tab, setTab] = useState<TabId>(initial);
   if (!organizationId) {
     return null;
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <PageHeader title="CRM">
-        Companies, contacts, leads, and inquiries for {organizationName}. Records are loaded from this organization only.
-      </PageHeader>
-      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="CRM records">
+    <div className="flex w-full min-w-0 flex-col gap-6">
+      <header>
+        <h1 className="text-[31px] leading-none text-foreground">Customer records</h1>
+        <p className="mt-3 max-w-3xl text-sm text-muted-foreground">
+          Companies, contacts, leads, and inquiries for {organizationName ?? "this organization"}.
+        </p>
+        <p className="mt-2 max-w-3xl text-xs leading-5 text-subtle">
+          Companies and contacts are alphabetical. Leads and inquiries are newest first. A lead score appears only after a stored prediction exists.
+        </p>
+      </header>
+      <div className="flex max-w-full flex-wrap gap-2" role="tablist" aria-label="CRM records">
         {tabs.map((item) => (
           <Button
             key={item.id}
-            className="shrink-0"
+            className={cn(
+              "h-10 shrink-0 rounded-[10px] px-4",
+              tab === item.id ? "bg-accent text-foreground" : "text-muted-foreground",
+            )}
             type="button"
             role="tab"
             aria-selected={tab === item.id}
-            variant={tab === item.id ? "default" : "outline"}
+            variant="ghost"
             onClick={() => setTab(item.id)}
           >
             {item.label}

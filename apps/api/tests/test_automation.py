@@ -473,6 +473,13 @@ def test_automation_snapshot_reports_sandbox_and_simulation(
     assert body["calendar_provider"] == "simulation"
     assert body["n8n_configured"] is False
     assert {item["trigger"] for item in body["automations"]} == {"lead_created", "schedule"}
+    lead = next(item for item in body["automations"] if item["trigger"] == "lead_created")
+    assert lead["kind"] == "lead_processing"
+    assert lead["completed"] == 0
+    assert lead["configured"] is False
+    follow_up = next(item for item in body["automations"] if item["kind"] == "follow_up")
+    assert follow_up["awaiting_review"] == 0
+    assert follow_up["configured"] is False
 
 
 def test_live_email_requires_an_explicit_switch() -> None:

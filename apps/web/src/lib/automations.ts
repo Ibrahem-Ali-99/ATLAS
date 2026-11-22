@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import type { DataScope } from "@/lib/provenance";
 
 export type WorkflowAttempt = {
   outcome: string;
@@ -16,6 +17,8 @@ export type WorkflowRun = {
   attempt_count: number;
   last_error: string | null;
   created_at: string;
+  lead_title: string | null;
+  company_name: string | null;
   attempts: WorkflowAttempt[];
 };
 
@@ -44,7 +47,17 @@ export type AutomationSnapshot = {
   calendar_provider: string;
   n8n_configured: boolean;
   webhook_configured: boolean;
-  automations: { name: string; trigger: string; description: string }[];
+  automations: {
+    name: string;
+    trigger: string;
+    description: string;
+    kind: string;
+    completed: number;
+    awaiting_review: number;
+    needs_attention: number;
+    failed: number;
+    configured: boolean;
+  }[];
   runs: WorkflowRun[];
   emails: EmailDelivery[];
   bookings: CalendarBooking[];
@@ -54,8 +67,11 @@ function organizationPath(organizationId: string, path: string): string {
   return `/api/v1/organizations/${organizationId}${path}`;
 }
 
-export function getAutomations(organizationId: string): Promise<AutomationSnapshot> {
-  return apiFetch(organizationPath(organizationId, "/automations"));
+export function getAutomations(
+  organizationId: string,
+  scope: DataScope = "operational",
+): Promise<AutomationSnapshot> {
+  return apiFetch(organizationPath(organizationId, `/automations?scope=${scope}`));
 }
 
 export function cancelBooking(organizationId: string, bookingId: string): Promise<CalendarBooking> {

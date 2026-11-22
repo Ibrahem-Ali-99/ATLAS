@@ -20,6 +20,8 @@ from app.domains.automation.models import (
     WorkflowStatus,
 )
 from app.domains.automation.signatures import open_webhook_secret, sign_webhook
+from app.domains.crm.models import Lead
+from app.domains.provenance.origin import Origin
 from app.integrations.n8n import post_webhook
 from app.integrations.outcomes import DeliveryFailed, OutcomeUncertain
 
@@ -37,6 +39,7 @@ def stage_lead_created(
     existing = db.scalar(select(WorkflowRun).where(WorkflowRun.idempotency_key == key))
     if existing is not None:
         return
+    lead = db.get(Lead, lead_id)
     db.add(
         WorkflowRun(
             organization_id=organization_id,
@@ -46,6 +49,7 @@ def stage_lead_created(
             lead_id=lead_id,
             agent_run_id=agent_run_id,
             payload={"lead_id": str(lead_id)},
+            origin=lead.origin if lead is not None else Origin.unknown,
             attempt_count=0,
         )
     )
@@ -212,10 +216,12 @@ def _claim(db: Session, organization_id: uuid.UUID, run_id: uuid.UUID) -> Workfl
 
 
 def _start_attempt(db: Session, run_id: uuid.UUID, organization_id: uuid.UUID) -> ExecutionAttempt:
+    run = db.get(WorkflowRun, run_id)
     attempt = ExecutionAttempt(
         organization_id=organization_id,
         workflow_run_id=run_id,
         outcome=AttemptOutcome.started,
+        origin=run.origin if run is not None else Origin.unknown,
     )
     db.add(attempt)
     db.commit()

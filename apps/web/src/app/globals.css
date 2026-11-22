@@ -1,23 +1,27 @@
 @import "tailwindcss";
 
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
-  --card: #141418;
-  --card-foreground: #fafafa;
-  --primary: #3b82f6;
-  --primary-foreground: #eff6ff;
-  --secondary: #18181b;
-  --secondary-foreground: #fafafa;
-  --muted: #18181b;
-  --muted-foreground: #a1a1aa;
-  --accent: #172033;
-  --accent-foreground: #dbeafe;
-  --destructive: #ef4444;
-  --border: #32323a;
-  --input: #3f3f46;
-  --ring: #3b82f6;
-  --radius: 0.75rem;
+  --background: #0a1019;
+  --foreground: #f3f7fc;
+  --card: #111925;
+  --card-foreground: #f3f7fc;
+  --primary: #6099ff;
+  --primary-foreground: #081321;
+  --secondary: #202e40;
+  --secondary-foreground: #f3f7fc;
+  --muted: #172231;
+  --muted-foreground: #a2b1c4;
+  --accent: #223756;
+  --accent-foreground: #f3f7fc;
+  --destructive: #f07178;
+  --border: #1e2c3d;
+  --input: #202e40;
+  --ring: #6099ff;
+  --sidebar: #111925;
+  --success: #63dab7;
+  --warning: #f9c274;
+  --subtle: #73849a;
+  --radius: 0.625rem;
   color-scheme: dark;
 }
 
@@ -38,15 +42,18 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --font-sans: var(--font-geist-sans);
+  --color-sidebar: var(--sidebar);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-subtle: var(--subtle);
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
   --radius-lg: var(--radius);
 }
 
 body {
-  background:
-    radial-gradient(900px 420px at 0% -10%, rgba(59, 130, 246, 0.14), transparent 55%),
-    var(--background);
+  background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), sans-serif;
+  text-rendering: optimizeLegibility;
 }

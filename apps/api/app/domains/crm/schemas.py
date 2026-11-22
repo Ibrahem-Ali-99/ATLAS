@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domains.crm.models import InteractionKind, LeadStatus
+from app.domains.provenance.origin import Origin
 
 
 class Page(BaseModel):
@@ -17,6 +18,7 @@ class CompanyCreate(BaseModel):
     website: str | None = Field(default=None, max_length=300)
     industry: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=4000)
+    origin: Origin | None = None
 
 
 class CompanyUpdate(BaseModel):
@@ -35,6 +37,7 @@ class CompanyOut(BaseModel):
     website: str | None
     industry: str | None
     notes: str | None
+    origin: Origin
     created_at: datetime
     updated_at: datetime
 
@@ -49,6 +52,7 @@ class ContactCreate(BaseModel):
     phone: str | None = Field(default=None, max_length=40)
     title: str | None = Field(default=None, max_length=120)
     company_id: uuid.UUID | None = None
+    origin: Origin | None = None
 
 
 class ContactUpdate(BaseModel):
@@ -69,6 +73,7 @@ class ContactOut(BaseModel):
     email: str | None
     phone: str | None
     title: str | None
+    origin: Origin
     created_at: datetime
     updated_at: datetime
 
@@ -85,6 +90,7 @@ class LeadCreate(BaseModel):
     owner_user_id: uuid.UUID | None = None
     source: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=4000)
+    origin: Origin | None = None
 
 
 class LeadUpdate(BaseModel):
@@ -109,6 +115,7 @@ class LeadOut(BaseModel):
     status: LeadStatus
     source: str | None
     notes: str | None
+    origin: Origin
     created_at: datetime
     updated_at: datetime
 
@@ -122,6 +129,7 @@ class InquiryCreate(BaseModel):
     body: str = Field(min_length=1, max_length=8000)
     company_id: uuid.UUID | None = None
     lead_id: uuid.UUID | None = None
+    origin: Origin | None = None
 
 
 class InquiryUpdate(BaseModel):
@@ -138,6 +146,7 @@ class InquiryOut(BaseModel):
     organization_id: uuid.UUID
     company_id: uuid.UUID | None
     lead_id: uuid.UUID | None
+    origin: Origin
     subject: str
     body: str
     created_at: datetime

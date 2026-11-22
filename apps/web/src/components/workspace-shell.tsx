@@ -77,17 +77,19 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   }
 
   const user = session.data.user;
+  const organizationName = session.data.memberships[0]?.organization_name ?? null;
+  const immersive = pathname === "/assistant";
 
   return (
-    <div className="min-h-screen md:grid md:grid-cols-[240px_minmax(0,1fr)]">
-      <aside className="hidden border-r border-border bg-background/80 md:block">
-        <div className="sticky top-0 h-screen p-4">
-          <SidebarNav />
+    <div className="min-h-screen bg-background md:grid md:grid-cols-[230px_minmax(0,1fr)]">
+      <aside className="hidden bg-sidebar md:block md:rounded-[10px] md:m-2">
+        <div className="sticky top-2 flex h-[calc(100vh-1rem)] flex-col">
+          <SidebarNav organizationName={organizationName} />
         </div>
       </aside>
-      <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-background/95 px-4 backdrop-blur md:px-6">
-          <div className="flex items-center gap-2">
+      <div className="flex min-h-screen min-w-0 flex-col">
+        <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center justify-between px-4 md:px-6">
+          <div className="flex min-w-0 items-center gap-2">
             <Button
               variant="ghost"
               size="icon"
@@ -97,7 +99,11 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             >
               <Menu className="size-4" />
             </Button>
-            <p className="text-sm font-medium">{titleForPath(pathname)}</p>
+            <p className="flex min-w-0 items-center truncate text-xs uppercase tracking-[0.14em] text-muted-foreground">
+              <span>ATLAS</span>
+              <span className="px-2 text-subtle">/</span>
+              <span className="truncate">{titleForPath(pathname)}</span>
+            </p>
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -128,14 +134,21 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             </DropdownMenuContent>
           </DropdownMenu>
         </header>
-        <main id="main" className="flex-1 px-4 py-6 md:px-8 md:py-8">
+        <main
+          id="main"
+          className={
+            immersive
+              ? "h-[calc(100vh-3rem)] min-w-0 overflow-hidden"
+              : "min-w-0 flex-1 overflow-x-hidden px-4 py-6 md:px-6 md:py-4"
+          }
+        >
           {children}
         </main>
       </div>
       <Sheet open={navOpen} onOpenChange={setNavOpen}>
         <SheetContent aria-describedby={undefined}>
           <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <SidebarNav onNavigate={() => setNavOpen(false)} />
+          <SidebarNav organizationName={organizationName} onNavigate={() => setNavOpen(false)} />
         </SheetContent>
       </Sheet>
       <SignOutDialog open={signOutOpen} onOpenChange={setSignOutOpen} />

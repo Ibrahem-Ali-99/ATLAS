@@ -46,4 +46,4 @@ class ConversationDetail(ConversationOut):
 class ReplyOut(BaseModel):
     conversation_id: uuid.UUID
     message: MessageOut
-    document_search: Literal["ready", "empty", "unconfigured", "unavailable"]
+    document_search: Literal["ready", "empty", "unconfigured", "unavailable", "skipped"]

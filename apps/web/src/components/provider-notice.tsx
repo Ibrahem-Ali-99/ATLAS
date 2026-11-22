@@ -25,9 +25,11 @@ export function getProviderStatus(organizationId: string): Promise<ProviderStatu
 export function ProviderNotice({
   organizationId,
   detail = false,
+  compact = false,
 }: {
   organizationId: string;
   detail?: boolean;
+  compact?: boolean;
 }) {
   const status = useQuery({
     queryKey: ["provider-status", organizationId],
@@ -41,12 +43,22 @@ export function ProviderNotice({
     return <RequestError error={status.error} />;
   }
   const data = status.data;
+  if (compact) {
+    if (!data.llm_ready) {
+      return <p className="text-xs text-subtle">{data.llm_detail}</p>;
+    }
+    return (
+      <p className="text-xs uppercase tracking-[0.12em] text-success">
+        {data.llm_provider} · {data.llm_model}
+      </p>
+    );
+  }
   const problem = !data.llm_ready || !data.embedding_ready || data.incompatible_documents > 0;
   if (!detail && !problem) {
     return null;
   }
   return (
-    <section className="rounded-xl border border-border bg-card p-4 text-sm" aria-live="polite">
+    <section className="rounded-[10px] bg-muted p-4 text-sm" aria-live="polite">
       <h2 className="font-medium">Models</h2>
       <p className="mt-1 text-muted-foreground">Read only. API keys are not shown.</p>
       <dl className="mt-3 space-y-2">

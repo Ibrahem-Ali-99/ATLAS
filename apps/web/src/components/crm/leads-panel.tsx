@@ -76,7 +76,7 @@ export function LeadsPanel({ organizationId }: { organizationId: string }) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.9fr)]">
-      <section className="rounded-xl border border-border bg-card">
+      <section className="rounded-[10px] bg-muted">
         <div className="grid gap-3 p-4 sm:grid-cols-[1fr_10rem_auto]">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search leads" aria-label="Search leads" />
           <select
@@ -137,7 +137,7 @@ export function LeadsPanel({ organizationId }: { organizationId: string }) {
           }}
         />
       ) : (
-        <aside className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+        <aside className="rounded-[10px] bg-muted p-6 text-sm text-muted-foreground">
           Select a lead to update its status and interaction history.
         </aside>
       )}
@@ -255,7 +255,7 @@ function LeadDetail({
   });
 
   return (
-    <aside className="space-y-4 rounded-xl border border-border bg-card p-6">
+    <aside className="space-y-4 rounded-[10px] bg-muted p-6">
       <div>
         <h2 className="text-base font-semibold">{lead.title}</h2>
         <p className="mt-1 text-sm text-muted-foreground">Owned by the member who created it unless reassigned by the API.</p>

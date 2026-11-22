@@ -47,6 +47,7 @@ const leadTitle = `E2E pier ${stamp}`;
 const documentTitle = `e2e-harbor-${stamp}`;
 
 test("workspace flow uses the browser and deterministic providers", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   const failedChunks: string[] = [];
   const pageErrors: string[] = [];
   page.on("response", (response) => {
@@ -72,16 +73,29 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByRole("button", { name: "Create" }).click();
   await page.getByLabel("Search companies").fill(companyName);
   await expect(page.getByRole("button", { name: companyName })).toBeVisible();
+  await page.getByRole("button", { name: companyName }).click();
+  await page.getByLabel("Industry").fill("Warehousing");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved.")).toBeVisible();
+  await page.getByRole("button", { name: "Delete" }).click();
+  await page.getByRole("button", { name: "Confirm delete" }).click();
+  await expect(page.getByRole("button", { name: companyName })).toHaveCount(0);
 
+  await page.getByRole("tab", { name: "Leads" }).click();
   const seededLeads = page.waitForResponse(
     (response) =>
-      response.request().method() === "GET" && response.url().includes("/leads") && response.ok(),
+      response.request().method() === "GET" &&
+      response.url().includes("/leads") &&
+      response.url().includes("q=North") &&
+      response.ok(),
   );
-  await page.getByRole("tab", { name: "Leads" }).click();
+  await page.getByLabel("Search leads").fill("North pier expansion");
   const seeded = await jsonBody<{ items: LeadRow[] }>(await seededLeads);
   const northPier = seeded.items.find((item) => item.title === "North pier expansion");
   expect(northPier).toBeTruthy();
   const northPierId = northPier?.id ?? "";
+  await page.getByLabel("Search leads").fill("");
+  await page.waitForTimeout(400);
   await page.getByRole("button", { name: "New lead" }).click();
   await page.getByLabel("Title").fill(leadTitle);
   await page.getByRole("button", { name: "Create" }).click();
@@ -97,16 +111,42 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   const documentRow = page.getByRole("row", { name: documentTitle });
   await expect(documentRow).toBeVisible();
   await expect(documentRow.getByRole("cell", { name: "ready" })).toBeVisible({ timeout: 30_000 });
+  await page.getByLabel("Search documents").fill(`bonded-yard-${stamp}`);
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByText(`Harbor warehousing includes cold storage and bonded-yard-${stamp}.`).first()).toBeVisible();
+  const reindexed = page.waitForResponse(
+    (response) => response.request().method() === "POST" && response.url().includes("/reindex") && response.ok(),
+  );
+  await documentRow.getByRole("button", { name: "Reindex" }).click();
+  await reindexed;
+  await expect(documentRow.getByRole("cell", { name: "ready" })).toBeVisible({ timeout: 30_000 });
   await shot(page, "03-knowledge.png");
 
   await page.getByRole("link", { name: "AI Assistant" }).click();
   await page.getByRole("button", { name: "New" }).click();
-  await page.getByPlaceholder("Ask about a document or a CRM record").fill(`bonded-yard-${stamp}`);
+  await page.getByPlaceholder("Ask about records, documents or your organization…").fill(`bonded-yard-${stamp}`);
   await page.getByRole("button", { name: "Send" }).click();
-  const answer = page.getByRole("article").filter({ hasText: "Company documents" });
+  const answer = page.getByRole("article").filter({ hasText: "Grounded answer from the supplied company records." });
   await expect(answer.getByText("Grounded answer from the supplied company records.")).toBeVisible();
-  await expect(answer.getByText(documentTitle)).toBeVisible();
+  await expect(answer.getByText(documentTitle)).toHaveCount(0);
   await shot(page, "04-assistant.png");
+
+  await page.getByPlaceholder("Ask about records, documents or your organization…").fill("What can you help me with?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByRole("heading", { name: "What I can help with" })).toBeVisible();
+  await expect(page.getByText("I could not find relevant company documents or CRM records for that question.")).toHaveCount(0);
+
+  await page.getByPlaceholder("Ask about records, documents or your organization…").fill("Which companies are in my CRM?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByRole("heading", { name: "Companies in this organization" })).toBeVisible();
+
+  await page.getByPlaceholder("Ask about records, documents or your organization…").fill("What does the document you mentioned say?");
+  await page.getByRole("button", { name: "Send" }).click();
+  const answers = page.getByRole("article").filter({
+    hasText: "Grounded answer from the supplied company records.",
+  });
+  await expect(answers).toHaveCount(2);
+  await expect(answers.nth(1).getByText(documentTitle)).toHaveCount(0);
 
   await page.getByRole("link", { name: "CRM", exact: true }).click();
   await page.getByRole("tab", { name: "Inquiries" }).click();
@@ -154,7 +194,15 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
     .locator("pre");
   await expect(leadProposal).toContainText(northPierId);
   await expect(leadProposal).toContainText("Rates for bonded storage");
+  const approvedDecision = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().includes(`/approvals/${leadApproval?.id}/approve`) &&
+      response.ok(),
+  );
   await page.getByRole("button", { name: "Approve" }).click();
+  await approvedDecision;
+  await expect(page.getByText("Approved. Execute writes the stored payload. Nothing is sent until then.")).toBeVisible();
   const approvedApprovals = page.waitForResponse(
     (response) =>
       response.request().method() === "GET" &&
@@ -177,15 +225,16 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   expect(executedBody.execution_result?.lead_id).toBe(northPierId);
   await page.getByLabel("Filter approvals").selectOption("executed");
   await expect(page.getByRole("button", { name: "update lead" }).first()).toBeVisible();
+  await page.getByRole("link", { name: "CRM", exact: true }).click();
+  await page.getByRole("tab", { name: "Leads" }).click();
   const refreshedLeads = page.waitForResponse(
     (response) =>
       response.request().method() === "GET" &&
       response.url().includes("/leads") &&
-      !response.url().includes("/leads/") &&
+      response.url().includes("q=North") &&
       response.ok(),
   );
-  await page.getByRole("link", { name: "CRM", exact: true }).click();
-  await page.getByRole("tab", { name: "Leads" }).click();
+  await page.getByLabel("Search leads").fill("North pier expansion");
   const refreshed = await jsonBody<{ items: LeadRow[] }>(await refreshedLeads);
   const updated = refreshed.items.find((item) => item.id === northPierId);
   expect(updated?.notes).toBe("Rates for bonded storage");
@@ -194,7 +243,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await shot(page, "06-crm-lead.png");
 
   await page.getByRole("link", { name: "Workflows" }).click();
-  await expect(page.getByRole("heading", { name: "Workflows" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Automations" })).toBeVisible();
   await expect(page.getByText("sandbox", { exact: false }).first()).toBeVisible();
   await shot(page, "07-workflows.png");
   await page.getByRole("link", { name: "Analytics" }).click();
@@ -275,11 +324,54 @@ test("narrow viewport opens every page without a missing chunk", async ({ page }
     await expect(page).toHaveURL(new RegExp(`${href}$`));
     await expect(page.locator("header").getByText(name, { exact: true })).toBeVisible();
     await expect(page.getByText("This page failed to render")).toHaveCount(0);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
   }
   await shot(page, "13-approvals-mobile.png");
+  for (const size of [
+    { width: 1920, height: 1080 },
+    { width: 768, height: 1024 },
+  ]) {
+    await page.setViewportSize(size);
+    await page.goto("/overview");
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/approvals");
   await page.reload();
   await expect(page.getByLabel("Filter approvals")).toBeVisible();
   expect(failedChunks).toEqual([]);
   expect(pageErrors).toEqual([]);
+});
+
+test("staff can use CRM and another organization cannot see Harbor records", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("staff@example.com");
+  await page.getByLabel("Password").fill("change-me-staff");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await page.goto("/crm");
+  await expect(page.getByRole("heading", { name: "Customer records" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New company" })).toBeVisible();
+  await page.getByRole("button", { name: /staff@example.com/ }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+
+  await page.getByLabel("Email").fill("outsider@example.org");
+  await page.getByLabel("Password").fill("change-me-outsider");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await page.goto("/crm");
+  await page.getByLabel("Search companies").fill("Harbor");
+  await expect(page.getByRole("cell", { name: "Harbor & Co." })).toHaveCount(0);
+  await page.goto("/knowledge");
+  await expect(page.getByRole("heading", { name: "Company knowledge" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Harbor/ })).toHaveCount(0);
 });

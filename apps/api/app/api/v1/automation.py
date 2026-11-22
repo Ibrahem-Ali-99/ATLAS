@@ -8,14 +8,17 @@ from app.domains.automation import status
 from app.domains.automation.hooks import create_webhook_key
 from app.domains.automation.schemas import AutomationSnapshot, BookingOut, WebhookKeyOut
 from app.domains.identity.dependencies import CsrfAdmin, DbSession, Member
+from app.domains.provenance.origin import DataScope
 from app.integrations.calendar import calendar_adapter
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["automation"])
 
 
 @router.get("/automations", response_model=AutomationSnapshot)
-def get_automations(member: Member, db: DbSession) -> AutomationSnapshot:
-    return AutomationSnapshot.model_validate(status.snapshot(db, member.organization.id))
+def get_automations(
+    member: Member, db: DbSession, scope: DataScope = DataScope.operational
+) -> AutomationSnapshot:
+    return AutomationSnapshot.model_validate(status.snapshot(db, member.organization.id, scope))
 
 
 @router.post("/integrations/webhook-keys", response_model=WebhookKeyOut, status_code=201)

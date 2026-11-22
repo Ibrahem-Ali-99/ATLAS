@@ -15,81 +15,106 @@ from app.domains.automation.models import (
     WorkflowStatus,
 )
 from app.domains.crm.models import Inquiry, Interaction, Lead, LeadStatus
+from app.domains.provenance.origin import DataScope, Origin, provenance_notice, scope_clause
 
 WINDOW_DAYS = 30
 OPEN_STATUSES = (LeadStatus.new, LeadStatus.contacted)
 CLOSED_STATUSES = (LeadStatus.won, LeadStatus.lost)
 
 
-def snapshot(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
+def snapshot(
+    db: Session, organization_id: uuid.UUID, scope: DataScope = DataScope.operational
+) -> dict[str, Any]:
     today = datetime.now(UTC).date()
     start = datetime.combine(today - timedelta(days=WINDOW_DAYS - 1), datetime.min.time(), UTC)
+    origins = _lead_origins(db, organization_id)
     return {
         "window_days": WINDOW_DAYS,
-        "synthetic_notice": (
-            "Counts include synthetic demonstration records stored for this organization. "
-            "They are not revenue."
-        ),
-        "leads_total": _count(db, Lead, organization_id),
-        "inquiries_total": _count(db, Inquiry, organization_id),
-        "lead_status": _grouped(db, Lead.status, Lead, organization_id),
+        "scope": scope.value,
+        "lead_origins": origins,
+        "provenance_notice": provenance_notice(scope, origins),
+        "leads_total": _count(db, Lead, organization_id, scope),
+        "inquiries_total": _count(db, Inquiry, organization_id, scope),
+        "lead_status": _grouped(db, Lead.status, Lead, organization_id, scope),
         "qualification": {
-            "qualified": _status_count(db, organization_id, (LeadStatus.qualified,)),
-            "unqualified": _status_count(db, organization_id, (LeadStatus.unqualified,)),
-            "open": _status_count(db, organization_id, OPEN_STATUSES),
-            "closed": _status_count(db, organization_id, CLOSED_STATUSES),
+            "qualified": _status_count(db, organization_id, (LeadStatus.qualified,), scope),
+            "unqualified": _status_count(db, organization_id, (LeadStatus.unqualified,), scope),
+            "open": _status_count(db, organization_id, OPEN_STATUSES, scope),
+            "closed": _status_count(db, organization_id, CLOSED_STATUSES, scope),
             "definition": (
                 "qualified and unqualified are those lead statuses. "
                 "open is new or contacted. closed is won or lost."
             ),
         },
-        "conversion": _conversion(db, organization_id),
-        "lead_trend": _trend(db, organization_id, start, today),
-        "agent_outcomes": _grouped(db, AgentRun.status, AgentRun, organization_id),
-        "failed_runs": failed_run_count(db, organization_id),
-        "approvals": _approvals(db, organization_id),
-        "automation": _automation(db, organization_id),
-        "follow_ups": _follow_ups(db, organization_id),
-        "email": _email(db, organization_id),
-        "calendar": _calendar(db, organization_id),
+        "conversion": _conversion(db, organization_id, scope),
+        "lead_trend": _trend(db, organization_id, start, today, scope),
+        "agent_outcomes": _grouped(db, AgentRun.status, AgentRun, organization_id, scope),
+        "failed_runs": failed_run_count(db, organization_id, scope),
+        "approvals": _approvals(db, organization_id, scope),
+        "automation": _automation(db, organization_id, scope),
+        "follow_ups": _follow_ups(db, organization_id, scope),
+        "email": _email(db, organization_id, scope),
+        "calendar": _calendar(db, organization_id, scope),
     }
 
 
-def _count(db: Session, model: Any, organization_id: uuid.UUID) -> int:
+def _filters(model: Any, organization_id: uuid.UUID, scope: DataScope) -> list[Any]:
+    filters = [model.organization_id == organization_id]
+    clause = scope_clause(model.origin, scope)
+    if clause is not None:
+        filters.append(clause)
+    return filters
+
+
+def _lead_origins(db: Session, organization_id: uuid.UUID) -> dict[str, int]:
+    rows = db.execute(
+        select(Lead.origin, func.count())
+        .where(Lead.organization_id == organization_id)
+        .group_by(Lead.origin)
+    ).all()
+    counts = {item.value: 0 for item in Origin}
+    for origin, count in rows:
+        counts[_value(origin)] = int(count)
+    return counts
+
+
+def _count(db: Session, model: Any, organization_id: uuid.UUID, scope: DataScope) -> int:
     return int(
         db.scalar(
-            select(func.count()).select_from(model).where(model.organization_id == organization_id)
+            select(func.count()).select_from(model).where(*_filters(model, organization_id, scope))
         )
         or 0
     )
 
 
 def _grouped(
-    db: Session, column: Any, model: Any, organization_id: uuid.UUID
+    db: Session, column: Any, model: Any, organization_id: uuid.UUID, scope: DataScope
 ) -> list[dict[str, Any]]:
     rows = db.execute(
         select(column, func.count())
-        .where(model.organization_id == organization_id)
+        .where(*_filters(model, organization_id, scope))
         .group_by(column)
         .order_by(column)
     ).all()
     return [{"status": _value(status), "count": int(count)} for status, count in rows]
 
 
-def _status_count(db: Session, organization_id: uuid.UUID, statuses: tuple[LeadStatus, ...]) -> int:
+def _status_count(
+    db: Session, organization_id: uuid.UUID, statuses: tuple[LeadStatus, ...], scope: DataScope
+) -> int:
     return int(
         db.scalar(
             select(func.count())
             .select_from(Lead)
-            .where(Lead.organization_id == organization_id, Lead.status.in_(statuses))
+            .where(*_filters(Lead, organization_id, scope), Lead.status.in_(statuses))
         )
         or 0
     )
 
 
-def _conversion(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
-    won = _status_count(db, organization_id, (LeadStatus.won,))
-    lost = _status_count(db, organization_id, (LeadStatus.lost,))
+def _conversion(db: Session, organization_id: uuid.UUID, scope: DataScope) -> dict[str, Any]:
+    won = _status_count(db, organization_id, (LeadStatus.won,), scope)
+    lost = _status_count(db, organization_id, (LeadStatus.lost,), scope)
     denominator = won + lost
     rate = None if denominator == 0 else round(won / denominator, 6)
     return {
@@ -102,12 +127,12 @@ def _conversion(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
 
 
 def _trend(
-    db: Session, organization_id: uuid.UUID, start: datetime, today: Any
+    db: Session, organization_id: uuid.UUID, start: datetime, today: Any, scope: DataScope
 ) -> list[dict[str, Any]]:
     bucket = func.date_trunc("day", Lead.created_at)
     rows = db.execute(
         select(bucket, func.count())
-        .where(Lead.organization_id == organization_id, Lead.created_at >= start)
+        .where(*_filters(Lead, organization_id, scope), Lead.created_at >= start)
         .group_by(bucket)
         .order_by(bucket)
     ).all()
@@ -120,10 +145,10 @@ def _trend(
     return days
 
 
-def _approvals(db: Session, organization_id: uuid.UUID) -> dict[str, int]:
+def _approvals(db: Session, organization_id: uuid.UUID, scope: DataScope) -> dict[str, int]:
     grouped = {
         item["status"]: item["count"]
-        for item in _grouped(db, Approval.status, Approval, organization_id)
+        for item in _grouped(db, Approval.status, Approval, organization_id, scope)
     }
     pending = grouped.get(ApprovalStatus.pending.value, 0)
     completed = grouped.get(ApprovalStatus.executed.value, 0) + grouped.get(
@@ -138,10 +163,10 @@ def _approvals(db: Session, organization_id: uuid.UUID) -> dict[str, int]:
     }
 
 
-def _automation(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
+def _automation(db: Session, organization_id: uuid.UUID, scope: DataScope) -> dict[str, Any]:
     grouped = {
         item["status"]: item["count"]
-        for item in _grouped(db, WorkflowRun.status, WorkflowRun, organization_id)
+        for item in _grouped(db, WorkflowRun.status, WorkflowRun, organization_id, scope)
     }
     succeeded = grouped.get(WorkflowStatus.completed.value, 0)
     failed = grouped.get(WorkflowStatus.failed.value, 0) + grouped.get(
@@ -159,26 +184,26 @@ def _automation(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
     }
 
 
-def _follow_ups(db: Session, organization_id: uuid.UUID) -> dict[str, int]:
+def _follow_ups(db: Session, organization_id: uuid.UUID, scope: DataScope) -> dict[str, int]:
     requested = int(
         db.scalar(
             select(func.count())
             .select_from(Approval)
             .where(
-                Approval.organization_id == organization_id,
+                *_filters(Approval, organization_id, scope),
                 Approval.action_type == ActionType.prepare_customer_response,
             )
         )
         or 0
     )
-    interactions = _count(db, Interaction, organization_id)
+    interactions = _count(db, Interaction, organization_id, scope)
     return {"approval_requests": requested, "interactions": interactions}
 
 
-def _email(db: Session, organization_id: uuid.UUID) -> dict[str, int]:
+def _email(db: Session, organization_id: uuid.UUID, scope: DataScope) -> dict[str, int]:
     rows = db.execute(
         select(EmailMessage.mode, EmailMessage.status, func.count())
-        .where(EmailMessage.organization_id == organization_id)
+        .where(*_filters(EmailMessage, organization_id, scope))
         .group_by(EmailMessage.mode, EmailMessage.status)
     ).all()
     sandbox = 0
@@ -195,10 +220,10 @@ def _email(db: Session, organization_id: uuid.UUID) -> dict[str, int]:
     return {"sandbox_sent": sandbox, "live_sent": live, "failed": failed}
 
 
-def _calendar(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
+def _calendar(db: Session, organization_id: uuid.UUID, scope: DataScope) -> dict[str, Any]:
     rows = db.execute(
         select(CalendarBooking.provider, CalendarBooking.status, func.count())
-        .where(CalendarBooking.organization_id == organization_id)
+        .where(*_filters(CalendarBooking, organization_id, scope))
         .group_by(CalendarBooking.provider, CalendarBooking.status)
     ).all()
     booked = 0
@@ -221,15 +246,14 @@ def _value(status: Any) -> str:
     return str(status.value if hasattr(status, "value") else status)
 
 
-def failed_run_count(db: Session, organization_id: uuid.UUID) -> int:
+def failed_run_count(
+    db: Session, organization_id: uuid.UUID, scope: DataScope = DataScope.operational
+) -> int:
     return int(
         db.scalar(
             select(func.count())
             .select_from(AgentRun)
-            .where(
-                AgentRun.organization_id == organization_id,
-                AgentRun.status == RunStatus.failed,
-            )
+            .where(*_filters(AgentRun, organization_id, scope), AgentRun.status == RunStatus.failed)
         )
         or 0
     )

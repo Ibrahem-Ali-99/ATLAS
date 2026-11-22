@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import type { DataScope } from "@/lib/provenance";
 
 function organizationPath(organizationId: string, path: string): string {
   return `/api/v1/organizations/${organizationId}${path}`;
@@ -9,7 +10,9 @@ export type DayCount = { day: string; count: number };
 
 export type AnalyticsSnapshot = {
   window_days: number;
-  synthetic_notice: string;
+  scope: string;
+  lead_origins: { operational: number; demo: number; evaluation: number; unknown: number };
+  provenance_notice: string;
   leads_total: number;
   inquiries_total: number;
   lead_status: StatusCount[];
@@ -84,6 +87,7 @@ export type DiagnosticRun = {
 };
 
 export type Diagnostics = {
+  scope: string;
   hint_notice: string;
   failed_runs: { id: string; error_code: string | null; hint: string | null }[];
   slowest_steps: { operation: string; latency_ms: number | null; agent_run_id: string | null }[];
@@ -111,8 +115,11 @@ export type EvaluationItem = {
   created_at: string;
 };
 
-export function getAnalytics(organizationId: string): Promise<AnalyticsSnapshot> {
-  return apiFetch(organizationPath(organizationId, "/analytics"));
+export function getAnalytics(
+  organizationId: string,
+  scope: DataScope = "operational",
+): Promise<AnalyticsSnapshot> {
+  return apiFetch(organizationPath(organizationId, `/analytics?scope=${scope}`));
 }
 
 export function scoreLead(organizationId: string, leadId: string): Promise<LeadPrediction> {
@@ -127,8 +134,11 @@ export function trainModel(organizationId: string): Promise<{ status: string }> 
   return apiFetch(organizationPath(organizationId, "/ml/train"), { method: "POST" });
 }
 
-export function getDiagnostics(organizationId: string): Promise<Diagnostics> {
-  return apiFetch(organizationPath(organizationId, "/diagnostics"));
+export function getDiagnostics(
+  organizationId: string,
+  scope: DataScope = "operational",
+): Promise<Diagnostics> {
+  return apiFetch(organizationPath(organizationId, `/diagnostics?scope=${scope}`));
 }
 
 export function getDiagnosticRun(organizationId: string, runId: string): Promise<DiagnosticRun> {

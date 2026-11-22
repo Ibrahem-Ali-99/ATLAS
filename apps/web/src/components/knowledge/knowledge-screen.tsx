@@ -4,10 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { ConfirmButton } from "@/components/confirm-button";
-import { PageHeader } from "@/components/page-header";
 import { ProviderNotice } from "@/components/provider-notice";
 import { RequestError } from "@/components/request-error";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,8 +21,14 @@ import {
 import type { DocumentStatus, KnowledgeDocument } from "@/lib/records";
 import { useWorkspace } from "@/lib/use-workspace";
 
-function statusVariant(status: DocumentStatus): "default" | "secondary" {
-  return status === "ready" ? "default" : "secondary";
+function statusClass(status: DocumentStatus): string {
+  if (status === "ready") {
+    return "text-success";
+  }
+  if (status === "failed") {
+    return "text-destructive";
+  }
+  return "text-warning";
 }
 
 function statusCopy(status: DocumentStatus): string {
@@ -75,6 +79,7 @@ function KnowledgeWorkspace({
       void queryClient.invalidateQueries({ queryKey: ["documents", organizationId] });
     },
   });
+  const selected = documents.data?.items.find((item) => item.id === selectedId) ?? null;
   const hits = useQuery({
     queryKey: ["document-search", organizationId, submitted],
     queryFn: () => searchDocuments(organizationId, submitted),
@@ -82,12 +87,17 @@ function KnowledgeWorkspace({
   });
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <PageHeader title="Knowledge">
-        PDF and text files for {organizationName}. Indexing runs in the background. Search uses this organization&apos;s ready documents only.
-      </PageHeader>
-      <ProviderNotice organizationId={organizationId} />
-      <section className="rounded-xl border border-border bg-card p-4">
+    <div className="flex w-full min-w-0 flex-col gap-6">
+      <header>
+        <h1 className="text-[31px] leading-none text-foreground">Company knowledge</h1>
+        <p className="mt-3 max-w-3xl text-sm text-muted-foreground">
+          Uploaded documents, indexing status, and retrieved evidence for {organizationName}.
+        </p>
+      </header>
+      <ProviderNotice organizationId={organizationId} detail />
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+      <div className="flex flex-col gap-4">
+      <section className="rounded-[10px] bg-muted p-4">
         <h2 className="text-sm font-medium">Upload</h2>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">PDF and TXT only. Other file types are rejected and nothing is stored.</p>
         <label className="mt-3 grid gap-2 text-sm">
@@ -109,43 +119,7 @@ function KnowledgeWorkspace({
         {upload.isSuccess ? <p className="mt-3 text-sm text-muted-foreground">Uploaded. Indexing continues until the status is ready.</p> : null}
         {upload.isError ? <div className="mt-3"><RequestError error={upload.error} /></div> : null}
       </section>
-      <section className="rounded-xl border border-border bg-card p-4">
-        <h2 className="text-sm font-medium">Search</h2>
-        <form
-          className="mt-3 flex flex-col gap-3 sm:flex-row"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setSubmitted(search.trim());
-          }}
-        >
-          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search indexed text" aria-label="Search documents" />
-          <Button type="submit">Search</Button>
-        </form>
-        {submitted.length > 0 && submitted.length < 2 ? (
-          <p className="mt-3 text-sm text-muted-foreground">Enter at least two characters.</p>
-        ) : null}
-        {hits.isFetching ? <p className="mt-3 text-sm text-muted-foreground">Searching…</p> : null}
-        {hits.isError ? <div className="mt-3"><RequestError error={hits.error} /></div> : null}
-        {submitted.length >= 2 && hits.data ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            {hits.data.items.length === 0
-              ? `No indexed excerpts matched “${submitted}”.`
-              : `${hits.data.items.length} excerpt${hits.data.items.length === 1 ? "" : "s"} matched “${submitted}”. Order follows the stored search rank.`}
-          </p>
-        ) : null}
-        <ul className="mt-3 space-y-3">
-          {hits.data?.items.map((hit) => (
-            <li key={hit.id} className="rounded-md border border-border bg-background p-3 text-sm">
-              <p className="font-medium">
-                {hit.document_title}
-                {hit.page_number !== null ? ` · page ${hit.page_number}` : ""}
-              </p>
-              <p className="mt-2 whitespace-pre-wrap leading-6 text-muted-foreground">{hit.content}</p>
-            </li>
-          ))}
-        </ul>
-      </section>
-      <section className="rounded-xl border border-border bg-card">
+      <section className="min-w-0 overflow-x-auto rounded-[10px] bg-muted">
         {documents.isPending ? <div className="space-y-2 p-4"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div> : null}
         {documents.isError ? <div className="p-4"><RequestError error={documents.error} /></div> : null}
         {documents.data && documents.data.items.length === 0 ? (
@@ -182,13 +156,53 @@ function KnowledgeWorkspace({
           </Table>
         ) : null}
       </section>
-      {selectedId ? (
-        <ChunkList
-          organizationId={organizationId}
-          documentId={selectedId}
-          status={documents.data?.items.find((item) => item.id === selectedId)?.status ?? "pending"}
-        />
-      ) : null}
+      </div>
+      <div className="flex flex-col gap-4">
+      <section className="rounded-[10px] bg-muted p-4">
+        <h2 className="text-sm font-medium">Search</h2>
+        <form
+          className="mt-3 flex flex-col gap-3 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setSubmitted(search.trim());
+          }}
+        >
+          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search indexed text" aria-label="Search documents" />
+          <Button type="submit">Search</Button>
+        </form>
+        {submitted.length > 0 && submitted.length < 2 ? (
+          <p className="mt-3 text-sm text-muted-foreground">Enter at least two characters.</p>
+        ) : null}
+        {hits.isFetching ? <p className="mt-3 text-sm text-muted-foreground">Searching…</p> : null}
+        {hits.isError ? <div className="mt-3"><RequestError error={hits.error} /></div> : null}
+        {submitted.length >= 2 && hits.data ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            {hits.data.items.length === 0
+              ? `No indexed excerpts matched “${submitted}”.`
+              : `${hits.data.items.length} excerpt${hits.data.items.length === 1 ? "" : "s"} matched “${submitted}”. Order follows the stored search rank.`}
+          </p>
+        ) : null}
+        <ul className="mt-3 space-y-3">
+          {hits.data?.items.map((hit) => (
+              <li key={hit.id} className="rounded-[10px] bg-secondary p-3 text-sm">
+              <p className="font-medium">
+                {hit.document_title}
+                {hit.page_number !== null ? ` · page ${hit.page_number}` : ""}
+              </p>
+              <p className="mt-2 whitespace-pre-wrap leading-6 text-muted-foreground">{hit.content}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+      {selected ? (
+        <ChunkList organizationId={organizationId} document={selected} />
+      ) : (
+        <p className="rounded-[10px] bg-muted p-4 text-sm text-muted-foreground">
+          Select a document to inspect its extracted passages, source metadata, and any processing error.
+        </p>
+      )}
+      </div>
+      </div>
     </div>
   );
 }
@@ -225,7 +239,7 @@ function DocumentRow({
         {remove.isError ? <RequestError error={remove.error} /> : null}
       </TableCell>
       <TableCell>
-        <Badge variant={statusVariant(document.status)}>{document.status}</Badge>
+        <p className={`text-xs uppercase tracking-[0.12em] ${statusClass(document.status)}`}>{document.status}</p>
         <p className="mt-1 max-w-48 text-xs leading-5 text-muted-foreground">{statusCopy(document.status)}</p>
       </TableCell>
       <TableCell>{Math.ceil(document.byte_size / 1024)} KB</TableCell>
@@ -250,22 +264,28 @@ function DocumentRow({
 
 function ChunkList({
   organizationId,
-  documentId,
-  status,
+  document,
 }: {
   organizationId: string;
-  documentId: string;
-  status: DocumentStatus;
+  document: KnowledgeDocument;
 }) {
+  const status = document.status;
   const chunks = useQuery({
-    queryKey: ["document-chunks", organizationId, documentId, status],
-    queryFn: () => documentChunks(organizationId, documentId),
+    queryKey: ["document-chunks", organizationId, document.id, status],
+    queryFn: () => documentChunks(organizationId, document.id),
     refetchInterval: status === "pending" || status === "processing" ? 2000 : false,
   });
   return (
-    <section className="rounded-xl border border-border bg-card p-4">
-      <h2 className="text-base font-semibold">Extracted text</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{statusCopy(status)}</p>
+    <section className="rounded-[10px] bg-muted p-4">
+      <h2 className="text-base text-foreground">{document.title}</h2>
+      <p className={`mt-2 text-xs uppercase tracking-[0.12em] ${statusClass(status)}`}>{statusCopy(status)}</p>
+      <dl className="mt-4 space-y-2 text-xs text-muted-foreground">
+        <div><dt className="text-subtle">File</dt><dd>{document.filename}</dd></div>
+        <div><dt className="text-subtle">Type</dt><dd>{document.media_type}</dd></div>
+        <div><dt className="text-subtle">Size</dt><dd>{Math.ceil(document.byte_size / 1024)} KB</dd></div>
+        <div><dt className="text-subtle">Updated</dt><dd>{new Date(document.updated_at).toLocaleString()}</dd></div>
+      </dl>
+      {document.error_message ? <p className="mt-4 text-sm leading-6 text-destructive">{document.error_message}</p> : null}
       {chunks.isPending ? <Skeleton className="mt-3 h-16 w-full" /> : null}
       {chunks.isError ? <div className="mt-3"><RequestError error={chunks.error} /></div> : null}
       {chunks.data && chunks.data.items.length === 0 ? (
@@ -277,7 +297,7 @@ function ChunkList({
       ) : null}
       <ul className="mt-3 space-y-3">
         {chunks.data?.items.map((chunk) => (
-          <li key={chunk.id} className="rounded-md border border-border p-3 text-sm">
+          <li key={chunk.id} className="rounded-[10px] bg-secondary p-3 text-sm">
             <p className="text-xs text-muted-foreground">
               Chunk {chunk.chunk_index + 1}
               {chunk.page_number !== null ? ` · page ${chunk.page_number}` : ""}

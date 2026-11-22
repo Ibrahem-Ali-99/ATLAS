@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.domains.agents.models import RunStatus
 from app.domains.approvals.schemas import ApprovalOut
+from app.domains.provenance.origin import Origin
 
 
 class StartRun(BaseModel):
@@ -36,6 +37,7 @@ class AgentRunOut(BaseModel):
     qualification: str | None
     error_code: str | None
     error_message: str | None
+    origin: Origin
     started_at: datetime
     finished_at: datetime | None
 

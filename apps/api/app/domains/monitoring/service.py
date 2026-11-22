@@ -16,6 +16,7 @@ from app.domains.automation.models import (
 )
 from app.domains.crm.models import Inquiry
 from app.domains.observability.models import OperationTrace
+from app.domains.provenance.origin import DataScope, scope_clause
 
 _HINTS = {
     "callback_missing": "n8n acknowledged the lead event and no matching callback is stored.",
@@ -27,7 +28,9 @@ _HINTS = {
 }
 
 
-def diagnostics(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
+def diagnostics(
+    db: Session, organization_id: uuid.UUID, scope: DataScope = DataScope.operational
+) -> dict[str, Any]:
     traces = list(
         db.scalars(
             select(OperationTrace)
@@ -39,7 +42,7 @@ def diagnostics(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
     failed_runs = list(
         db.scalars(
             select(AgentRun)
-            .where(AgentRun.organization_id == organization_id, AgentRun.status == RunStatus.failed)
+            .where(*_scoped(AgentRun, organization_id, scope), AgentRun.status == RunStatus.failed)
             .order_by(AgentRun.started_at.desc())
             .limit(20)
         )
@@ -48,7 +51,7 @@ def diagnostics(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
         db.scalars(
             select(Approval)
             .where(
-                Approval.organization_id == organization_id,
+                *_scoped(Approval, organization_id, scope),
                 Approval.status == ApprovalStatus.needs_attention,
             )
             .limit(20)
@@ -58,7 +61,7 @@ def diagnostics(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
         db.scalars(
             select(WorkflowRun)
             .where(
-                WorkflowRun.organization_id == organization_id,
+                *_scoped(WorkflowRun, organization_id, scope),
                 WorkflowRun.status.in_([WorkflowStatus.failed, WorkflowStatus.needs_attention]),
             )
             .order_by(WorkflowRun.created_at.desc())
@@ -70,7 +73,7 @@ def diagnostics(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
             select(func.count())
             .select_from(ExecutionAttempt)
             .where(
-                ExecutionAttempt.organization_id == organization_id,
+                *_scoped(ExecutionAttempt, organization_id, scope),
                 ExecutionAttempt.outcome.in_(("failed", "uncertain")),
             )
         )
@@ -78,6 +81,7 @@ def diagnostics(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
     )
     costs = [trace.cost_usd for trace in traces if trace.cost_usd is not None]
     return {
+        "scope": scope.value,
         "hint_notice": "Hints name a recorded error code. They are not a root-cause finding.",
         "failed_runs": [
             {"id": run.id, "error_code": run.error_code, "hint": _HINTS.get(run.error_code or "")}
@@ -115,6 +119,14 @@ def diagnostics(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
             "and the provider reported usage."
         ),
     }
+
+
+def _scoped(model: Any, organization_id: uuid.UUID, scope: DataScope) -> list[Any]:
+    filters = [model.organization_id == organization_id]
+    clause = scope_clause(model.origin, scope)
+    if clause is not None:
+        filters.append(clause)
+    return filters
 
 
 def trace_run(db: Session, organization_id: uuid.UUID, run_id: uuid.UUID) -> dict[str, Any]:

@@ -12,6 +12,7 @@ from app.domains.knowledge.chunking import chunk_pages
 from app.domains.knowledge.extract import extract_text
 from app.domains.knowledge.models import Chunk, Document, DocumentStatus
 from app.domains.knowledge.vectors import store_chunk_embedding
+from app.domains.provenance.origin import Origin
 from app.integrations.language import EmbeddingClient, get_embedding_client
 
 logger = structlog.get_logger(__name__)
@@ -56,6 +57,7 @@ def store_upload(
     filename: str,
     media_type: str,
     payload: bytes,
+    origin: Origin = Origin.operational,
 ) -> Document:
     settings = get_settings()
     safe_name = Path(filename).name.strip()
@@ -80,6 +82,7 @@ def store_upload(
         byte_size=len(payload),
         storage_path="",
         status=DocumentStatus.pending,
+        origin=origin,
     )
     db.add(document)
     db.flush()

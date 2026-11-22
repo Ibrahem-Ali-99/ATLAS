@@ -102,6 +102,7 @@ export async function apiStream<T>(
   path: string,
   body: unknown,
   onToken: (text: string) => void,
+  onPhase?: (phase: string) => void,
 ): Promise<T> {
   const headers = new Headers({
     Accept: "text/event-stream",
@@ -158,6 +159,11 @@ export async function apiStream<T>(
         const payload = JSON.parse(data) as { text?: unknown };
         if (typeof payload.text === "string") {
           onToken(payload.text);
+        }
+      } else if (name === "phase") {
+        const payload = JSON.parse(data) as { phase?: unknown };
+        if (typeof payload.phase === "string") {
+          onPhase?.(payload.phase);
         }
       } else if (name === "done") {
         result = JSON.parse(data) as T;

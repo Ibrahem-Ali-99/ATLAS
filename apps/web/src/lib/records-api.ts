@@ -221,10 +221,12 @@ export function streamConversationMessage(
   conversationId: string,
   content: string,
   onToken: (text: string) => void,
+  onPhase?: (phase: string) => void,
 ): Promise<AssistantReply> {
   return apiStream(
     organizationPath(organizationId, `/conversations/${conversationId}/messages/stream`),
     { content },
     onToken,
+    onPhase,
   );
 }

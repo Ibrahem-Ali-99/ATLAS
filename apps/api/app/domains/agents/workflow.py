@@ -16,6 +16,7 @@ from app.domains.agents.models import AgentRun, RunStatus
 from app.domains.approvals.models import ActionType, ApprovalStatus
 from app.domains.approvals.service import create_approval, execute_decisions, list_for_run
 from app.domains.crm import service as crm
+from app.domains.knowledge.attribution import attribute_answer
 from app.integrations.business_mcp import BusinessTools, TransientToolError
 from app.integrations.language import ChatClient
 
@@ -159,7 +160,10 @@ def retrieve_knowledge(state: AgentState) -> dict[str, Any]:
         run,
         "retrieve_knowledge",
         "succeeded",
-        {"hits": [_hit_summary(hit) for hit in hits]},
+        {
+            "hits": [_hit_summary(hit) for hit in hits],
+            "evidence": [_hit_summary(hit) for hit in _supporting_hits(state, hits)],
+        },
     )
     return {"knowledge": hits}
 
@@ -367,9 +371,39 @@ def _appointment_start() -> datetime:
     return (datetime.now(UTC) + timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
 
 
+def _supporting_hits(state: AgentState, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep retrieved rows that contain a fact in the classification.
+
+    The full tool result stays on the event. This list is not a new model judgment.
+    """
+
+    claims = " ".join(
+        text
+        for key in ("summary", "lead_title", "draft_response")
+        if isinstance((text := state.get(key)), str) and text.strip()
+    )
+    question = f"{state.get('subject', '')}\n{state.get('body', '')}"
+    passages = [
+        (
+            str(hit.get("chunk_id") or hit.get("document_title") or index),
+            str(hit.get("content") or ""),
+        )
+        for index, hit in enumerate(hits)
+    ]
+    _stored, cited = attribute_answer(question, claims, passages)
+    cited_ids = set(cited)
+    return [
+        hit
+        for index, hit in enumerate(hits)
+        if str(hit.get("chunk_id") or hit.get("document_title") or index) in cited_ids
+    ]
+
+
 def _hit_summary(hit: dict[str, Any]) -> dict[str, Any]:
     content = hit.get("content")
     return {
+        "document_id": hit.get("document_id"),
+        "chunk_id": hit.get("chunk_id"),
         "document_title": hit.get("document_title"),
         "score": hit.get("score"),
         "excerpt": content[:180] if isinstance(content, str) else "",

@@ -12,6 +12,56 @@ def _config() -> Config:
     return Config(str(API_ROOT / "alembic.ini"))
 
 
+def test_origin_migration_leaves_existing_rows_unknown() -> None:
+    ensure_database("atlas_migration_test")
+    engine = create_engine(MIGRATION_DATABASE_URL, pool_pre_ping=True)
+    with engine.begin() as connection:
+        connection.execute(text("DROP SCHEMA public CASCADE"))
+        connection.execute(text("CREATE SCHEMA public"))
+    engine.dispose()
+    config = _config()
+    command.upgrade(config, "20261122_0010")
+    engine = create_engine(MIGRATION_DATABASE_URL, pool_pre_ping=True)
+    user_id = "00000000-0000-4000-8000-000000000011"
+    org_id = "00000000-0000-4000-8000-000000000012"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO users (id, email, full_name, password_hash)
+                VALUES (:id, 'legacy@example.com', 'Legacy', 'hash')
+                """
+            ),
+            {"id": user_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO organizations (id, name, slug)
+                VALUES (:id, 'Legacy Org', 'legacy-org')
+                """
+            ),
+            {"id": org_id},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO leads (organization_id, owner_user_id, title, status)
+                VALUES (:org, :owner, 'Historical lead', 'new')
+                """
+            ),
+            {"org": org_id, "owner": user_id},
+        )
+    engine.dispose()
+    command.upgrade(config, "head")
+    engine = create_engine(MIGRATION_DATABASE_URL, pool_pre_ping=True)
+    with engine.connect() as connection:
+        origin = connection.execute(text("SELECT origin FROM leads")).scalar()
+    engine.dispose()
+    assert origin == "unknown"
+    command.downgrade(config, "base")
+
+
 def test_migrations_upgrade_downgrade_and_reupgrade() -> None:
     ensure_database("atlas_migration_test")
     engine = create_engine(MIGRATION_DATABASE_URL, pool_pre_ping=True)

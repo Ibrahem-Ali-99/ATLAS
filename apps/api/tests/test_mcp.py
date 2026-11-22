@@ -1,15 +1,26 @@
 import asyncio
 import json
+import sys
 import uuid
+from pathlib import Path
 
+import pytest
 from mcp import Client
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings
 from app.domains.crm.models import Lead, LeadStatus
 from app.domains.crm.service import create_company, create_contact, create_lead
 from app.domains.identity.models import MembershipRole
 from app.integrations.business_mcp import server_parameters
+from app.integrations.mcp_runtime import (
+    probe_mcp_interpreter,
+    public_tool_message,
+    resolve_mcp_python,
+    venv_python,
+)
 from tests.factories import make_membership, make_organization, make_user
 
 
@@ -21,6 +32,8 @@ def test_mcp_child_receives_the_embedding_provider(monkeypatch) -> None:
     assert env["ATLAS_LLM_MODEL"]
     assert env["ATLAS_PUBLIC_DEMO"] == "false"
     assert "ATLAS_LLM_API_KEY" not in env
+    assert env["ATLAS_MCP_ORGANIZATION_ID"]
+    assert server_parameters(uuid.uuid4()).command == resolve_mcp_python()
 
 
 def test_mcp_stdio_session_is_read_only_and_organization_scoped(db: Session) -> None:
@@ -98,6 +111,56 @@ def _text(result: object) -> str:
         if isinstance(text, str):
             parts.append(text)
     return "".join(parts)
+
+
+def test_selected_interpreter_loads_the_mcp_server() -> None:
+    status = probe_mcp_interpreter()
+    assert status.category == "ready"
+    assert status.exit_code == 0
+    assert Path(status.executable).is_file()
+    assert server_parameters(uuid.uuid4()).command == status.executable
+
+
+def test_missing_import_is_classified_without_the_stderr_body() -> None:
+    status = probe_mcp_interpreter(sys.executable, statement="import atlas_mcp_dependency_missing")
+    assert status.category == "import_failure"
+    assert status.exit_code == 1
+    assert status.exception_type == "ModuleNotFoundError"
+
+
+def test_resolver_uses_the_virtualenv_when_the_process_image_is_the_base(tmp_path: Path) -> None:
+    candidate = venv_python(tmp_path)
+    candidate.parent.mkdir()
+    candidate.write_bytes(b"")
+    selected = resolve_mcp_python(
+        configured="",
+        executable=str(tmp_path / "base-python"),
+        prefix=str(tmp_path),
+        base_prefix=str(tmp_path / "base"),
+        virtual_env=None,
+    )
+    assert selected == str(candidate)
+
+
+def test_configured_interpreter_must_exist(tmp_path: Path) -> None:
+    missing = tmp_path / "missing-python"
+    with pytest.raises(ValueError, match="ATLAS_MCP_PYTHON"):
+        resolve_mcp_python(configured=str(missing))
+    with pytest.raises(ValidationError):
+        Settings(
+            secret_key="test-secret-key-must-be-32-chars-min",
+            database_url="postgresql+psycopg://atlas:atlas@localhost/atlas",
+            mcp_python=str(missing),
+        )
+
+
+def test_public_tool_message_drops_secret_text() -> None:
+    assert public_tool_message("Error executing tool search_company_knowledge") == (
+        "Error executing tool search_company_knowledge"
+    )
+    assert public_tool_message("postgresql+psycopg://atlas:atlas@localhost/atlas") == (
+        "The business tool failed"
+    )
 
 
 def _titles(db: Session, organization_id: uuid.UUID) -> list[str]:

@@ -26,6 +26,8 @@ class WorkflowRunOut(BaseModel):
     attempt_count: int
     last_error: str | None
     created_at: datetime
+    lead_title: str | None = None
+    company_name: str | None = None
     attempts: list[AttemptOut]
 
 
@@ -53,6 +55,12 @@ class AutomationCard(BaseModel):
     name: str
     trigger: str
     description: str
+    kind: str
+    completed: int
+    awaiting_review: int
+    needs_attention: int
+    failed: int
+    configured: bool
 
 
 class AutomationSnapshot(BaseModel):

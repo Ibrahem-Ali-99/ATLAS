@@ -107,6 +107,13 @@ def test_successful_run_pauses_resumes_and_writes_once(client: TestClient, db: S
                 for hit in event["detail"]["hits"]
             ]
             assert "Harbor services" in titles
+            evidence = [
+                hit["document_title"]
+                for event in body["events"]
+                if event["step"] == "retrieve_knowledge"
+                for hit in event["detail"]["evidence"]
+            ]
+            assert set(evidence) <= set(titles)
             assert _lead_count(db, organization_id) == 0
             run_id = body["run"]["id"]
             for approval in body["approvals"]:

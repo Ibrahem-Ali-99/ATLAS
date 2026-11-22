@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.domains.provenance.origin import Origin, origin_column
 
 EMBEDDING_DIMENSIONS = 1536
 
@@ -44,6 +45,7 @@ class Document(Base):
     byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
     storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[DocumentStatus] = mapped_column(DOCUMENT_STATUS, nullable=False)
+    origin: Mapped[Origin] = origin_column()
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

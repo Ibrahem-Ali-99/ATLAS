@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import AppError
 from app.domains.crm.models import Company, Contact, Inquiry, Interaction, Lead
 from app.domains.identity.service import get_membership
+from app.domains.provenance.origin import Origin, stated_origin
 
 
 def _text(value: object) -> str:
@@ -72,6 +73,18 @@ def _apply(record: object, values: dict[str, object]) -> None:
         setattr(record, key, value)
 
 
+def _with_origin(
+    values: dict[str, object], *, default: Origin = Origin.operational
+) -> dict[str, object]:
+    copied = dict(values)
+    copied["origin"] = stated_origin(copied.get("origin"), default=default)
+    return copied
+
+
+def _editable(values: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in values.items() if key != "origin"}
+
+
 def list_companies(
     db: Session, organization_id: uuid.UUID, *, q: str | None, page: int, page_size: int
 ) -> tuple[list[Company], int]:
@@ -86,7 +99,7 @@ def list_companies(
 
 
 def create_company(db: Session, organization_id: uuid.UUID, values: dict[str, object]) -> Company:
-    company = Company(organization_id=organization_id, **values)
+    company = Company(organization_id=organization_id, **_with_origin(values))
     db.add(company)
     db.commit()
     db.refresh(company)
@@ -101,7 +114,7 @@ def update_company(
     db: Session, organization_id: uuid.UUID, company_id: uuid.UUID, values: dict[str, object]
 ) -> Company:
     company = _company(db, organization_id, company_id)
-    _apply(company, values)
+    _apply(company, _editable(values))
     db.commit()
     db.refresh(company)
     return company
@@ -147,7 +160,7 @@ def create_contact(db: Session, organization_id: uuid.UUID, values: dict[str, ob
     company_id = values.get("company_id")
     if isinstance(company_id, uuid.UUID):
         _company(db, organization_id, company_id)
-    contact = Contact(organization_id=organization_id, **values)
+    contact = Contact(organization_id=organization_id, **_with_origin(values))
     db.add(contact)
     db.commit()
     db.refresh(contact)
@@ -164,7 +177,7 @@ def update_contact(
     contact = _contact(db, organization_id, contact_id)
     if "company_id" in values and isinstance(values["company_id"], uuid.UUID):
         _company(db, organization_id, values["company_id"])
-    _apply(contact, values)
+    _apply(contact, _editable(values))
     db.commit()
     db.refresh(contact)
     return contact
@@ -184,10 +197,13 @@ def list_leads(
     status: str | None,
     company_id: uuid.UUID | None,
     owner_user_id: uuid.UUID | None,
+    origin: str | None,
     page: int,
     page_size: int,
 ) -> tuple[list[Lead], int]:
     query = select(Lead).where(Lead.organization_id == organization_id)
+    if origin:
+        query = query.where(Lead.origin == stated_origin(origin, default=Origin.operational))
     if status:
         query = query.where(Lead.status == status)
     if company_id is not None:
@@ -230,7 +246,7 @@ def create_lead(
     if isinstance(contact_id, uuid.UUID):
         _contact(db, organization_id, contact_id)
     values["owner_user_id"] = owner_id
-    lead = Lead(organization_id=organization_id, **values)
+    lead = Lead(organization_id=organization_id, **_with_origin(values))
     db.add(lead)
     _persist(db, lead, commit=commit)
     return lead
@@ -258,7 +274,7 @@ def update_lead(
         _company(db, organization_id, company_id)
     if isinstance(contact_id, uuid.UUID):
         _contact(db, organization_id, contact_id)
-    _apply(lead, values)
+    _apply(lead, _editable(values))
     _persist(db, lead, commit=commit)
     return lead
 
@@ -294,8 +310,10 @@ def create_inquiry(db: Session, organization_id: uuid.UUID, values: dict[str, ob
     if isinstance(company_id, uuid.UUID):
         _company(db, organization_id, company_id)
     if isinstance(lead_id, uuid.UUID):
-        _lead(db, organization_id, lead_id)
-    inquiry = Inquiry(organization_id=organization_id, **values)
+        parent = _lead(db, organization_id, lead_id)
+        if values.get("origin") is None:
+            values["origin"] = parent.origin
+    inquiry = Inquiry(organization_id=organization_id, **_with_origin(values))
     db.add(inquiry)
     db.commit()
     db.refresh(inquiry)
@@ -322,7 +340,7 @@ def update_inquiry(
         _company(db, organization_id, company_id)
     if isinstance(lead_id, uuid.UUID):
         _lead(db, organization_id, lead_id)
-    _apply(inquiry, values)
+    _apply(inquiry, _editable(values))
     db.commit()
     db.refresh(inquiry)
     return inquiry
@@ -356,12 +374,12 @@ def add_interaction(
     *,
     commit: bool = True,
 ) -> Interaction:
-    _lead(db, organization_id, lead_id)
+    lead = _lead(db, organization_id, lead_id)
     interaction = Interaction(
         organization_id=organization_id,
         lead_id=lead_id,
         author_user_id=author_user_id,
-        **values,
+        **_with_origin(values, default=lead.origin),
     )
     db.add(interaction)
     _persist(db, interaction, commit=commit)
@@ -467,6 +485,27 @@ def search_records(
                 "record_id": str(contact.id),
                 "title": contact.full_name,
                 "excerpt": contact.email or contact.title or contact.full_name,
+            }
+        )
+    inquiry_match = or_(
+        *[
+            or_(Inquiry.subject.ilike(f"%{term}%"), Inquiry.body.ilike(f"%{term}%"))
+            for term in terms
+        ]
+    )
+    inquiries = db.scalars(
+        select(Inquiry)
+        .where(Inquiry.organization_id == organization_id, inquiry_match)
+        .order_by(Inquiry.created_at.desc())
+        .limit(limit)
+    ).all()
+    for inquiry in inquiries:
+        records.append(
+            {
+                "record_type": "inquiry",
+                "record_id": str(inquiry.id),
+                "title": inquiry.subject,
+                "excerpt": (inquiry.body or inquiry.subject)[:400],
             }
         )
     return records[:limit]

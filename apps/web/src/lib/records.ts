@@ -169,7 +169,7 @@ export type ConversationDetail = Conversation & {
 export type AssistantReply = {
   conversation_id: string;
   message: ChatMessage;
-  document_search: "ready" | "empty" | "unconfigured" | "unavailable";
+  document_search: "ready" | "empty" | "unconfigured" | "unavailable" | "skipped";
 };
 
 export function blankToNull(value: string | null | undefined): string | null {
