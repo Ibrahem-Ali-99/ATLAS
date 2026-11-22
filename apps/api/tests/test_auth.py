@@ -1,0 +1,127 @@
+import uuid
+
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.config import get_settings
+from app.core.security import sign_session_id
+from app.domains.identity.models import MembershipRole, UserSession
+from tests.factories import PASSWORD, make_membership, make_organization, make_user
+from tests.helpers import login
+
+
+def test_login_and_current_user(client: TestClient, db: Session) -> None:
+    user = make_user(db, "ada@example.com", full_name="Ada Admin")
+    organization = make_organization(db, "Atlas Demo", "atlas-demo")
+    make_membership(db, user, organization, MembershipRole.admin)
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "Ada@Example.com", "password": PASSWORD},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user"]["email"] == "ada@example.com"
+    assert body["user"]["full_name"] == "Ada Admin"
+    assert "password_hash" not in body["user"]
+    assert PASSWORD not in response.text
+    assert body["csrf_token"]
+    assert body["memberships"][0]["role"] == "admin"
+
+    me = client.get("/api/v1/auth/me")
+    assert me.status_code == 200
+    assert me.json()["user"]["id"] == str(user.id)
+    assert me.json()["csrf_token"] == body["csrf_token"]
+
+
+def test_login_cookie_is_httponly(client: TestClient, db: Session) -> None:
+    make_user(db, "ada@example.com")
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "ada@example.com", "password": PASSWORD},
+    )
+    header = response.headers["set-cookie"].lower()
+    assert "atlas_session=" in header
+    assert "httponly" in header
+    assert "samesite=lax" in header
+
+
+def test_invalid_credentials_are_indistinguishable(client: TestClient, db: Session) -> None:
+    make_user(db, "ada@example.com")
+    unknown = client.post(
+        "/api/v1/auth/login",
+        json={"email": "missing@example.com", "password": PASSWORD},
+    )
+    wrong = client.post(
+        "/api/v1/auth/login",
+        json={"email": "ada@example.com", "password": "wrong-password"},
+    )
+    inactive_user = make_user(db, "inactive@example.com", is_active=False)
+    inactive = client.post(
+        "/api/v1/auth/login",
+        json={"email": inactive_user.email, "password": PASSWORD},
+    )
+    assert unknown.status_code == wrong.status_code == inactive.status_code == 401
+    assert unknown.json() == wrong.json() == inactive.json()
+    assert unknown.json()["error"]["code"] == "invalid_credentials"
+
+
+def test_password_is_stored_as_argon2_hash(db: Session) -> None:
+    user = make_user(db, "ada@example.com")
+    assert user.password_hash != PASSWORD
+    assert user.password_hash.startswith("$argon2")
+
+
+def test_me_requires_authentication(client: TestClient) -> None:
+    response = client.get("/api/v1/auth/me")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "unauthenticated"
+
+
+def test_tampered_cookie_is_rejected(client: TestClient, db: Session) -> None:
+    make_user(db, "ada@example.com")
+    login(client, "ada@example.com", PASSWORD)
+    client.cookies.clear()
+    client.cookies.set("atlas_session", "tampered-value")
+    response = client.get("/api/v1/auth/me")
+    assert response.status_code == 401
+
+
+def test_signed_cookie_without_server_session_is_rejected(client: TestClient) -> None:
+    token = sign_session_id(uuid.uuid4(), get_settings().secret_key)
+    client.cookies.set("atlas_session", token)
+    response = client.get("/api/v1/auth/me")
+    assert response.status_code == 401
+
+
+def test_logout_rejects_wrong_csrf_without_revoking(client: TestClient, db: Session) -> None:
+    make_user(db, "ada@example.com")
+    login(client, "ada@example.com", PASSWORD)
+    rejected = client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": "not-the-session-token"})
+    assert rejected.status_code == 403
+    assert rejected.json()["error"]["code"] == "csrf_failed"
+    assert client.get("/api/v1/auth/me").status_code == 200
+    db.expire_all()
+    record = db.scalar(select(UserSession))
+    assert record is not None
+    assert record.revoked_at is None
+
+
+def test_logout_requires_csrf_and_revokes_session(client: TestClient, db: Session) -> None:
+    make_user(db, "ada@example.com")
+    body = login(client, "ada@example.com", PASSWORD)
+    missing = client.post("/api/v1/auth/logout")
+    assert missing.status_code == 403
+    assert missing.json()["error"]["code"] == "csrf_failed"
+    assert client.get("/api/v1/auth/me").status_code == 200
+
+    logged_out = client.post(
+        "/api/v1/auth/logout",
+        headers={"X-CSRF-Token": str(body["csrf_token"])},
+    )
+    assert logged_out.status_code == 204
+    assert client.get("/api/v1/auth/me").status_code == 401
+    db.expire_all()
+    record = db.scalar(select(UserSession))
+    assert record is not None
+    assert record.revoked_at is not None
