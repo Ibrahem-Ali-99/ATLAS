@@ -45,6 +45,8 @@ npm run dev -- --hostname 127.0.0.1 --port 3000
 
 Open http://127.0.0.1:3000. The page and `NEXT_PUBLIC_API_URL` must use the same loopback host (`127.0.0.1` or `localhost`); browsers treat those names as different sites, and the API only listens on IPv4 `127.0.0.1`. CORS allows both `http://127.0.0.1:3000` and `http://localhost:3000`. API docs are at http://127.0.0.1:8000/docs when `ATLAS_ENVIRONMENT` is not `production`.
 
+Container startup, health checks, and a single-origin hosting layout are in `docs/deployment.md`. Do not start the Compose `api` or `web` services while the host processes above are using ports 8000 and 3000.
+
 If another Postgres instance already owns host port 5432, set `POSTGRES_PORT` and the port in `ATLAS_DATABASE_URL` to a free port, then run `docker compose up -d postgres` again. The API container still reaches Postgres on the internal port 5432.
 
 Mailpit accepts sandbox SMTP on port 1025 and shows the mailbox at `http://127.0.0.1:8025`. n8n listens on port 5678. An API process on the host dispatches lead events to `http://127.0.0.1:5678/webhook/atlas-lead`. The Compose API service uses `http://n8n:5678/webhook/atlas-lead` on the Docker network. n8n calls the host API at `http://host.docker.internal:8000`. Import `infrastructure/n8n/lead-processing.json` and `infrastructure/n8n/follow-up.json`, then copy the ATLAS webhook key into `ATLAS_HOOK_KEY_ID` and `ATLAS_HOOK_SECRET` for the scheduled follow-up. The daily schedule and the manual trigger both enter the same signer. This n8n release starts `n8n execute` from a manual trigger, not from the schedule node. The webhook rate limit is counted inside each API process and is not shared across instances. Leave `ATLAS_EMAIL_MODE` as `sandbox` unless live delivery is explicitly enabled. Calendar bookings in this release use the simulation adapter and stay in ATLAS.
@@ -99,7 +101,10 @@ Frontend checks, from `apps\web`. `next build` must run before `tsc` on a clean 
 npm run lint
 npm run build
 npm run typecheck
+npm run e2e
 ```
+
+`npm run e2e` starts an API on port 8010 against the `atlas_e2e` database and the web dev server on port 3010. It does not call a paid model.
 
 ## Security boundaries in this release
 
@@ -109,7 +114,7 @@ npm run typecheck
 - State-changing requests other than login require the CSRF token returned by login and `/api/v1/auth/me`.
 - Organization routes load the membership for the authenticated user. They do not treat a client-supplied organization id or role as authorization.
 
-Rate limiting, a production penetration test, and browser-level cookie checks are not part of this release. Do not treat the items above as a completed security audit.
+Webhook callbacks are rate limited inside each API process. Login attempts are not. Change the seed passwords before any shared environment, and leave model keys and the n8n URL empty on a public demo. Playwright covers the signed-in workspace in `apps/web/e2e`. That run uses deterministic providers and is not a penetration test. Do not treat this list as a completed security audit.
 
 ## Layout
 
@@ -122,5 +127,5 @@ scripts           Seed wrapper and local quality checks
 .github           CI
 automation        Reserved
 evaluation        Reserved
-docs              Short architecture note
+docs              Architecture and deployment notes
 ```

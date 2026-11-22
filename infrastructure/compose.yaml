@@ -38,6 +38,12 @@ services:
       ATLAS_MAX_COSINE_DISTANCE: ${ATLAS_MAX_COSINE_DISTANCE:-0.55}
       ATLAS_MAX_UPLOAD_BYTES: ${ATLAS_MAX_UPLOAD_BYTES:-10485760}
       ATLAS_STORAGE_DIR: /var/lib/atlas/storage
+      ATLAS_MODEL_DIR: /var/lib/atlas/models
+      ATLAS_LLM_PROVIDER: ${ATLAS_LLM_PROVIDER:-openai}
+      ATLAS_EMBEDDING_PROVIDER: ${ATLAS_EMBEDDING_PROVIDER:-openai}
+      ATLAS_LANGFUSE_PUBLIC_KEY: ${ATLAS_LANGFUSE_PUBLIC_KEY:-}
+      ATLAS_LANGFUSE_SECRET_KEY: ${ATLAS_LANGFUSE_SECRET_KEY:-}
+      ATLAS_LANGFUSE_HOST: ${ATLAS_LANGFUSE_HOST:-}
       ATLAS_PUBLIC_API_URL: ${ATLAS_PUBLIC_API_URL:-http://api:8000}
       ATLAS_N8N_LEAD_WEBHOOK_URL: ${ATLAS_N8N_LEAD_WEBHOOK_URL:-http://n8n:5678/webhook/atlas-lead}
       ATLAS_EMAIL_MODE: ${ATLAS_EMAIL_MODE:-sandbox}
@@ -47,6 +53,7 @@ services:
       ATLAS_CALENDAR_MODE: simulation
     volumes:
       - atlas_uploads:/var/lib/atlas/storage
+      - atlas_models:/var/lib/atlas/models
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -60,13 +67,27 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/ready')",
         ]
       interval: 10s
       timeout: 5s
       retries: 12
       start_period: 40s
-    restart: on-failure
+    restart: unless-stopped
+
+  web:
+    profiles: ["demo"]
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 
   mailpit:
     image: axllent/mailpit:v1.21
@@ -107,5 +128,6 @@ services:
 volumes:
   atlas_postgres_data:
   atlas_uploads:
+  atlas_models:
   atlas_mailpit_data:
   atlas_n8n_data:

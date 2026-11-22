@@ -1,3 +1,5 @@
+# API image. Training, ingestion resume, and workflow recovery run in this process.
+# Do not start a second copy of this image as a worker. That would recover the same rows twice.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

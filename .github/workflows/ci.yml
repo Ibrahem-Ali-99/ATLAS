@@ -59,6 +59,68 @@ jobs:
       - run: npm run build
       - run: npm run typecheck
 
+  browser:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: atlas
+          POSTGRES_PASSWORD: atlas
+          POSTGRES_DB: atlas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U atlas -d atlas"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: atlas
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      SEED_ADMIN_EMAIL: admin@example.com
+      SEED_ADMIN_PASSWORD: change-me-admin
+      SEED_ADMIN_NAME: Avery Admin
+      SEED_STAFF_EMAIL: staff@example.com
+      SEED_STAFF_PASSWORD: change-me-staff
+      SEED_STAFF_NAME: Sam Staff
+      SEED_OUTSIDER_EMAIL: outsider@example.org
+      SEED_OUTSIDER_PASSWORD: change-me-outsider
+      SEED_OUTSIDER_NAME: Olivia Outsider
+      ATLAS_SECRET_KEY: test-secret-key-must-be-32-chars-min
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install API dependencies
+        working-directory: apps/api
+        run: uv sync --frozen
+      - name: Install the web app and Playwright
+        working-directory: apps/web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Browser test
+        working-directory: apps/web
+        run: npx playwright test
+
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the API image
+        run: docker build -t atlas-api:ci apps/api
+      - name: Build the web image
+        run: docker build -t atlas-web:ci apps/web
+
   secrets:
     runs-on: ubuntu-latest
     steps:
