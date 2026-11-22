@@ -2,7 +2,7 @@
 
 ATLAS is a business operations command center: a Next.js dashboard, a FastAPI modular monolith, and PostgreSQL with pgvector.
 
-Day 1 covers authentication, organizations, memberships, and the dashboard shell. Day 2 adds organization-scoped CRM, document ingestion with hybrid retrieval, and a read-only assistant. Day 3 adds an inquiry agent. It proposes CRM changes and waits for an admin to approve them. Day 4 runs n8n workflows, signed webhooks, sandbox email through Mailpit, and simulated calendar bookings. Outbound email and bookings still wait for approval. Analytics remains an empty state. The assistant still does not create or change CRM records.
+Day 1 covers authentication, organizations, memberships, and the dashboard shell. Day 2 adds organization-scoped CRM, document ingestion with hybrid retrieval, and a read-only assistant. Day 3 adds an inquiry agent. It proposes CRM changes and waits for an admin to approve them. Day 4 runs n8n workflows, signed webhooks, sandbox email through Mailpit, and simulated calendar bookings. Outbound email and bookings still wait for approval. Day 5 adds a synthetic lead-score model, SQL analytics, local operation traces, and a deterministic evaluation suite. A prediction does not authorize a CRM write or an external action. Langfuse export stays off unless both keys are set. The assistant still does not create or change CRM records.
 
 ## Stack
 

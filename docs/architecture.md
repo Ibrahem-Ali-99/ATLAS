@@ -38,9 +38,17 @@ A customer response or appointment is an external action. Approval first stores 
 
 `ATLAS_APPROVAL_TTL_HOURS` defaults to 24. Tool reads retry up to three times. CRM writes are not retried.
 
+## Lead scores, analytics, and diagnostics
+
+Lead scoring trains on a documented synthetic dataset (`lead-synthetic-1`). The label uses a hidden budget band that is not a model feature, and lead status is not a feature. Logistic regression and a shallow decision tree are compared with a referral rule on a held-out fold. The served probability is sigmoid-calibrated on the training fold when that fit succeeds. The artifact lives under `var/atlas-models`, outside the upload directory, and the API does not return its path. A stored prediction is advisory. It does not change the lead, create an approval, or authorize an external action. The score is a synthetic-data demonstration, not a measurement of real conversion.
+
+Analytics reads the caller's organization. Conversion is won divided by won plus lost. Open leads are excluded, and the rate is absent when that denominator is zero. The lead trend is the last 30 UTC days, including days with zero. There is no revenue metric.
+
+Operation traces are stored locally. Langfuse export runs only when both keys are set, and a Langfuse failure leaves the local row in place with status `unavailable`. Token cost is stored only when the provider reported usage and both prices are configured. Traces omit prompt text, document text, and credential fields. The evaluation suite is a versioned set of deterministic checks. Its results are not live-model accuracy.
+
 ## Frontend
 
-`apps/web` is a Next.js App Router client of the API. Authenticated pages call `/api/v1/auth/me`. CRM, knowledge, the assistant, agent runs, approvals, and workflows call the organization routes with the session cookie. Workflows shows automation status, recent runs, sandbox email, and simulated bookings. It does not embed the n8n editor. Analytics still renders an explicit empty state.
+`apps/web` is a Next.js App Router client of the API. Authenticated pages call `/api/v1/auth/me`. CRM, knowledge, the assistant, agent runs, approvals, workflows, analytics, and monitoring call the organization routes with the session cookie. Workflows shows automation status, recent runs, sandbox email, and simulated bookings. It does not embed the n8n editor. Analytics and overview counts come from the analytics endpoint. An organization with no leads or inquiries sees an empty state.
 
 ## Engineering standards
 
