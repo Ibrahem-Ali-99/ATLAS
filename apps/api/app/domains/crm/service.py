@@ -469,4 +469,25 @@ def search_records(
                 "excerpt": contact.email or contact.title or contact.full_name,
             }
         )
+    inquiry_match = or_(
+        *[
+            or_(Inquiry.subject.ilike(f"%{term}%"), Inquiry.body.ilike(f"%{term}%"))
+            for term in terms
+        ]
+    )
+    inquiries = db.scalars(
+        select(Inquiry)
+        .where(Inquiry.organization_id == organization_id, inquiry_match)
+        .order_by(Inquiry.created_at.desc())
+        .limit(limit)
+    ).all()
+    for inquiry in inquiries:
+        records.append(
+            {
+                "record_type": "inquiry",
+                "record_id": str(inquiry.id),
+                "title": inquiry.subject,
+                "excerpt": (inquiry.body or inquiry.subject)[:400],
+            }
+        )
     return records[:limit]

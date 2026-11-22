@@ -66,7 +66,13 @@ def create_message(
     chat: Annotated[ChatClient, Depends(get_chat_client)],
 ) -> ReplyOut:
     turn = service.prepare_turn(
-        db, member.organization.id, member.user.id, conversation_id, body.content, embedder
+        db,
+        member.organization.id,
+        member.user.id,
+        conversation_id,
+        body.content,
+        embedder,
+        chat,
     )
     _require_model(db, turn, chat)
     try:
@@ -86,13 +92,24 @@ def stream_message(
     chat: Annotated[ChatClient, Depends(get_chat_client)],
 ) -> StreamingResponse:
     turn = service.prepare_turn(
-        db, member.organization.id, member.user.id, conversation_id, body.content, embedder
+        db,
+        member.organization.id,
+        member.user.id,
+        conversation_id,
+        body.content,
+        embedder,
+        chat,
     )
     _require_model(db, turn, chat)
 
     def events() -> Iterator[str]:
         parts: list[str] = []
         try:
+            for phase in turn.phases:
+                if phase in {"preparing", "searching_crm", "retrieving_documents"}:
+                    yield _event("phase", {"phase": phase})
+            if turn.needs_model:
+                yield _event("phase", {"phase": "streaming"})
             for token in service.stream_turn(turn, chat):
                 parts.append(token)
                 yield _event("token", {"text": token})

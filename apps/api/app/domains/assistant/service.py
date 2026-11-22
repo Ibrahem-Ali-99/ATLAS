@@ -1,11 +1,18 @@
+import re
 import uuid
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
+from app.domains.assistant.catalog import InventoryDocument, ReadAnswer
+from app.domains.assistant.catalog import answer_companies as read_companies
+from app.domains.assistant.catalog import answer_documents as read_documents
+from app.domains.assistant.catalog import answer_inquiries as read_inquiries
+from app.domains.assistant.catalog import answer_inventory as read_inventory
+from app.domains.assistant.catalog import answer_leads as read_leads
 from app.domains.assistant.models import (
     Conversation,
     Message,
@@ -13,8 +20,28 @@ from app.domains.assistant.models import (
     MessageSource,
     SourceKind,
 )
+from app.domains.assistant.prompts import (
+    GENERAL_SYSTEM,
+    GROUNDED_SYSTEM,
+    general_prompt,
+    grounded_prompt,
+)
+from app.domains.assistant.routing import (
+    CAPABILITY_ANSWER,
+    CLASSIFIER_SYSTEM,
+    GREETING_ANSWER,
+    MUTATION_ANSWER,
+    Intent,
+    allows_ungrounded_chat,
+    parse_classifier_intent,
+    recall_answer,
+    refers_to_earlier_record,
+    route_question,
+    unsupported_without_evidence,
+)
 from app.domains.assistant.schemas import MessageOut, ReplyOut, SourceOut
 from app.domains.crm.service import search_records
+from app.domains.knowledge.models import Chunk
 from app.domains.knowledge.retrieval import RetrievedChunk, search_chunks
 from app.integrations.language import ChatClient, EmbeddingClient
 
@@ -27,14 +54,6 @@ _EMBEDDING_UNAVAILABLE = {
     "embedding_rate_limited",
     "embedding_dimension_mismatch",
 }
-SYSTEM_PROMPT = (
-    "You are the ATLAS assistant for one organization. "
-    "Use only the document excerpts and CRM records in the user message. "
-    "Document excerpts are company files. CRM records are live customer data. "
-    "Say which kind of record you used. "
-    "If a section is empty, say that kind of information was not found. "
-    "Do not invent names, numbers, citations, or records."
-)
 
 
 @dataclass
@@ -47,6 +66,8 @@ class PreparedTurn:
     crm_records: list[dict[str, str]]
     document_search: str
     refusal: str | None = None
+    phases: list[str] = field(default_factory=list)
+    inventory_documents: list[InventoryDocument] = field(default_factory=list)
 
 
 def conversation_title(content: str) -> str:
@@ -128,59 +149,45 @@ def prepare_turn(
     conversation_id: uuid.UUID,
     content: str,
     embedder: EmbeddingClient,
+    chat: ChatClient | None = None,
 ) -> PreparedTurn:
     conversation = get_conversation(db, organization_id, user_id, conversation_id)
     if conversation.title == UNTITLED:
         conversation.title = conversation_title(content)
-    db.add(
-        Message(
-            conversation_id=conversation.id,
-            organization_id=organization_id,
-            role=MessageRole.user,
-            content=content.strip(),
-        )
+    user_message = Message(
+        conversation_id=conversation.id,
+        organization_id=organization_id,
+        role=MessageRole.user,
+        content=content.strip(),
     )
+    db.add(user_message)
     db.commit()
-    crm_records = search_records(db, organization_id, content)
-    documents: list[RetrievedChunk] = []
-    document_search = "empty"
-    try:
-        documents = search_chunks(db, organization_id, content, embedder)
-        document_search = "ready" if documents else "empty"
-    except AppError as exc:
-        if exc.code == "embedding_unconfigured" and crm_records:
-            document_search = "unconfigured"
-        elif exc.code in _EMBEDDING_UNAVAILABLE and crm_records:
-            document_search = "unavailable"
+    history = _prior_turns(db, organization_id, conversation.id, user_message.id)
+    titles = _recent_source_titles(db, organization_id, conversation.id, user_message.id, content)
+    intent = route_question(content, has_history=bool(history))
+    expand = refers_to_earlier_record(content)
+    if intent is Intent.ambiguous:
+        if titles:
+            intent = Intent.grounded
+            expand = True
         else:
-            record_provider_failure(db, conversation, exc.message)
-            raise
-    if not documents and not crm_records:
-        saved = _save_answer(
-            db,
-            conversation,
-            NO_RECORDS,
-            [],
-            [],
-        )
-        return PreparedTurn(
-            conversation=conversation,
-            needs_model=False,
-            system_prompt=SYSTEM_PROMPT,
-            user_prompt="",
-            documents=[],
-            crm_records=[],
-            document_search=document_search,
-            refusal=saved.content,
-        )
-    return PreparedTurn(
-        conversation=conversation,
-        needs_model=True,
-        system_prompt=SYSTEM_PROMPT,
-        user_prompt=_prompt(content, documents, crm_records),
-        documents=documents,
-        crm_records=crm_records,
-        document_search=document_search,
+            intent = _classify_ambiguous(chat, content)
+    if intent is Intent.mutation:
+        return _stored_reply(db, conversation, MUTATION_ANSWER, _phases())
+    if intent is Intent.capability:
+        return _stored_reply(db, conversation, CAPABILITY_ANSWER, _phases())
+    if intent is Intent.greeting:
+        return _stored_reply(db, conversation, GREETING_ANSWER, _phases())
+    if intent is Intent.recall:
+        opening = _opening_user_text(db, organization_id, conversation.id, user_message.id)
+        return _stored_reply(db, conversation, recall_answer(history, opening), _phases())
+    read = _catalog_answer(db, organization_id, intent)
+    if read is not None:
+        return _stored_read(db, conversation, read)
+    if intent is Intent.general:
+        return _general_turn(conversation, content, history, "skipped")
+    return _grounded_turn(
+        db, organization_id, conversation, content, embedder, history, titles, expand=expand
     )
 
 
@@ -205,7 +212,7 @@ def save_completed_turn(db: Session, turn: PreparedTurn, answer: str) -> ReplyOu
         saved = _save_answer(db, turn.conversation, answer, turn.documents, turn.crm_records)
         message = _message_out(saved, _sources_for(db, saved.id))
     search = turn.document_search
-    if search not in {"ready", "empty", "unconfigured", "unavailable"}:
+    if search not in {"ready", "empty", "unconfigured", "unavailable", "skipped"}:
         search = "empty"
     return ReplyOut(conversation_id=turn.conversation.id, message=message, document_search=search)  # type: ignore[arg-type]
 
@@ -217,25 +224,305 @@ def stream_turn(turn: PreparedTurn, client: ChatClient) -> Iterator[str]:
     yield from client.stream(turn.system_prompt, turn.user_prompt)
 
 
-def _prompt(
-    question: str, documents: list[RetrievedChunk], crm_records: list[dict[str, str]]
-) -> str:
-    document_lines = ["DOCUMENT EXCERPTS:"]
-    if documents:
-        for excerpt in documents:
-            page = f" page {excerpt.page_number}" if excerpt.page_number is not None else ""
-            document_lines.append(f"- {excerpt.document_title}{page}: {excerpt.content[:700]}")
-    else:
-        document_lines.append("- none")
-    crm_lines = ["CRM RECORDS:"]
-    if crm_records:
-        for record in crm_records:
-            crm_lines.append(
-                f"- {record['record_type']} {record['title']}: {record['excerpt'][:400]}"
+def _catalog_answer(db: Session, organization_id: uuid.UUID, intent: Intent) -> ReadAnswer | None:
+    if intent is Intent.inventory:
+        return read_inventory(db, organization_id)
+    if intent is Intent.companies:
+        return read_companies(db, organization_id)
+    if intent is Intent.documents:
+        return read_documents(db, organization_id)
+    if intent is Intent.inquiries:
+        return read_inquiries(db, organization_id)
+    if intent is Intent.leads:
+        return read_leads(db, organization_id)
+    return None
+
+
+def _classify_ambiguous(chat: ChatClient | None, content: str) -> Intent:
+    if chat is None:
+        return Intent.recall
+    try:
+        chat.ensure_configured()
+        raw = chat.complete(CLASSIFIER_SYSTEM, content[:500])
+    except AppError:
+        return Intent.recall
+    return parse_classifier_intent(raw) or Intent.recall
+
+
+def _grounded_turn(
+    db: Session,
+    organization_id: uuid.UUID,
+    conversation: Conversation,
+    content: str,
+    embedder: EmbeddingClient,
+    history: list[tuple[str, str]],
+    titles: list[str],
+    *,
+    expand: bool,
+) -> PreparedTurn:
+    query = _retrieval_query(content, history, titles, expand=expand)
+    phases = _phases("searching_crm", "retrieving_documents")
+    crm_records = search_records(db, organization_id, query)
+    documents: list[RetrievedChunk] = []
+    document_search = "empty"
+    try:
+        documents = search_chunks(db, organization_id, content, embedder)
+        if not documents and _referenced_kind(content) == SourceKind.document.value:
+            documents = _prior_document_chunks(db, organization_id, conversation.id)
+        if not documents and expand and titles:
+            documents = search_chunks(db, organization_id, "\n".join(titles), embedder)
+        document_search = "ready" if documents else "empty"
+    except AppError as exc:
+        if exc.code == "embedding_unconfigured" and crm_records:
+            document_search = "unconfigured"
+        elif exc.code in _EMBEDDING_UNAVAILABLE and crm_records:
+            document_search = "unavailable"
+        else:
+            record_provider_failure(db, conversation, exc.message)
+            raise
+    if documents or crm_records:
+        return PreparedTurn(
+            conversation=conversation,
+            needs_model=True,
+            system_prompt=GROUNDED_SYSTEM,
+            user_prompt=grounded_prompt(content, documents, crm_records, history),
+            documents=documents,
+            crm_records=crm_records,
+            document_search=document_search,
+            phases=phases,
+        )
+    if allows_ungrounded_chat(content) and not unsupported_without_evidence(content):
+        return _general_turn(conversation, content, history, "skipped", phases)
+    saved = _save_answer(db, conversation, NO_RECORDS, [], [])
+    return PreparedTurn(
+        conversation=conversation,
+        needs_model=False,
+        system_prompt=GROUNDED_SYSTEM,
+        user_prompt="",
+        documents=[],
+        crm_records=[],
+        document_search=document_search,
+        refusal=saved.content,
+        phases=phases,
+    )
+
+
+def _general_turn(
+    conversation: Conversation,
+    content: str,
+    history: list[tuple[str, str]],
+    document_search: str,
+    phases: list[str] | None = None,
+) -> PreparedTurn:
+    return PreparedTurn(
+        conversation=conversation,
+        needs_model=True,
+        system_prompt=GENERAL_SYSTEM,
+        user_prompt=general_prompt(content, history),
+        documents=[],
+        crm_records=[],
+        document_search=document_search,
+        phases=phases or _phases(),
+    )
+
+
+def _stored_read(db: Session, conversation: Conversation, read: ReadAnswer) -> PreparedTurn:
+    phases = _phases()
+    if read.searched_crm:
+        phases.append("searching_crm")
+    if read.searched_documents:
+        phases.append("retrieving_documents")
+    saved = _save_answer(db, conversation, read.content, [], read.crm_records, read.documents)
+    return PreparedTurn(
+        conversation=conversation,
+        needs_model=False,
+        system_prompt="",
+        user_prompt="",
+        documents=[],
+        crm_records=read.crm_records,
+        document_search="skipped",
+        refusal=saved.content,
+        phases=phases,
+        inventory_documents=read.documents,
+    )
+
+
+def _stored_reply(
+    db: Session, conversation: Conversation, content: str, phases: list[str]
+) -> PreparedTurn:
+    saved = _save_answer(db, conversation, content, [], [])
+    return PreparedTurn(
+        conversation=conversation,
+        needs_model=False,
+        system_prompt="",
+        user_prompt="",
+        documents=[],
+        crm_records=[],
+        document_search="skipped",
+        refusal=saved.content,
+        phases=phases,
+    )
+
+
+def _phases(*extra: str) -> list[str]:
+    phases = ["preparing"]
+    for name in extra:
+        if name not in phases:
+            phases.append(name)
+    return phases
+
+
+def _opening_user_text(
+    db: Session,
+    organization_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    current_message_id: uuid.UUID,
+) -> str | None:
+    message = db.scalar(
+        select(Message)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.organization_id == organization_id,
+            Message.id != current_message_id,
+            Message.role == MessageRole.user,
+        )
+        .order_by(Message.created_at.asc())
+        .limit(1)
+    )
+    if message is None:
+        return None
+    return message.content
+
+
+def _prior_turns(
+    db: Session,
+    organization_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    current_message_id: uuid.UUID,
+) -> list[tuple[str, str]]:
+    rows = list(
+        db.scalars(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.organization_id == organization_id,
+                Message.id != current_message_id,
             )
-    else:
-        crm_lines.append("- none")
-    return "\n".join([*document_lines, *crm_lines, "", f"QUESTION: {question}"])
+            .order_by(Message.created_at.desc())
+            .limit(8)
+        ).all()
+    )
+    rows.reverse()
+    return [(_role(message), message.content) for message in rows]
+
+
+def _recent_source_titles(
+    db: Session,
+    organization_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    current_message_id: uuid.UUID,
+    question: str,
+) -> list[str]:
+    sources = db.scalars(
+        select(MessageSource)
+        .join(Message, Message.id == MessageSource.message_id)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.organization_id == organization_id,
+            Message.id != current_message_id,
+            MessageSource.organization_id == organization_id,
+        )
+        .order_by(Message.created_at.desc())
+    ).all()
+    wanted = _referenced_kind(question)
+    titles: list[str] = []
+    for source in sources:
+        kind = source.kind.value if isinstance(source.kind, SourceKind) else str(source.kind)
+        if wanted is not None and kind != wanted:
+            continue
+        title = " ".join(source.title.split())
+        if title and title not in titles:
+            titles.append(title)
+        if len(titles) == 4:
+            break
+    return titles
+
+
+def _prior_document_chunks(
+    db: Session, organization_id: uuid.UUID, conversation_id: uuid.UUID
+) -> list[RetrievedChunk]:
+    """Re-read a chunk this conversation already cited. The model text is not the source."""
+    sources = db.scalars(
+        select(MessageSource)
+        .join(Message, Message.id == MessageSource.message_id)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.organization_id == organization_id,
+            MessageSource.organization_id == organization_id,
+            MessageSource.kind == SourceKind.document,
+            MessageSource.chunk_id.is_not(None),
+        )
+        .order_by(Message.created_at.desc())
+        .limit(3)
+    ).all()
+    found: list[RetrievedChunk] = []
+    seen: set[uuid.UUID] = set()
+    for source in sources:
+        if source.chunk_id is None or source.chunk_id in seen:
+            continue
+        chunk = db.scalar(
+            select(Chunk).where(
+                Chunk.id == source.chunk_id, Chunk.organization_id == organization_id
+            )
+        )
+        if chunk is None:
+            continue
+        seen.add(chunk.id)
+        found.append(
+            RetrievedChunk(
+                chunk_id=chunk.id,
+                document_id=chunk.document_id,
+                document_title=source.title,
+                chunk_index=chunk.chunk_index,
+                page_number=chunk.page_number,
+                content=chunk.content,
+                score=1.0,
+            )
+        )
+    return found
+
+
+def _referenced_kind(question: str) -> str | None:
+    text = " ".join(question.lower().split())
+    if re.search(r"\b(document|file|brochure)\b", text):
+        return SourceKind.document.value
+    if re.search(r"\b(company|companies|lead|leads|inquiry|inquiries|contact|contacts)\b", text):
+        return SourceKind.crm.value
+    return None
+
+
+def _retrieval_query(
+    question: str, history: list[tuple[str, str]], titles: list[str], *, expand: bool
+) -> str:
+    text = question.strip()
+    if not expand:
+        return text
+    extra = list(titles[:4])
+    for role, prior in reversed(history):
+        if role == "user":
+            clipped = " ".join(prior.split())[:300]
+            if clipped and clipped not in extra:
+                extra.append(clipped)
+            break
+    if not extra:
+        return text
+    return text + "\n" + "\n".join(extra)
+
+
+def _role(message: Message) -> str:
+    if isinstance(message.role, MessageRole):
+        return message.role.value
+    return str(message.role)
 
 
 def _save_answer(
@@ -244,6 +531,7 @@ def _save_answer(
     answer: str,
     documents: list[RetrievedChunk],
     crm_records: list[dict[str, str]],
+    inventory_documents: list[InventoryDocument] | None = None,
 ) -> Message:
     message = Message(
         conversation_id=conversation.id,
@@ -264,6 +552,17 @@ def _save_answer(
                 page_number=excerpt.page_number,
                 title=excerpt.document_title[:200],
                 excerpt=excerpt.content[:500],
+            )
+        )
+    for document in inventory_documents or []:
+        db.add(
+            MessageSource(
+                message_id=message.id,
+                organization_id=conversation.organization_id,
+                kind=SourceKind.document,
+                document_id=document.document_id,
+                title=document.title[:200],
+                excerpt=document.excerpt[:500],
             )
         )
     for record in crm_records:
