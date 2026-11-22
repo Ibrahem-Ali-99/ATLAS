@@ -83,15 +83,20 @@ function AssistantWorkspace({
       setStreaming("");
       setPhases([]);
       setNotice(null);
+      let phase = "";
       return streamConversationMessage(
         organizationId,
         conversationId,
         content,
         (token) => {
+          if (phase === "verifying") {
+            return;
+          }
           setStreaming((current) => current + token);
         },
-        (phase) => {
-          setPhases((current) => (current.at(-1) === phase ? current : [...current, phase]));
+        (next) => {
+          phase = next;
+          setPhases((current) => (current.at(-1) === next ? current : [...current, next]));
         },
       );
     },
@@ -605,6 +610,10 @@ function sourceKey(source: MessageSource): string {
 }
 
 function streamStatus(phases: string[], streaming: string): string {
+  const last = phases.at(-1);
+  if (last === "verifying") {
+    return "Checking the answer against company records";
+  }
   const labels = phases.map(phaseLabel).filter((label): label is string => label !== null);
   if (streaming) {
     return labels.includes("Streaming an answer") ? "Streaming an answer" : "Assistant";
@@ -616,6 +625,7 @@ function phaseLabel(phase: string): string | null {
   if (phase === "preparing") return "Preparing";
   if (phase === "searching_crm") return "Searching company records";
   if (phase === "retrieving_documents") return "Retrieving documents";
+  if (phase === "verifying") return "Checking the answer against company records";
   if (phase === "streaming") return "Streaming an answer";
   return null;
 }
