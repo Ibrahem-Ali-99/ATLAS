@@ -6,6 +6,7 @@ from typing import Any, cast
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.domains.knowledge.models import Chunk, Document
 from app.integrations.language import EmbeddingClient
 
@@ -59,22 +60,25 @@ def search_chunks(
         .limit(20)
     ).all()
     fused: dict[uuid.UUID, RetrievedChunk] = {}
-    _fuse_vector(fused, vector_rows)
+    _fuse_vector(fused, vector_rows, get_settings().max_cosine_distance)
     _fuse_text(fused, text_rows)
     ranked = sorted(fused.values(), key=lambda item: item.score, reverse=True)
     return ranked[:limit]
 
 
-# pgvector cosine distance is 1 - cosine similarity. Neighbors farther than this
-# are lexical-only so an unrelated question is not cited from the nearest file.
-MAX_COSINE_DISTANCE = 0.55
+def _fuse_vector(
+    fused: dict[uuid.UUID, RetrievedChunk], rows: Sequence[Any], max_distance: float
+) -> None:
+    """Ignore distant vector neighbors.
 
+    pgvector cosine distance is 1 - cosine similarity. A full-text match can still
+    cite the same chunk when the wording overlaps but the vectors are far apart.
+    """
 
-def _fuse_vector(fused: dict[uuid.UUID, RetrievedChunk], rows: Sequence[Any]) -> None:
     for position, row in enumerate(rows, start=1):
         chunk = cast(Chunk, row[0])
         title = str(row[1])
-        if float(row[2]) > MAX_COSINE_DISTANCE:
+        if float(row[2]) > max_distance:
             continue
         score = 1 / (60 + position)
         current = fused.get(chunk.id)

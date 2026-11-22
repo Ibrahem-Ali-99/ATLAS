@@ -51,7 +51,11 @@ The API container can be started with `docker compose up --build api` after `.en
 
 ## Documents and the assistant
 
-Uploads accept PDF and UTF-8 text files up to `ATLAS_MAX_UPLOAD_BYTES` (10 MiB by default). Chat and embeddings are OpenAI-compatible HTTP calls. The defaults are `gpt-4o-mini` and `text-embedding-3-small` at `https://api.openai.com/v1`, with embeddings fixed at 1536 dimensions. Leave `ATLAS_LLM_API_KEY` and `ATLAS_EMBEDDING_API_KEY` empty until you have a provider. Empty keys return an error. The API does not invent a successful answer or a citation.
+Uploads accept PDF and UTF-8 text files up to `ATLAS_MAX_UPLOAD_BYTES` (10 MiB by default). Chat and embeddings are OpenAI-compatible HTTP calls. The defaults are `gpt-4o-mini` and `text-embedding-3-small` at `https://api.openai.com/v1`, with embeddings fixed at 1536 dimensions. Leave `ATLAS_LLM_API_KEY` and `ATLAS_EMBEDDING_API_KEY` empty until you have a provider. Put real keys only in the gitignored `.env`, then restart the API process. Do not commit them or paste them into chat. Empty keys return an error. The API does not invent a successful answer or a citation.
+
+`ATLAS_MAX_COSINE_DISTANCE` defaults to `0.55`. That value is pgvector cosine distance, equal to 1 - cosine similarity. Distant vector neighbors are dropped. A shared keyword can still cite a passage through full-text search, and a paraphrase with no shared words is cited only inside the distance limit.
+
+If the API stops while a document is pending or processing, the next startup indexes it again. A second run replaces the same chunks instead of appending them. A failed reindex keeps the earlier chunks when they already exist.
 
 The assistant answers from retrieved document excerpts and from CRM records it is allowed to read. Citations are the retrieved rows, shown separately as company documents or CRM records. A question with no matching records gets an explicit refusal and does not call the model.
 

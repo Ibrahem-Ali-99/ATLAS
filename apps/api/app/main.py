@@ -19,6 +19,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level, settings.environment)
     logger.info("startup", environment=settings.environment)
+    try:
+        from app.domains.knowledge.service import resume_incomplete_documents
+
+        resumed = resume_incomplete_documents()
+        if resumed:
+            logger.info("ingestion_resumed", documents=resumed)
+    except Exception:
+        logger.error("ingestion_resume_failed")
     yield
     logger.info("shutdown")
 

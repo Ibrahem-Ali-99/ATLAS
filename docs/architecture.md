@@ -16,11 +16,13 @@ A session cookie identifies the user. Organization access is loaded from `member
 
 PostgreSQL is provided by the `pgvector/pgvector` image. Migration `0001` enables `vector` and creates the identity tables. `0002` adds companies, contacts, leads, inquiries, and interactions. `0003` adds documents and chunks, including a `vector(1536)` embedding and a full-text `search_vector`. `0004` adds conversations, messages, and message sources.
 
-Document files are stored on disk under `ATLAS_STORAGE_DIR`, or `var/atlas-storage` when that setting is empty. Ingestion runs after the upload response, extracts PDF or text content, chunks it with page numbers when the extractor provides them, and writes embeddings. Retrieval mixes cosine distance and Postgres full-text rank, and it only returns chunks from the caller's organization.
+Document files are stored on disk under `ATLAS_STORAGE_DIR`, or `var/atlas-storage` when that setting is empty. Ingestion runs after the upload response, extracts PDF or text content, chunks it with page numbers when the extractor provides them, and writes embeddings. On startup the API indexes documents still marked pending or processing. Replacement of chunks and the ready status commit together, so a repeated run does not duplicate passages. A failed reindex keeps the previous chunks when they exist.
+
+Retrieval mixes cosine distance and Postgres full-text rank, and it only returns chunks from the caller's organization. `ATLAS_MAX_COSINE_DISTANCE` defaults to 0.55, where distance is 1 - cosine similarity. Vector neighbors farther than that are ignored. A full-text match is still cited, so shared keywords can surface a loosely related passage. A paraphrase with no shared words is cited only when its distance is within the threshold.
 
 ## Models
 
-Chat and embeddings use configurable OpenAI-compatible HTTP endpoints (`ATLAS_LLM_*` and `ATLAS_EMBEDDING_*`). The embedding width is fixed at 1536. An empty API key returns `llm_unconfigured` or `embedding_unconfigured`. The assistant stores citations from retrieved rows. It does not parse citations out of model text. If neither documents nor CRM records match, it stores a refusal and does not call the model.
+Chat and embeddings use configurable OpenAI-compatible HTTP endpoints (`ATLAS_LLM_*` and `ATLAS_EMBEDDING_*`). The embedding width is fixed at 1536. Responses must contain one vector of that width per input, ordered by the provider's `index`. Token counts are logged only when the provider includes a `usage` object. They are not required and are not stored. An empty API key returns `llm_unconfigured` or `embedding_unconfigured`. The assistant stores citations from retrieved rows. It does not parse citations out of model text. If neither documents nor CRM records match, it stores a refusal and does not call the model.
 
 ## Frontend
 

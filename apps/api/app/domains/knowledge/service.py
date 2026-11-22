@@ -119,6 +119,29 @@ def list_chunk_text(db: Session, organization_id: uuid.UUID, document_id: uuid.U
     )
 
 
+def resume_incomplete_documents(embedder: EmbeddingClient | None = None) -> int:
+    """Index documents still pending or processing after a restart.
+
+    Chunks are replaced in the same transaction as the ready status, so a repeated
+    run does not leave two copies of the same passage.
+    """
+
+    db = SessionLocal()
+    try:
+        document_ids = list(
+            db.scalars(
+                select(Document.id).where(
+                    Document.status.in_([DocumentStatus.pending, DocumentStatus.processing])
+                )
+            ).all()
+        )
+    finally:
+        db.close()
+    for document_id in document_ids:
+        ingest_document(document_id, embedder)
+    return len(document_ids)
+
+
 def ingest_document(document_id: uuid.UUID, embedder: EmbeddingClient | None = None) -> None:
     db = SessionLocal()
     try:
@@ -130,22 +153,24 @@ def ingest_document(document_id: uuid.UUID, embedder: EmbeddingClient | None = N
         db.commit()
         stored = _stored_file(document.storage_path)
         if stored is None:
-            _fail(db, document, "The stored document could not be read")
+            _record_failure(db, document, "The stored document could not be read")
             return
         payload = stored.read_bytes()
         pages = extract_text(document.filename, payload)
         try:
             pieces = chunk_pages(pages)
         except ValueError:
-            _fail(db, document, "Document is too long to index")
+            _record_failure(db, document, "Document is too long to index")
             return
         if not pieces:
-            _fail(db, document, "No text could be extracted from the document")
+            _record_failure(db, document, "No text could be extracted from the document")
             return
         client = embedder or get_embedding_client()
         vectors = client.embed([piece.content for piece in pieces])
-        if len(vectors) != len(pieces):
-            _fail(db, document, "The embedding provider returned an unexpected response")
+        if len(vectors) != len(pieces) or any(
+            len(vector) != get_settings().embedding_dimensions for vector in vectors
+        ):
+            _record_failure(db, document, "The embedding provider returned an unexpected response")
             return
         db.execute(delete(Chunk).where(Chunk.document_id == document.id))
         for piece, vector in zip(pieces, vectors, strict=True):
@@ -179,8 +204,12 @@ def ingest_document(document_id: uuid.UUID, embedder: EmbeddingClient | None = N
         db.close()
 
 
-def _fail(db: Session, document: Document, message: str) -> None:
-    document.status = DocumentStatus.failed
+def _record_failure(db: Session, document: Document, message: str) -> None:
+    indexed = (
+        db.scalar(select(func.count()).select_from(Chunk).where(Chunk.document_id == document.id))
+        or 0
+    )
+    document.status = DocumentStatus.ready if indexed else DocumentStatus.failed
     document.error_message = message[:500]
     db.commit()
 
@@ -189,9 +218,7 @@ def _fail_existing(db: Session, document_id: uuid.UUID, message: str) -> None:
     document = db.get(Document, document_id)
     if document is None:
         return
-    document.status = DocumentStatus.failed
-    document.error_message = message[:500]
-    db.commit()
+    _record_failure(db, document, message)
 
 
 def _storage_path(organization_id: uuid.UUID, document_id: uuid.UUID) -> Path:
