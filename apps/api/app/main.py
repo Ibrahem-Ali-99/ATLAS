@@ -18,6 +18,9 @@ logger = structlog.get_logger(__name__)
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level, settings.environment)
+    from app.integrations.mcp_runtime import require_mcp_interpreter
+
+    require_mcp_interpreter()
     logger.info("startup", environment=settings.environment)
     try:
         from app.domains.knowledge.service import resume_incomplete_documents

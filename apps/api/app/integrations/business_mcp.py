@@ -1,15 +1,22 @@
 import asyncio
 import json
 import os
-import sys
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
 
 from mcp import Client
-from mcp.client.stdio import StdioServerParameters
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from app.core.config import get_settings
+from app.integrations.mcp_runtime import (
+    log_mcp_status,
+    observed_status,
+    public_tool_message,
+    resolve_mcp_python,
+    virtualenv_root,
+)
 
 ALLOWED_TOOLS = frozenset({"find_contact", "get_lead", "search_company_knowledge"})
 
@@ -48,8 +55,12 @@ def server_parameters(organization_id: uuid.UUID) -> StdioServerParameters:
         ),
         "ATLAS_LOG_LEVEL": "WARNING",
     }
+    command = resolve_mcp_python()
+    root = virtualenv_root(command)
+    if root is not None:
+        env["VIRTUAL_ENV"] = root
     return StdioServerParameters(
-        command=sys.executable,
+        command=command,
         args=["-m", "app.mcp_server"],
         cwd=api_root,
         env=env,
@@ -99,21 +110,58 @@ def call_tool(organization_id: uuid.UUID, name: str, arguments: dict[str, Any]) 
 
 
 async def _call(organization_id: uuid.UUID, name: str, arguments: dict[str, Any]) -> Any:
+    parameters = server_parameters(organization_id)
+    descriptor, raw_path = tempfile.mkstemp(prefix="atlas-mcp-")
+    os.close(descriptor)
+    captured = Path(raw_path)
     try:
-        async with Client(
-            server_parameters(organization_id), mode="legacy", read_timeout_seconds=30.0
-        ) as client:
-            result = await client.call_tool(name, arguments)
-    except BusinessToolError:
-        raise
-    except Exception as exc:
-        raise BusinessToolError("The business tool failed") from exc
-    if result.is_error:
-        raise BusinessToolError(_text(result)[:200] or "The business tool failed")
+        try:
+            with captured.open("w", encoding="utf-8", errors="replace") as errlog:
+                async with Client(
+                    stdio_client(parameters, errlog=errlog),
+                    mode="legacy",
+                    read_timeout_seconds=30.0,
+                ) as client:
+                    result = await client.call_tool(name, arguments)
+        except BusinessToolError:
+            raise
+        except (TimeoutError, OSError, ConnectionError) as exc:
+            _log_capture(
+                parameters.command,
+                name,
+                captured,
+                timed_out=isinstance(exc, TimeoutError),
+            )
+            raise
+        except Exception as exc:
+            _log_capture(parameters.command, name, captured)
+            raise BusinessToolError("The business tool failed") from exc
+        else:
+            if result.is_error:
+                _log_capture(parameters.command, name, captured, tool_error=True)
+                message = public_tool_message(_text(result)) or "The business tool failed"
+                raise BusinessToolError(message)
+    finally:
+        captured.unlink(missing_ok=True)
     try:
         return json.loads(_text(result))
     except json.JSONDecodeError as exc:
         raise BusinessToolError("The business tool returned an unexpected response") from exc
+
+
+def _log_capture(
+    executable: str,
+    tool: str,
+    captured: Path,
+    *,
+    timed_out: bool = False,
+    tool_error: bool = False,
+) -> None:
+    stderr = captured.read_text(encoding="utf-8", errors="replace") if captured.is_file() else ""
+    log_mcp_status(
+        observed_status(executable, stderr, timed_out=timed_out, tool_error=tool_error),
+        tool=tool,
+    )
 
 
 def _text(result: Any) -> str:
