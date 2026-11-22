@@ -91,6 +91,44 @@ def test_embedding_orders_vectors_and_rejects_malformed_payloads(
         assert exc.value.code == "embedding_failed"
 
 
+def test_usage_is_stored_under_the_model_that_produced_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded: list[dict[str, object]] = []
+
+    def capture(**kwargs: object) -> None:
+        recorded.append(kwargs)
+
+    monkeypatch.setattr("app.domains.observability.tracing.record_operation", capture)
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *_args, **_kwargs: _Response(
+            200,
+            {"usage": {"prompt_tokens": 3}, "data": [{"index": 0, "embedding": _vector(0.1)}]},
+        ),
+    )
+    OpenAICompatibleEmbeddingClient(_configured()).embed(["hello"])
+    monkeypatch.setattr(
+        httpx,
+        "stream",
+        lambda *_args, **_kwargs: _Stream(
+            200,
+            [
+                'data: {"choices":[{"delta":{"content":"Cold"}}],'
+                '"usage":{"prompt_tokens":2,"completion_tokens":1}}',
+                "data: [DONE]",
+            ],
+        ),
+    )
+    assert OpenAICompatibleChatClient(_configured()).complete("system", "user") == "Cold"
+    settings = get_settings()
+    assert recorded[0]["operation"] == "embedding_usage"
+    assert recorded[0]["model_name"] == settings.embedding_model
+    assert recorded[1]["operation"] == "llm_usage"
+    assert recorded[1]["model_name"] == settings.llm_model
+
+
 def test_chat_stream_keeps_tokens_and_rejects_provider_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

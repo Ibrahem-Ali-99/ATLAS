@@ -165,7 +165,7 @@ def _log_usage(event: str, payload: dict[str, Any]) -> None:
         operation=event,
         status="succeeded",
         provider="openai-compatible",
-        model_name=settings.llm_model if event == "chat_usage" else settings.embedding_model,
+        model_name=settings.llm_model if event == "llm_usage" else settings.embedding_model,
         tokens_in=prompt if isinstance(prompt, int) else None,
         tokens_out=completion if isinstance(completion, int) else None,
     )
