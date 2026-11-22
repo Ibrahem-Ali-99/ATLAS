@@ -10,9 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import AppError
+from app.domains.agents.models import AgentRun
 from app.domains.approvals.models import ActionType, Approval, ApprovalStatus
 from app.domains.crm import service as crm
 from app.domains.crm.models import LeadStatus
+from app.domains.provenance.origin import Origin
 
 
 def payload_hash(payload: Mapping[str, Any]) -> str:
@@ -31,6 +33,7 @@ def create_approval(
     position: int,
     commit: bool = True,
 ) -> Approval:
+    run = db.get(AgentRun, run_id)
     approval = Approval(
         organization_id=organization_id,
         run_id=run_id,
@@ -40,6 +43,7 @@ def create_approval(
         payload=payload,
         payload_hash=payload_hash(payload),
         status=ApprovalStatus.pending,
+        origin=run.origin if run is not None else Origin.unknown,
         expires_at=datetime.now(UTC) + timedelta(hours=get_settings().approval_ttl_hours),
     )
     db.add(approval)
@@ -271,7 +275,11 @@ def _apply(db: Session, organization_id: uuid.UUID, approval: Approval) -> dict[
     payload = approval.payload
     if approval.action_type == ActionType.create_lead:
         lead = crm.create_lead(
-            db, organization_id, approval.requested_by, _lead_values(payload), commit=False
+            db,
+            organization_id,
+            approval.requested_by,
+            {**_lead_values(payload), "origin": approval.origin},
+            commit=False,
         )
         return {"lead_id": str(lead.id)}
     if approval.action_type == ActionType.update_lead:

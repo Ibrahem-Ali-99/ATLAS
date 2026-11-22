@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.domains.approvals.models import ACTION_TYPE, ActionType
+from app.domains.provenance.origin import Origin, origin_column
 
 
 class IntentStatus(enum.StrEnum):
@@ -140,6 +141,7 @@ class ExecutionIntent(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[IntentStatus] = mapped_column(INTENT_STATUS, nullable=False)
+    origin: Mapped[Origin] = origin_column()
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -173,6 +175,7 @@ class WorkflowRun(Base):
         Uuid, ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
     )
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    origin: Mapped[Origin] = origin_column()
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -203,6 +206,7 @@ class ExecutionAttempt(Base):
         Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=True
     )
     outcome: Mapped[AttemptOutcome] = mapped_column(ATTEMPT_OUTCOME, nullable=False)
+    origin: Mapped[Origin] = origin_column()
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     started_at: Mapped[datetime] = mapped_column(
@@ -230,6 +234,7 @@ class EmailMessage(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[EmailStatus] = mapped_column(EMAIL_STATUS, nullable=False)
     mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    origin: Mapped[Origin] = origin_column()
     provider_message_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -255,6 +260,7 @@ class CalendarBooking(Base):
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[BookingStatus] = mapped_column(BOOKING_STATUS, nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    origin: Mapped[Origin] = origin_column()
     provider_event_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

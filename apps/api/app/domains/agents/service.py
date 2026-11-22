@@ -19,6 +19,7 @@ from app.domains.approvals.models import Approval, ApprovalStatus
 from app.domains.approvals.service import list_for_run
 from app.domains.crm import service as crm
 from app.domains.crm.models import Inquiry
+from app.domains.provenance.origin import DataScope, scope_clause
 from app.integrations.business_mcp import BusinessToolError, BusinessTools
 from app.integrations.language import ChatClient
 
@@ -33,12 +34,13 @@ def start_run(
     inquiry_id: uuid.UUID,
     chat: ChatClient,
 ) -> AgentRun:
-    crm.get_inquiry(db, organization_id, inquiry_id)
+    inquiry = crm.get_inquiry(db, organization_id, inquiry_id)
     run = AgentRun(
         organization_id=organization_id,
         inquiry_id=inquiry_id,
         started_by=actor_user_id,
         status=RunStatus.running,
+        origin=inquiry.origin,
     )
     db.add(run)
     db.commit()
@@ -81,8 +83,12 @@ def list_runs(
     status: RunStatus | None,
     page: int,
     page_size: int,
+    scope: DataScope = DataScope.operational,
 ) -> tuple[list[tuple[AgentRun, str]], int]:
     filters = [AgentRun.organization_id == organization_id]
+    clause = scope_clause(AgentRun.origin, scope)
+    if clause is not None:
+        filters.append(clause)
     if status is not None:
         filters.append(AgentRun.status == status)
     total = db.scalar(select(func.count()).select_from(AgentRun).where(*filters)) or 0

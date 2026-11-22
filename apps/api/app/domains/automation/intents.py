@@ -38,6 +38,7 @@ def stage_intent(db: Session, approval: Approval, payload: dict[str, Any]) -> Ex
         payload=dict(payload),
         idempotency_key=hashlib.sha256(str(approval.id).encode()).hexdigest(),
         status=IntentStatus.pending,
+        origin=approval.origin,
         attempt_count=0,
     )
     db.add(intent)
@@ -198,6 +199,7 @@ def _start_attempt(db: Session, intent: ExecutionIntent) -> ExecutionAttempt:
         organization_id=intent.organization_id,
         intent_id=intent.id,
         outcome=AttemptOutcome.started,
+        origin=intent.origin,
     )
     db.add(attempt)
     db.commit()
@@ -337,7 +339,7 @@ def _record_success(db: Session, intent: ExecutionIntent, plan: dict[str, Any]) 
             intent.organization_id,
             lead_id,
             author,
-            {"kind": InteractionKind.email, "body": plan["body"]},
+            {"kind": InteractionKind.email, "body": plan["body"], "origin": intent.origin},
             commit=False,
         )
         email = EmailMessage(
@@ -350,6 +352,7 @@ def _record_success(db: Session, intent: ExecutionIntent, plan: dict[str, Any]) 
             status=EmailStatus.sent,
             mode=str(plan["email_mode"]),
             provider_message_id=str(plan["message_id"]),
+            origin=intent.origin,
             sent_at=_now(),
         )
         db.add(email)
@@ -372,6 +375,7 @@ def _record_success(db: Session, intent: ExecutionIntent, plan: dict[str, Any]) 
             intent_id=intent.id,
             starts_at=starts_at,
             ends_at=ends_at,
+            origin=intent.origin,
         ),
     )
     interaction = crm.add_interaction(
@@ -379,7 +383,7 @@ def _record_success(db: Session, intent: ExecutionIntent, plan: dict[str, Any]) 
         intent.organization_id,
         lead_id,
         author,
-        {"kind": InteractionKind.call, "body": plan["body"]},
+        {"kind": InteractionKind.call, "body": plan["body"], "origin": intent.origin},
         commit=False,
     )
     intent.external_id = str(booking.id)
@@ -414,6 +418,7 @@ def _record_failure_side_effect(db: Session, intent: ExecutionIntent, error: str
                 else EmailStatus.failed
             ),
             mode="sandbox",
+            origin=intent.origin,
             error=error,
         )
     )

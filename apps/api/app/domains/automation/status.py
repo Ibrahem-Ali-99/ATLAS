@@ -14,19 +14,22 @@ from app.domains.automation.models import (
     WorkflowRun,
 )
 from app.domains.crm.models import Company, Lead
+from app.domains.provenance.origin import DataScope, scope_clause
 
 
-def snapshot(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
+def snapshot(
+    db: Session, organization_id: uuid.UUID, scope: DataScope = DataScope.operational
+) -> dict[str, Any]:
     settings = get_settings()
     key = db.scalar(select(WebhookKey.id).where(WebhookKey.organization_id == organization_id))
-    counts = _status_counts(db, organization_id)
-    awaiting_review = _awaiting_review(db, organization_id)
+    counts = _status_counts(db, organization_id, scope)
+    awaiting_review = _awaiting_review(db, organization_id, scope)
     webhook_ready = key is not None
     lead_ready = bool(settings.n8n_lead_webhook_url) and webhook_ready
     runs = list(
         db.scalars(
             select(WorkflowRun)
-            .where(WorkflowRun.organization_id == organization_id)
+            .where(*_scoped(WorkflowRun, organization_id, scope))
             .order_by(WorkflowRun.created_at.desc())
             .limit(20)
         )
@@ -45,7 +48,7 @@ def snapshot(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
     emails = list(
         db.scalars(
             select(EmailMessage)
-            .where(EmailMessage.organization_id == organization_id)
+            .where(*_scoped(EmailMessage, organization_id, scope))
             .order_by(EmailMessage.created_at.desc())
             .limit(20)
         )
@@ -53,7 +56,7 @@ def snapshot(db: Session, organization_id: uuid.UUID) -> dict[str, Any]:
     bookings = list(
         db.scalars(
             select(CalendarBooking)
-            .where(CalendarBooking.organization_id == organization_id)
+            .where(*_scoped(CalendarBooking, organization_id, scope))
             .order_by(CalendarBooking.created_at.desc())
             .limit(20)
         )
@@ -157,10 +160,20 @@ def _card(
     }
 
 
-def _status_counts(db: Session, organization_id: uuid.UUID) -> dict[str, dict[str, int]]:
+def _scoped(model: Any, organization_id: uuid.UUID, scope: DataScope) -> list[Any]:
+    filters = [model.organization_id == organization_id]
+    clause = scope_clause(model.origin, scope)
+    if clause is not None:
+        filters.append(clause)
+    return filters
+
+
+def _status_counts(
+    db: Session, organization_id: uuid.UUID, scope: DataScope
+) -> dict[str, dict[str, int]]:
     rows = db.execute(
         select(WorkflowRun.kind, WorkflowRun.status, func.count())
-        .where(WorkflowRun.organization_id == organization_id)
+        .where(*_scoped(WorkflowRun, organization_id, scope))
         .group_by(WorkflowRun.kind, WorkflowRun.status)
     ).all()
     grouped: dict[str, dict[str, int]] = {}
@@ -169,13 +182,13 @@ def _status_counts(db: Session, organization_id: uuid.UUID) -> dict[str, dict[st
     return grouped
 
 
-def _awaiting_review(db: Session, organization_id: uuid.UUID) -> int:
+def _awaiting_review(db: Session, organization_id: uuid.UUID, scope: DataScope) -> int:
     return int(
         db.scalar(
             select(func.count())
             .select_from(Approval)
             .where(
-                Approval.organization_id == organization_id,
+                *_scoped(Approval, organization_id, scope),
                 Approval.status == ApprovalStatus.pending,
                 Approval.action_type.in_(
                     (ActionType.prepare_customer_response, ActionType.request_appointment)

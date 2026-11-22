@@ -9,7 +9,8 @@ Implemented:
 - approvals: human decisions required before an agent writes CRM records.
 - automation: webhooks, execution intents, sandbox email, and simulated calendar bookings.
 - ml: synthetic lead scoring. Predictions are advisory.
-- analytics: organization-scoped counts from persisted records.
+- provenance: operational, demo, evaluation, or unknown origin on business records.
+- analytics: organization-scoped counts from persisted records, filtered by origin.
 - observability: local operation traces, with optional Langfuse export.
 - evaluation: deterministic benchmark checks. They are not live-model accuracy.
 - monitoring: diagnostics assembled from stored runs and traces.

@@ -15,6 +15,7 @@ from app.domains.agents.schemas import (
 from app.domains.approvals.schemas import ApprovalOut
 from app.domains.crm import service as crm
 from app.domains.identity.dependencies import CsrfMember, DbSession, Member
+from app.domains.provenance.origin import DataScope
 from app.integrations.language import ChatClient, get_chat_client
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["agents"])
@@ -44,11 +45,17 @@ def list_runs(
     member: Member,
     db: DbSession,
     status: RunStatus | None = None,
+    scope: DataScope = DataScope.operational,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> AgentRunPage:
     rows, total = service.list_runs(
-        db, member.organization.id, status=status, page=page, page_size=page_size
+        db,
+        member.organization.id,
+        status=status,
+        page=page,
+        page_size=page_size,
+        scope=scope,
     )
     return AgentRunPage(
         page=page,

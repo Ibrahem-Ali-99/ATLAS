@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.domains.automation.models import BookingStatus, CalendarBooking
+from app.domains.provenance.origin import Origin
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class Slot:
     intent_id: uuid.UUID
     starts_at: datetime
     ends_at: datetime
+    origin: Origin
 
 
 class SimulatedCalendar:
@@ -35,6 +37,7 @@ class SimulatedCalendar:
             ends_at=slot.ends_at,
             status=BookingStatus.booked,
             provider=self.provider,
+            origin=slot.origin,
             provider_event_id=None,
         )
         db.add(booking)

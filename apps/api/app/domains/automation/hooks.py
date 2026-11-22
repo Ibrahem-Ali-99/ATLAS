@@ -231,6 +231,7 @@ def _request_follow_up(
         subject=f"Follow-up: {lead.title}"[:200],
         body=body.body,
         lead_id=lead.id,
+        origin=lead.origin,
     )
     db.add(inquiry)
     db.flush()
@@ -239,6 +240,7 @@ def _request_follow_up(
         inquiry_id=inquiry.id,
         started_by=actor,
         status=RunStatus.awaiting_approval,
+        origin=lead.origin,
     )
     db.add(run)
     db.flush()

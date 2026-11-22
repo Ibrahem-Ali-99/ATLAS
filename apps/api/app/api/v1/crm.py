@@ -25,6 +25,7 @@ from app.domains.crm.schemas import (
     LeadUpdate,
 )
 from app.domains.identity.dependencies import CsrfMember, DbSession, Member
+from app.domains.provenance.origin import Origin
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["crm"])
 
@@ -134,6 +135,7 @@ def list_leads(
     status: LeadStatus | None = None,
     company_id: uuid.UUID | None = None,
     owner_user_id: uuid.UUID | None = None,
+    origin: Origin | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> LeadPage:
@@ -144,6 +146,7 @@ def list_leads(
         status=status.value if status is not None else None,
         company_id=company_id,
         owner_user_id=owner_user_id,
+        origin=origin.value if origin is not None else None,
         page=page,
         page_size=page_size,
     )

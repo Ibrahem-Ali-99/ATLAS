@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.domains.provenance.origin import Origin, origin_column
 
 
 class ActionType(enum.StrEnum):
@@ -78,6 +79,7 @@ class Approval(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    origin: Mapped[Origin] = origin_column()
     status: Mapped[ApprovalStatus] = mapped_column(APPROVAL_STATUS, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     decided_by: Mapped[uuid.UUID | None] = mapped_column(

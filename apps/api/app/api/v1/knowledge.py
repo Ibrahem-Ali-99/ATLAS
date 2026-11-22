@@ -1,13 +1,14 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Response, UploadFile
 
 from app.domains.crm.service import page_bounds
 from app.domains.identity.dependencies import CsrfMember, DbSession, Member
 from app.domains.knowledge import service
 from app.domains.knowledge.retrieval import search_chunks
 from app.domains.knowledge.schemas import ChunkOut, ChunkPage, DocumentOut, DocumentPage
+from app.domains.provenance.origin import Origin
 from app.integrations.language import EmbeddingClient, get_embedding_client
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["knowledge"])
@@ -40,6 +41,7 @@ def upload_document(
     background: BackgroundTasks,
     file: UploadFile,
     embedder: Annotated[EmbeddingClient, Depends(get_embedding_client)],
+    origin: Annotated[Origin, Form()] = Origin.operational,
 ) -> DocumentOut:
     payload = file.file.read()
     document = service.store_upload(
@@ -49,6 +51,7 @@ def upload_document(
         filename=file.filename or "document.txt",
         media_type=file.content_type or "application/octet-stream",
         payload=payload,
+        origin=origin,
     )
     background.add_task(service.ingest_document, document.id, embedder)
     return DocumentOut.model_validate(document)

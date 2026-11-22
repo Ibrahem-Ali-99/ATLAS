@@ -13,6 +13,7 @@ from app.domains.crm.models import (
     LeadStatus,
 )
 from app.domains.identity.models import Organization, User
+from app.domains.provenance.origin import Origin
 
 
 def seed_sample_crm(
@@ -106,6 +107,7 @@ def _company(
         website=website,
         industry=industry,
         notes=notes,
+        origin=Origin.demo,
     )
     db.add(company)
     db.flush()
@@ -132,6 +134,7 @@ def _contact(
         full_name=full_name,
         email=email,
         title=title,
+        origin=Origin.demo,
     )
     db.add(contact)
     db.flush()
@@ -164,6 +167,7 @@ def _lead(
         status=status,
         source=source,
         notes=notes,
+        origin=Origin.demo,
     )
     db.add(lead)
     db.flush()
@@ -185,6 +189,7 @@ def _interaction(
             author_user_id=author.id,
             kind=InteractionKind.note,
             body=body,
+            origin=Origin.demo,
         )
     )
 
@@ -212,5 +217,6 @@ def _inquiry(
             lead_id=lead.id,
             subject=subject,
             body=body,
+            origin=Origin.demo,
         )
     )

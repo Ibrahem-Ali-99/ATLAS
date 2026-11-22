@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.domains.provenance.origin import Origin, origin_column
 
 
 class RunStatus(enum.StrEnum):
@@ -43,6 +44,7 @@ class AgentRun(Base):
     qualification: Mapped[str | None] = mapped_column(String(40), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    origin: Mapped[Origin] = origin_column()
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

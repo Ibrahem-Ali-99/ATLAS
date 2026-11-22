@@ -13,6 +13,7 @@ from app.domains.identity.dependencies import CsrfAdmin, CsrfMember, DbSession, 
 from app.domains.ml.inference import latest_model, latest_prediction, score_lead, start_training
 from app.domains.ml.models import LeadPrediction, ModelVersion
 from app.domains.monitoring.service import diagnostics, trace_run
+from app.domains.provenance.origin import DataScope
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["intelligence"])
 SYNTHETIC_NOTICE = (
@@ -35,8 +36,10 @@ class PredictionOut(BaseModel):
 
 
 @router.get("/analytics")
-def get_analytics(member: Member, db: DbSession) -> dict[str, Any]:
-    return snapshot(db, member.organization.id)
+def get_analytics(
+    member: Member, db: DbSession, scope: DataScope = DataScope.operational
+) -> dict[str, Any]:
+    return snapshot(db, member.organization.id, scope)
 
 
 @router.get("/ml/model")
@@ -107,8 +110,10 @@ def get_evaluations(member: Member, db: DbSession) -> dict[str, Any]:
 
 
 @router.get("/diagnostics")
-def get_diagnostics(member: Member, db: DbSession) -> dict[str, Any]:
-    return diagnostics(db, member.organization.id)
+def get_diagnostics(
+    member: Member, db: DbSession, scope: DataScope = DataScope.operational
+) -> dict[str, Any]:
+    return diagnostics(db, member.organization.id, scope)
 
 
 @router.get("/diagnostics/runs/{run_id}")
