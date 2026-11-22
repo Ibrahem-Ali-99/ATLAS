@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { PageHeader } from "@/components/page-header";
 import { MembershipTable } from "@/components/membership-table";
 import { SignOutDialog } from "@/components/sign-out-dialog";
 import { Button } from "@/components/ui/button";
@@ -17,12 +18,9 @@ export function SettingsScreen() {
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          Account details from the current session. Profile editing is not available in this release.
-        </p>
-      </div>
+      <PageHeader title="Settings">
+        Account details from the current session. Profile editing is not available, and these fields cannot be saved.
+      </PageHeader>
       <Card>
         <CardHeader>
           <CardTitle>Account</CardTitle>
@@ -42,8 +40,9 @@ export function SettingsScreen() {
                   readOnly
                   aria-readonly="true"
                   value={user.full_name}
-                  className="h-10 cursor-default rounded-md border border-input bg-muted px-3 text-sm"
+                  className="h-10 cursor-default rounded-md border border-border bg-muted px-3 text-sm text-foreground"
                 />
+                <span className="text-xs text-muted-foreground">Read only</span>
               </label>
               <label className="grid gap-2 text-sm">
                 <span className="font-medium">Email</span>
@@ -51,8 +50,9 @@ export function SettingsScreen() {
                   readOnly
                   aria-readonly="true"
                   value={user.email}
-                  className="h-10 cursor-default rounded-md border border-input bg-muted px-3 text-sm"
+                  className="h-10 cursor-default rounded-md border border-border bg-muted px-3 text-sm text-foreground"
                 />
+                <span className="text-xs text-muted-foreground">Read only</span>
               </label>
             </div>
           )}

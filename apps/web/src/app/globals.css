@@ -3,7 +3,7 @@
 :root {
   --background: #09090b;
   --foreground: #fafafa;
-  --card: #111113;
+  --card: #141418;
   --card-foreground: #fafafa;
   --primary: #3b82f6;
   --primary-foreground: #eff6ff;
@@ -14,7 +14,7 @@
   --accent: #172033;
   --accent-foreground: #dbeafe;
   --destructive: #ef4444;
-  --border: #27272a;
+  --border: #32323a;
   --input: #3f3f46;
   --ring: #3b82f6;
   --radius: 0.75rem;

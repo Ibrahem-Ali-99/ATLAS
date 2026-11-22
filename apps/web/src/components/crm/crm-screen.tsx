@@ -6,6 +6,7 @@ import { CompaniesPanel } from "@/components/crm/companies-panel";
 import { ContactsPanel } from "@/components/crm/contacts-panel";
 import { InquiriesPanel } from "@/components/crm/inquiries-panel";
 import { LeadsPanel } from "@/components/crm/leads-panel";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/lib/use-workspace";
 
@@ -27,16 +28,14 @@ export function CrmScreen() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">CRM</h1>
-        <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Companies, contacts, leads, and inquiries for {organizationName}. Records are loaded from this organization only.
-        </p>
-      </div>
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="CRM records">
+      <PageHeader title="CRM">
+        Companies, contacts, leads, and inquiries for {organizationName}. Records are loaded from this organization only.
+      </PageHeader>
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="CRM records">
         {tabs.map((item) => (
           <Button
             key={item.id}
+            className="shrink-0"
             type="button"
             role="tab"
             aria-selected={tab === item.id}

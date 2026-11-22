@@ -8,7 +8,10 @@ export function RequestError({ error }: { error: unknown }) {
         ? error.message
         : "Request failed";
   return (
-    <p className="text-sm text-red-300" role="alert">
+    <p
+      className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm leading-5 text-red-100"
+      role="alert"
+    >
       {message}
     </p>
   );

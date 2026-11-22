@@ -3,6 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { ConfirmButton } from "@/components/confirm-button";
+import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,19 @@ import { useWorkspace } from "@/lib/use-workspace";
 
 function statusVariant(status: DocumentStatus): "default" | "secondary" {
   return status === "ready" ? "default" : "secondary";
+}
+
+function statusCopy(status: DocumentStatus): string {
+  if (status === "pending") {
+    return "Waiting to start indexing.";
+  }
+  if (status === "processing") {
+    return "Indexing is in progress. This list refreshes until it finishes.";
+  }
+  if (status === "ready") {
+    return "Indexed and searchable.";
+  }
+  return "Indexing failed. The stored error is shown on the row.";
 }
 
 export function KnowledgeScreen() {
@@ -67,19 +82,18 @@ function KnowledgeWorkspace({
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Knowledge</h1>
-        <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-          PDF and text files for {organizationName}. Indexing runs in the background. Search uses this organization&apos;s ready documents only.
-        </p>
-      </div>
+      <PageHeader title="Knowledge">
+        PDF and text files for {organizationName}. Indexing runs in the background. Search uses this organization&apos;s ready documents only.
+      </PageHeader>
       <section className="rounded-xl border border-border bg-card p-4">
-        <label className="grid gap-2 text-sm">
-          Upload a PDF or TXT file
+        <h2 className="text-sm font-medium">Upload</h2>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">PDF and TXT only. Other file types are rejected and nothing is stored.</p>
+        <label className="mt-3 grid gap-2 text-sm">
+          <span className="sr-only">Upload a PDF or TXT file</span>
           <input
             type="file"
             accept=".pdf,.txt,application/pdf,text/plain"
-            className="text-sm"
+            className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-primary-foreground"
             onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) {
@@ -90,7 +104,44 @@ function KnowledgeWorkspace({
           />
         </label>
         {upload.isPending ? <p className="mt-3 text-sm text-muted-foreground">Uploading…</p> : null}
+        {upload.isSuccess ? <p className="mt-3 text-sm text-muted-foreground">Uploaded. Indexing continues until the status is ready.</p> : null}
         {upload.isError ? <div className="mt-3"><RequestError error={upload.error} /></div> : null}
+      </section>
+      <section className="rounded-xl border border-border bg-card p-4">
+        <h2 className="text-sm font-medium">Search</h2>
+        <form
+          className="mt-3 flex flex-col gap-3 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setSubmitted(search.trim());
+          }}
+        >
+          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search indexed text" aria-label="Search documents" />
+          <Button type="submit">Search</Button>
+        </form>
+        {submitted.length > 0 && submitted.length < 2 ? (
+          <p className="mt-3 text-sm text-muted-foreground">Enter at least two characters.</p>
+        ) : null}
+        {hits.isFetching ? <p className="mt-3 text-sm text-muted-foreground">Searching…</p> : null}
+        {hits.isError ? <div className="mt-3"><RequestError error={hits.error} /></div> : null}
+        {submitted.length >= 2 && hits.data ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            {hits.data.items.length === 0
+              ? `No indexed excerpts matched “${submitted}”.`
+              : `${hits.data.items.length} excerpt${hits.data.items.length === 1 ? "" : "s"} matched “${submitted}”. Order follows the stored search rank.`}
+          </p>
+        ) : null}
+        <ul className="mt-3 space-y-3">
+          {hits.data?.items.map((hit) => (
+            <li key={hit.id} className="rounded-md border border-border bg-background p-3 text-sm">
+              <p className="font-medium">
+                {hit.document_title}
+                {hit.page_number !== null ? ` · page ${hit.page_number}` : ""}
+              </p>
+              <p className="mt-2 whitespace-pre-wrap leading-6 text-muted-foreground">{hit.content}</p>
+            </li>
+          ))}
+        </ul>
       </section>
       <section className="rounded-xl border border-border bg-card">
         {documents.isPending ? <div className="space-y-2 p-4"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div> : null}
@@ -136,34 +187,6 @@ function KnowledgeWorkspace({
           status={documents.data?.items.find((item) => item.id === selectedId)?.status ?? "pending"}
         />
       ) : null}
-      <section className="rounded-xl border border-border bg-card p-4">
-        <form
-          className="flex flex-col gap-3 sm:flex-row"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setSubmitted(search.trim());
-          }}
-        >
-          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search indexed text" aria-label="Search documents" />
-          <Button type="submit">Search</Button>
-        </form>
-        {hits.isFetching ? <p className="mt-3 text-sm text-muted-foreground">Searching…</p> : null}
-        {hits.isError ? <div className="mt-3"><RequestError error={hits.error} /></div> : null}
-        {hits.data && hits.data.items.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">No indexed excerpts matched that search.</p>
-        ) : null}
-        <ul className="mt-3 space-y-3">
-          {hits.data?.items.map((hit) => (
-            <li key={hit.id} className="rounded-md border border-border p-3 text-sm">
-              <p className="font-medium">
-                {hit.document_title}
-                {hit.page_number !== null ? ` · page ${hit.page_number}` : ""}
-              </p>
-              <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{hit.content}</p>
-            </li>
-          ))}
-        </ul>
-      </section>
     </div>
   );
 }
@@ -199,16 +222,24 @@ function DocumentRow({
         {reindex.isError ? <RequestError error={reindex.error} /> : null}
         {remove.isError ? <RequestError error={remove.error} /> : null}
       </TableCell>
-      <TableCell><Badge variant={statusVariant(document.status)}>{document.status}</Badge></TableCell>
+      <TableCell>
+        <Badge variant={statusVariant(document.status)}>{document.status}</Badge>
+        <p className="mt-1 max-w-48 text-xs leading-5 text-muted-foreground">{statusCopy(document.status)}</p>
+      </TableCell>
       <TableCell>{Math.ceil(document.byte_size / 1024)} KB</TableCell>
       <TableCell>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button type="button" size="sm" variant="outline" disabled={reindex.isPending} onClick={() => reindex.mutate()}>
-            Reindex
+            {reindex.isPending ? "Reindexing…" : "Reindex"}
           </Button>
-          <Button type="button" size="sm" variant="outline" disabled={remove.isPending} onClick={() => remove.mutate()}>
-            Delete
-          </Button>
+          <ConfirmButton
+            label="Delete"
+            confirmLabel="Confirm delete"
+            pendingLabel="Deleting…"
+            pending={remove.isPending}
+            size="sm"
+            onConfirm={() => remove.mutate()}
+          />
         </div>
       </TableCell>
     </TableRow>
@@ -232,6 +263,7 @@ function ChunkList({
   return (
     <section className="rounded-xl border border-border bg-card p-4">
       <h2 className="text-base font-semibold">Extracted text</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{statusCopy(status)}</p>
       {chunks.isPending ? <Skeleton className="mt-3 h-16 w-full" /> : null}
       {chunks.isError ? <div className="mt-3"><RequestError error={chunks.error} /></div> : null}
       {chunks.data && chunks.data.items.length === 0 ? (

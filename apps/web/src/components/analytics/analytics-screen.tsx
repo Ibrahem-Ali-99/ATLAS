@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -29,10 +30,9 @@ export function AnalyticsScreen() {
 function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
   if (data.leads_total === 0 && data.inquiries_total === 0) {
     return (
-      <div className="space-y-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Analytics</h1>
-        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{data.synthetic_notice}</p>
-        <p className="text-sm text-muted-foreground">No leads or inquiries are stored for this organization yet.</p>
+      <div className="mx-auto w-full max-w-6xl space-y-3">
+        <PageHeader title="Analytics">{data.synthetic_notice}</PageHeader>
+        <p className="text-sm text-muted-foreground">No leads or inquiries are stored for this organization yet. Charts appear after the first record is saved.</p>
       </div>
     );
   }
@@ -40,12 +40,11 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
   const automation =
     data.automation.success_rate === null ? "unavailable" : `${Math.round(data.automation.success_rate * 1000) / 10}%`;
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-6xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Analytics</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+        <PageHeader title="Analytics">
           {data.synthetic_notice} Lead trend uses the last {data.window_days} days. {data.conversion.definition}
-        </p>
+        </PageHeader>
       </div>
       <div className="grid gap-4 md:grid-cols-4">
         <Metric label="Leads" value={String(data.leads_total)} />
@@ -60,15 +59,19 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
             <CardDescription>{data.qualification.definition}</CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.lead_status}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="status" />
-                <YAxis allowDecimals={false} />
-                <Tooltip />
-                <Bar dataKey="count" fill="currentColor" />
-              </BarChart>
-            </ResponsiveContainer>
+            {data.lead_status.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No lead statuses are stored in this window.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data.lead_status}>
+                  <CartesianGrid stroke="#32323a" strokeDasharray="3 3" />
+                  <XAxis dataKey="status" tick={{ fill: "#a1a1aa", fontSize: 12 }} />
+                  <YAxis allowDecimals={false} tick={{ fill: "#a1a1aa", fontSize: 12 }} />
+                  <Tooltip contentStyle={chartTooltip} />
+                  <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -79,11 +82,11 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
           <CardContent className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.lead_trend}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="day" hide />
-                <YAxis allowDecimals={false} />
-                <Tooltip />
-                <Line type="monotone" dataKey="count" stroke="currentColor" dot={false} />
+                <CartesianGrid stroke="#32323a" strokeDasharray="3 3" />
+                <XAxis dataKey="day" tickFormatter={shortDay} minTickGap={28} tick={{ fill: "#a1a1aa", fontSize: 12 }} />
+                <YAxis allowDecimals={false} tick={{ fill: "#a1a1aa", fontSize: 12 }} />
+                <Tooltip contentStyle={chartTooltip} />
+                <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -102,12 +105,23 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
   );
 }
 
+const chartTooltip = {
+  background: "#141418",
+  border: "1px solid #32323a",
+  borderRadius: 8,
+  color: "#fafafa",
+};
+
+function shortDay(value: string): string {
+  return value.length >= 10 ? value.slice(5) : value;
+}
+
 function Metric({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
     <Card>
       <CardHeader>
         <CardDescription>{label}</CardDescription>
-        <CardTitle>{value}</CardTitle>
+        <CardTitle className="text-2xl tabular-nums">{value}</CardTitle>
       </CardHeader>
       {detail ? (
         <CardContent>

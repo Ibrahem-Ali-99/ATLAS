@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { ConfirmButton } from "@/components/confirm-button";
 import { Pager } from "@/components/pager";
 import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
@@ -196,11 +197,12 @@ function InquiryEditor({
       <div className="mt-4">
         <InquiryFields form={form} formId="inquiry-edit" companies={companies} onSubmit={(values) => save.mutate(values)} />
       </div>
+      {save.isSuccess ? <p className="mt-3 text-sm text-muted-foreground">Saved.</p> : null}
       {save.isError ? <div className="mt-3"><RequestError error={save.error} /></div> : null}
       {remove.isError ? <div className="mt-3"><RequestError error={remove.error} /></div> : null}
       <div className="mt-4 flex gap-2">
         <Button type="submit" form="inquiry-edit" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
-        <Button type="button" variant="outline" disabled={remove.isPending} onClick={() => remove.mutate()}>Delete</Button>
+        <ConfirmButton label="Delete" confirmLabel="Confirm delete" pendingLabel="Deleting…" pending={remove.isPending} onConfirm={() => remove.mutate()} />
       </div>
     </aside>
   );

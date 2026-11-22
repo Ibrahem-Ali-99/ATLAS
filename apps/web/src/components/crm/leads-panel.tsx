@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { ConfirmButton } from "@/components/confirm-button";
 import { Pager } from "@/components/pager";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
@@ -260,11 +261,12 @@ function LeadDetail({
         <p className="mt-1 text-sm text-muted-foreground">Owned by the member who created it unless reassigned by the API.</p>
       </div>
       <LeadFields form={form} formId="lead-edit" companies={companies} onSubmit={(values) => save.mutate(values)} />
+      {save.isSuccess ? <p className="text-sm text-muted-foreground">Saved.</p> : null}
       {save.isError ? <RequestError error={save.error} /> : null}
       {remove.isError ? <RequestError error={remove.error} /> : null}
       <div className="flex gap-2">
         <Button type="submit" form="lead-edit" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
-        <Button type="button" variant="outline" disabled={remove.isPending} onClick={() => remove.mutate()}>Delete</Button>
+        <ConfirmButton label="Delete" confirmLabel="Confirm delete" pendingLabel="Deleting…" pending={remove.isPending} onConfirm={() => remove.mutate()} />
       </div>
       <LeadScore organizationId={organizationId} leadId={lead.id} />
       <div className="border-t border-border pt-4">

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -78,12 +79,16 @@ function AssistantWorkspace({
   });
 
   return (
-    <div className="mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
+      <PageHeader title="AI Assistant">
+        Answers use stored documents and CRM records for {organizationName}. A citation is a retrieved row, not a phrase taken from the model text.
+      </PageHeader>
+      <div className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
       <aside className="rounded-xl border border-border bg-card p-4">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-base font-semibold">Conversations</h1>
+          <h2 className="text-sm font-semibold">Conversations</h2>
           <Button type="button" size="sm" disabled={create.isPending} onClick={() => create.mutate()}>
-            New
+            {create.isPending ? "Starting…" : "New"}
           </Button>
         </div>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">History is stored for {organizationName} and stays after refresh.</p>
@@ -101,7 +106,8 @@ function AssistantWorkspace({
                 className={`w-full rounded-md px-2 py-2 text-left text-sm ${conversation.id === conversationId ? "bg-accent" : "hover:bg-accent/50"}`}
                 onClick={() => router.replace(`/assistant?conversation=${conversation.id}`)}
               >
-                {conversation.title}
+                <span className="block truncate font-medium">{conversation.title}</span>
+                <span className="mt-1 block text-xs text-muted-foreground">{new Date(conversation.updated_at).toLocaleString()}</span>
               </button>
             </li>
           ))}
@@ -109,7 +115,12 @@ function AssistantWorkspace({
       </aside>
       <section className="flex min-h-[32rem] flex-col rounded-xl border border-border bg-card">
         {!conversationId ? (
-          <p className="p-6 text-sm text-muted-foreground">Start a conversation to ask about company documents or CRM records.</p>
+          <div className="p-6">
+            <p className="text-sm font-medium">No conversation is open</p>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+              Start one, then ask about a document you uploaded or a CRM record in this organization. The answer stays in this conversation after you refresh.
+            </p>
+          </div>
         ) : null}
         {detail.isPending && conversationId ? <div className="space-y-3 p-6"><Skeleton className="h-16 w-full" /><Skeleton className="h-16 w-2/3" /></div> : null}
         {detail.isError ? <div className="p-6"><RequestError error={detail.error} /></div> : null}
@@ -147,6 +158,7 @@ function AssistantWorkspace({
           </div>
         </form>
       </section>
+      </div>
     </div>
   );
 }
@@ -165,11 +177,17 @@ function MessageView({ message }: { message: ChatMessage }) {
   const documents = message.sources.filter((source) => source.kind === "document");
   const records = message.sources.filter((source) => source.kind === "crm");
   return (
-    <article className="rounded-lg border border-border p-4 text-sm">
+    <article
+      className={
+        message.role === "user"
+          ? "ml-auto max-w-[40rem] rounded-lg bg-accent px-4 py-3 text-sm"
+          : "max-w-[40rem] rounded-lg border border-border bg-background px-4 py-3 text-sm"
+      }
+    >
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {message.role === "user" ? "You" : "Assistant"}
       </p>
-      <p className="mt-2 whitespace-pre-wrap">{message.content}</p>
+      <p className="mt-2 whitespace-pre-wrap leading-6">{message.content}</p>
       {documents.length > 0 ? <SourceList label="Company documents" sources={documents} /> : null}
       {records.length > 0 ? <SourceList label="CRM records" sources={records} /> : null}
     </article>

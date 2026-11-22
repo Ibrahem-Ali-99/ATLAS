@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 
+import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,32 +43,58 @@ export function WorkflowsScreen() {
   const calendarLabel =
     data.calendar_provider === "simulation" ? "Simulated calendar" : data.calendar_provider;
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-          n8n starts these automations. ATLAS records the outcome. A lead webhook is attempted
-          twice, then the failure stays on the run. This page does not start another attempt.
-          Outbound email and calendar bookings wait for an admin approval. Simulated bookings
-          are stored in ATLAS.
-        </p>
-      </div>
+    <div className="mx-auto w-full max-w-6xl space-y-6">
+      <PageHeader title="Workflows">
+        n8n starts these automations. ATLAS records the outcome. A lead webhook is attempted twice, then the failure stays on the run. This page does not start another attempt.
+      </PageHeader>
+      <section className="grid gap-3 md:grid-cols-2">
+        <article className="rounded-xl border border-border bg-card p-4 text-sm">
+          <h2 className="font-medium">Email</h2>
+          <p className="mt-2 leading-6 text-muted-foreground">
+            {data.email_mode === "live"
+              ? "Live email is enabled. Execute sends through the configured provider."
+              : "Sandbox email reaches the local mailbox, not a customer inbox."}
+          </p>
+          <Badge className="mt-3">{emailLabel}</Badge>
+        </article>
+        <article className="rounded-xl border border-border bg-card p-4 text-sm">
+          <h2 className="font-medium">Calendar</h2>
+          <p className="mt-2 leading-6 text-muted-foreground">
+            {data.calendar_provider === "simulation"
+              ? "Bookings are simulated rows in ATLAS. No external calendar is contacted."
+              : `Bookings use ${data.calendar_provider}.`}
+          </p>
+          <Badge className="mt-3" variant="secondary">{calendarLabel}</Badge>
+        </article>
+        <article className="rounded-xl border border-border bg-card p-4 text-sm">
+          <h2 className="font-medium">n8n</h2>
+          <p className="mt-2 leading-6 text-muted-foreground">
+            {data.n8n_configured
+              ? "A lead webhook URL is configured."
+              : "The lead webhook URL is empty, so new runs are stored as not configured."}
+          </p>
+          <Badge className="mt-3" variant="secondary">{data.n8n_configured ? "n8n webhook configured" : "n8n webhook not configured"}</Badge>
+        </article>
+        <article className="rounded-xl border border-border bg-card p-4 text-sm">
+          <h2 className="font-medium">Webhook key</h2>
+          <p className="mt-2 leading-6 text-muted-foreground">
+            {data.webhook_configured
+              ? "This organization has a key for signed callbacks."
+              : "No webhook key is installed, so ATLAS cannot sign an outbound call."}
+          </p>
+          <Badge className="mt-3" variant="secondary">{data.webhook_configured ? "Webhook key installed" : "No webhook key"}</Badge>
+        </article>
+      </section>
       {analytics.data ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm leading-6 text-muted-foreground">
           Automation success rate:{" "}
           {analytics.data.automation.success_rate === null
             ? "unavailable"
-            : analytics.data.automation.success_rate}{" "}
+            : `${Math.round(analytics.data.automation.success_rate * 1000) / 10}%`}
           . {analytics.data.automation.definition} Follow-up requests: {analytics.data.follow_ups.approval_requests}.
           Sandbox email sent: {analytics.data.email.sandbox_sent}. Calendar bookings: {analytics.data.calendar.booked}.
         </p>
       ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Badge>{emailLabel}</Badge>
-        <Badge variant="secondary">{calendarLabel}</Badge>
-        <Badge variant="secondary">{data.n8n_configured ? "n8n webhook configured" : "n8n webhook not configured"}</Badge>
-        <Badge variant="secondary">{data.webhook_configured ? "Webhook key installed" : "No webhook key"}</Badge>
-      </div>
       <div className="grid gap-4 md:grid-cols-2">
         {data.automations.map((automation) => (
           <article key={automation.name} className="rounded-xl border border-border bg-card p-4">
