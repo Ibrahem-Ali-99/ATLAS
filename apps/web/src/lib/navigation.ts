@@ -35,7 +35,7 @@ const monitoring = { href: "/monitoring", label: "Monitoring", icon: Activity };
 const settings = { href: "/settings", label: "Settings", icon: Settings };
 
 export const navigationGroups: NavGroup[] = [
-  { label: "Workspace", items: [overview, assistant, crm, knowledge] },
+  { label: "Business operations", items: [overview, assistant, crm, knowledge] },
   { label: "Operations", items: [agentRuns, approvals, workflows] },
   { label: "Insight", items: [analytics, monitoring, settings] },
 ];

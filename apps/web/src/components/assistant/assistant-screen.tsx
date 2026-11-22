@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -101,7 +102,6 @@ function AssistantWorkspace({
       setNotice(searchNotice(reply));
       if (reply.message.sources.length > 0) {
         setFocusSource(sourceKey(reply.message.sources[0]));
-        revealSources();
       }
       await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, conversationId] });
       await queryClient.invalidateQueries({ queryKey: ["conversations", organizationId] });
@@ -152,17 +152,13 @@ function AssistantWorkspace({
   );
 
   return (
-    <div className="flex h-full min-h-0 bg-background">
-      <aside className="hidden w-72 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">{history}</aside>
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{current?.title ?? "Assistant"}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              Ask about ATLAS, a follow-up, or a record for {organizationName}.
-            </p>
-          </div>
-          <div className="flex shrink-0 gap-2">
+    <div className="flex h-full min-h-0 gap-2 bg-background p-2">
+      <aside className="hidden w-[264px] shrink-0 flex-col rounded-[10px] bg-card lg:flex">{history}</aside>
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col px-4">
+        <div className="flex items-start justify-between gap-4 py-4">
+          <h1 className="min-w-0 truncate text-[23px] leading-tight text-foreground">{current?.title ?? "Assistant"}</h1>
+          <div className="flex shrink-0 items-center gap-3">
+            <ProviderNotice organizationId={organizationId} compact />
             <Button type="button" size="sm" variant="outline" className="lg:hidden" onClick={() => setHistoryOpen(true)}>
               History
             </Button>
@@ -174,8 +170,7 @@ function AssistantWorkspace({
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
-            <ProviderNotice organizationId={organizationId} />
+          <div className="flex w-full max-w-4xl flex-col gap-6 py-2">
             {!conversationId ? (
               <p className="text-sm leading-6 text-muted-foreground">
                 No conversation is open. Start one from the list, then ask about a document or a CRM record for {organizationName}.
@@ -209,12 +204,12 @@ function AssistantWorkspace({
             ) : null}
           </div>
         </div>
-        <div className="border-t border-border bg-background px-4 py-4">
-          <div className="mx-auto w-full max-w-3xl space-y-3">
+        <div className="py-4">
+          <div className="w-full max-w-4xl space-y-3">
             {notice ? <StatusNote>{notice}</StatusNote> : null}
             {send.isError ? <FailureNotice error={send.error} onRetry={() => submit()} canRetry={draft.trim().length > 0} /> : null}
             <form
-              className="rounded-xl border border-border bg-card p-3"
+              className="rounded-[10px] bg-muted px-4 py-3"
               onSubmit={(event) => {
                 event.preventDefault();
                 submit();
@@ -229,14 +224,16 @@ function AssistantWorkspace({
                     submit();
                   }
                 }}
-                placeholder="Ask about a document or a CRM record"
+                placeholder="Ask about records, documents or your organization…"
                 disabled={!conversationId || send.isPending}
-                className="min-h-16 border-0 bg-transparent px-1 py-1 focus-visible:ring-0"
+                className="min-h-12 border-0 bg-transparent px-0 py-1 shadow-none focus-visible:ring-0"
               />
               <div className="mt-2 flex items-center justify-between gap-3">
-                <p className="text-xs text-muted-foreground">Enter sends. Shift+Enter adds a line. Follow-ups stay in this chat.</p>
-                <Button type="submit" disabled={!conversationId || send.isPending || draft.trim().length === 0}>
-                  {send.isPending ? "Answering…" : "Send"}
+                <p className="text-[10px] uppercase tracking-[0.14em] text-subtle">
+                  Enter to send · Shift + Enter for a new line
+                </p>
+                <Button type="submit" className="rounded-[10px]" disabled={!conversationId || send.isPending || draft.trim().length === 0}>
+                  {send.isPending ? "Answering…" : "Send →"}
                 </Button>
               </div>
             </form>
@@ -300,15 +297,15 @@ function ConversationHistory({
   const customer = filtered.filter((item) => !isEvaluationConversation(item));
   const evaluation = filtered.filter((item) => isEvaluationConversation(item));
   return (
-    <div className="flex h-full min-h-0 flex-col p-3">
+    <div className="flex h-full min-h-0 flex-col p-4">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">Conversations</h2>
+        <h2 className="text-lg text-foreground">Conversations</h2>
         <Button type="button" size="sm" disabled={creating} onClick={onCreate}>
           {creating ? "Starting…" : "New chat"}
         </Button>
       </div>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground">Stored for {organizationName}. A new chat takes its title from the first question.</p>
-      <Input className="mt-3" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" />
+      <p className="sr-only">Stored for {organizationName}. A new chat takes its title from the first question.</p>
+      <Input className="mt-4 h-10 rounded-[10px] border-0 bg-secondary" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search conversations…" aria-label="Search conversations" />
       {pending ? <Skeleton className="mt-4 h-16 w-full" /> : null}
       {error ? <div className="mt-4"><RequestError error={error} /></div> : null}
       {conversations && customer.length === 0 && evaluation.length === 0 ? (
@@ -330,10 +327,10 @@ function ConversationHistory({
         <div className="mt-3 border-t border-border pt-3">
           <button
             type="button"
-            className="text-xs font-medium text-muted-foreground"
+            className="text-[10px] uppercase tracking-[0.14em] text-subtle"
             onClick={() => setShowEvaluation((current) => !current)}
           >
-            {showEvaluation ? "Hide" : "Show"} evaluation history ({evaluation.length})
+            {showEvaluation ? "Hide evaluation history" : `Evaluation history / ${evaluation.length} hidden`}
           </button>
           {showEvaluation ? (
             <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
@@ -370,11 +367,11 @@ function ConversationButton({
     <li>
       <button
         type="button"
-        className={`w-full rounded-md px-2 py-2 text-left text-sm transition-colors ${selected ? "bg-accent text-foreground" : "hover:bg-accent/60"}`}
+        className={`w-full rounded-[10px] px-3 py-2 text-left transition-colors ${selected ? "bg-accent text-foreground" : "hover:bg-accent/60"}`}
         onClick={() => onOpen(conversation.id)}
       >
-        <span className="block truncate font-medium">{conversation.title}</span>
-        <span className="mt-1 block text-xs text-muted-foreground">{new Date(conversation.updated_at).toLocaleString()}</span>
+        <span className="block truncate text-[13px] text-foreground">{conversation.title}</span>
+        <span className="mt-1 block text-[10px] text-subtle">{new Date(conversation.updated_at).toLocaleString()}</span>
       </button>
     </li>
   );
@@ -427,57 +424,73 @@ function MessageView({
   const refused = message.role === "assistant" && message.content.includes(NO_RECORDS);
   if (message.role === "user") {
     return (
-      <article className="ml-auto max-w-[36rem] rounded-2xl bg-secondary px-4 py-3 text-sm">
-        <p className="text-xs font-medium text-muted-foreground">You</p>
-        <p className="mt-2 whitespace-pre-wrap leading-6">{message.content}</p>
+      <article>
+        <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">You</p>
+        <p className="mt-2 whitespace-pre-wrap rounded-[10px] bg-secondary px-4 py-4 text-[15px] leading-6 text-foreground">{message.content}</p>
       </article>
     );
   }
   return (
-    <article className="max-w-3xl text-sm">
-      <p className="text-xs font-medium text-muted-foreground">Assistant</p>
+    <article>
+      <p className="text-xs uppercase tracking-[0.12em] text-primary">Atlas assistant</p>
       {refused ? (
-        <div className="mt-2 rounded-lg border border-border bg-card px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">No supporting evidence</p>
-          <p className="mt-2 whitespace-pre-wrap leading-7">{message.content}</p>
+        <div className="mt-3 rounded-[10px] bg-muted px-4 py-3">
+          <p className="text-[10px] uppercase tracking-[0.14em] text-subtle">No supporting evidence</p>
+          <p className="mt-2 whitespace-pre-wrap text-[15px] leading-7">{message.content}</p>
         </div>
       ) : (
-        <div className="mt-2">
-          <RichText id={message.id} text={message.content} />
+        <div className="mt-3 text-[15px] leading-7 text-muted-foreground">
+          <RichText id={message.id} text={message.content} lead />
         </div>
       )}
-      {documents.length > 0 ? <SourceList label="Company documents" sources={documents} onSource={onSource} /> : null}
-      {records.length > 0 ? <SourceList label="CRM records" sources={records} onSource={onSource} /> : null}
+      {documents.length > 0 ? <SourceList kind="document" sources={documents} onSource={onSource} /> : null}
+      {records.length > 0 ? <SourceList kind="crm" sources={records} onSource={onSource} /> : null}
+      {documents.length > 0 || records.length > 0 ? (
+        <div className="mt-5">
+          <p className="text-sm text-muted-foreground">Relevant actions</p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            {records.length > 0 ? (
+              <Link href="/crm" className="rounded-[10px] bg-muted px-4 py-3 text-xs text-primary">
+                View company record →
+              </Link>
+            ) : null}
+            {documents.length > 0 ? (
+              <Link href="/knowledge" className="rounded-[10px] bg-muted px-4 py-3 text-xs text-primary">
+                Browse knowledge →
+              </Link>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
 
 function SourceList({
-  label,
+  kind,
   sources,
   onSource,
 }: {
-  label: string;
+  kind: "document" | "crm";
   sources: MessageSource[];
   onSource: (source: MessageSource) => void;
 }) {
+  const eyebrow = kind === "document" ? "Company knowledge" : "CRM record";
   return (
-    <div className="mt-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <div className="mt-2 flex flex-col gap-2">
-        {sources.map((source) => (
-          <button
-            key={sourceKey(source)}
-            type="button"
-            className="rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent"
-            onClick={() => onSource(source)}
-          >
-            <span className="font-medium">{source.title}</span>
-            {source.page_number !== null ? <span className="ml-2 text-xs text-muted-foreground">page {source.page_number}</span> : null}
-            <span className="mt-1 block text-xs leading-5 text-muted-foreground">{source.excerpt}</span>
-          </button>
-        ))}
-      </div>
+    <div className="mt-4 flex flex-col gap-2">
+      {sources.map((source, index) => (
+        <div key={sourceKey(source)} className="rounded-[10px] bg-muted px-4 py-4">
+          <p className="text-[11px] uppercase tracking-[0.12em] text-success">
+            Source {String(index + 1).padStart(2, "0")} / {eyebrow}
+          </p>
+          <div className="mt-2 flex items-center justify-between gap-4">
+            <p className="min-w-0 truncate text-sm text-foreground">{source.title}</p>
+            <button type="button" className="shrink-0 text-xs text-primary" onClick={() => onSource(source)}>
+              View exact excerpt →
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

@@ -5,20 +5,24 @@ type Block =
   | { type: "code"; text: string }
   | { type: "table"; headers: string[]; rows: string[][] };
 
-export function RichText({ text, id }: { text: string; id: string }) {
+export function RichText({ text, id, lead = false }: { text: string; id: string; lead?: boolean }) {
   const blocks = parseMarkdown(text);
   return (
     <div className="space-y-3 leading-7">
       {blocks.map((block, index) => (
-        <BlockView key={`${id}-${index}`} block={block} />
+        <BlockView key={`${id}-${index}`} block={block} lead={lead && index === 0} />
       ))}
     </div>
   );
 }
 
-function BlockView({ block }: { block: Block }) {
+function BlockView({ block, lead = false }: { block: Block; lead?: boolean }) {
   if (block.type === "heading") {
-    const className = block.level === 1 ? "text-lg font-semibold" : "text-base font-semibold";
+    const className = lead
+      ? "text-[22px] font-normal leading-snug text-foreground"
+      : block.level === 1
+        ? "text-lg font-semibold"
+        : "text-base font-semibold";
     if (block.level === 1) {
       return <h2 className={className}><Inline text={block.text} /></h2>;
     }
@@ -73,7 +77,7 @@ function BlockView({ block }: { block: Block }) {
     );
   }
   return (
-    <p className="whitespace-pre-wrap">
+    <p className={lead ? "whitespace-pre-wrap text-[22px] leading-snug text-foreground" : "whitespace-pre-wrap"}>
       <Inline text={block.text} />
     </p>
   );

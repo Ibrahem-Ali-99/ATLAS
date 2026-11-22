@@ -102,23 +102,23 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
 
   await page.getByRole("link", { name: "AI Assistant" }).click();
   await page.getByRole("button", { name: "New" }).click();
-  await page.getByPlaceholder("Ask about a document or a CRM record").fill(`bonded-yard-${stamp}`);
+  await page.getByPlaceholder("Ask about records, documents or your organization…").fill(`bonded-yard-${stamp}`);
   await page.getByRole("button", { name: "Send" }).click();
-  const answer = page.getByRole("article").filter({ hasText: "Company documents" });
+  const answer = page.getByRole("article").filter({ hasText: "Grounded answer from the supplied company records." });
   await expect(answer.getByText("Grounded answer from the supplied company records.")).toBeVisible();
   await expect(answer.getByText(documentTitle)).toBeVisible();
   await shot(page, "04-assistant.png");
 
-  await page.getByPlaceholder("Ask about a document or a CRM record").fill("What can you help me with?");
+  await page.getByPlaceholder("Ask about records, documents or your organization…").fill("What can you help me with?");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByRole("heading", { name: "What I can help with" })).toBeVisible();
   await expect(page.getByText("I could not find relevant company documents or CRM records for that question.")).toHaveCount(0);
 
-  await page.getByPlaceholder("Ask about a document or a CRM record").fill("Which companies are in my CRM?");
+  await page.getByPlaceholder("Ask about records, documents or your organization…").fill("Which companies are in my CRM?");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByRole("heading", { name: "Companies in this organization" })).toBeVisible();
 
-  await page.getByPlaceholder("Ask about a document or a CRM record").fill("What does the document you mentioned say?");
+  await page.getByPlaceholder("Ask about records, documents or your organization…").fill("What does the document you mentioned say?");
   await page.getByRole("button", { name: "Send" }).click();
   const followUp = page.getByRole("article").filter({ hasText: documentTitle });
   await expect(followUp.getByText("Grounded answer from the supplied company records.")).toHaveCount(2);
