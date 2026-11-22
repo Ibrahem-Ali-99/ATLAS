@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 
 import { MembershipTable } from "@/components/membership-table";
 import { Badge } from "@/components/ui/badge";
@@ -141,20 +142,26 @@ export function OverviewScreen() {
           {analytics.isPending ? <Skeleton className="h-16 w-full" /> : null}
           {analytics.isError ? <p className="text-sm text-red-300">Analytics could not be loaded.</p> : null}
           {analytics.data ? (
-            <dl className="grid gap-3 text-sm sm:grid-cols-3">
-              <div>
-                <dt className="text-muted-foreground">Leads</dt>
-                <dd className="mt-1 text-lg font-medium">{analytics.data.leads_total}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Inquiries</dt>
-                <dd className="mt-1 text-lg font-medium">{analytics.data.inquiries_total}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Pending approvals</dt>
-                <dd className="mt-1 text-lg font-medium">{analytics.data.approvals.pending}</dd>
-              </div>
-            </dl>
+            <div className="grid gap-3 text-sm sm:grid-cols-3">
+              <Link href="/crm" className="rounded-lg border border-border p-3">
+                <p className="text-muted-foreground">Leads</p>
+                <p className="mt-1 text-lg font-medium">{analytics.data.leads_total}</p>
+                <p className="mt-1 text-muted-foreground">Stored leads for this organization.</p>
+              </Link>
+              <Link href="/approvals" className="rounded-lg border border-border p-3">
+                <p className="text-muted-foreground">Pending approvals</p>
+                <p className="mt-1 text-lg font-medium">{analytics.data.approvals.pending}</p>
+                <p className="mt-1 text-muted-foreground">Waiting for an admin. Execute is the write.</p>
+              </Link>
+              <Link href="/monitoring" className="rounded-lg border border-border p-3">
+                <p className="text-muted-foreground">Failed runs</p>
+                <p className="mt-1 text-lg font-medium">{analytics.data.failed_runs}</p>
+                <p className="mt-1 text-muted-foreground">
+                  {analytics.data.approvals.needs_attention} approval
+                  {analytics.data.approvals.needs_attention === 1 ? "" : "s"} need attention because the outcome was not confirmed.
+                </p>
+              </Link>
+            </div>
           ) : null}
         </CardContent>
       </Card>

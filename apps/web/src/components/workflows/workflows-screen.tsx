@@ -46,8 +46,10 @@ export function WorkflowsScreen() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-          n8n starts these automations. ATLAS records the outcome. Outbound email and calendar
-          bookings wait for an admin approval. Simulated bookings are stored in ATLAS.
+          n8n starts these automations. ATLAS records the outcome. A lead webhook is attempted
+          twice, then the failure stays on the run. This page does not start another attempt.
+          Outbound email and calendar bookings wait for an admin approval. Simulated bookings
+          are stored in ATLAS.
         </p>
       </div>
       {analytics.data ? (

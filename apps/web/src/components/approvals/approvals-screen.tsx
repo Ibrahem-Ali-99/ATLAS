@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +65,7 @@ function ApprovalsBody({
   onNotice: (notice: string | null) => void;
 }) {
   const queryClient = useQueryClient();
+  const executeGuard = useRef(false);
   const approvals = useQuery({
     queryKey: ["approvals", organizationId, status],
     queryFn: () => listApprovals(organizationId, { status }),
@@ -96,8 +97,20 @@ function ApprovalsBody({
     },
   });
   const execute = useMutation({
-    mutationFn: (approvalId: string) => executeApproval(organizationId, approvalId),
+    mutationFn: async (approvalId: string) => {
+      if (executeGuard.current) {
+        throw new Error("This approval is already being executed.");
+      }
+      executeGuard.current = true;
+      try {
+        return await executeApproval(organizationId, approvalId);
+      } catch (error) {
+        executeGuard.current = false;
+        throw error;
+      }
+    },
     onSuccess: async (approval) => {
+      executeGuard.current = false;
       onNotice("Executed. The stored result is on this approval.");
       await queryClient.invalidateQueries({ queryKey: ["approvals", organizationId] });
       await queryClient.invalidateQueries({ queryKey: ["agent-runs", organizationId] });
@@ -214,6 +227,7 @@ function ApprovalDetail({
         {approval.executed_at ? <div>Executed {new Date(approval.executed_at).toLocaleString()}</div> : null}
         {approval.decision_note ? <div>Note: {approval.decision_note}</div> : null}
       </dl>
+      <p className="text-sm leading-6 text-muted-foreground">{sideEffect(approval.action_type, approval.status)}</p>
       <pre className="overflow-x-auto rounded-md bg-background p-3 text-xs">{JSON.stringify(approval.payload, null, 2)}</pre>
       {executionSummary(approval.execution_result) ? (
         <p className="text-sm text-muted-foreground">{executionSummary(approval.execution_result)}</p>
@@ -248,6 +262,22 @@ function ApprovalDetail({
       {error ? <RequestError error={error} /> : null}
     </div>
   );
+}
+
+function sideEffect(actionType: string, status: string): string {
+  if (status === "needs_attention") {
+    return "The outcome could not be confirmed, so this was not marked successful. Check Workflows before running it again.";
+  }
+  if (actionType === "prepare_customer_response") {
+    return "Approve stores this text. Execute sends it through the configured email mode. Sandbox mode reaches the local mailbox, not a customer inbox. Reject sends nothing.";
+  }
+  if (actionType === "request_appointment") {
+    return "Approve stores this time. Execute writes a simulated calendar booking in ATLAS. No external calendar is contacted. Reject books nothing.";
+  }
+  if (actionType === "update_lead" || actionType === "create_lead") {
+    return "Approve does not change CRM. Execute writes this payload. Reject writes nothing.";
+  }
+  return "Execute writes only the payload shown here.";
 }
 
 function targetLabel(payload: Record<string, unknown>): string {

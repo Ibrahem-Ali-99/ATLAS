@@ -3,6 +3,15 @@ import path from "node:path";
 
 import { expect, test, type Page, type Response } from "@playwright/test";
 
+import { isStaleChunkError } from "../src/lib/chunk-error";
+
+test("a missing JavaScript chunk is recognized as a stale bundle", () => {
+  expect(
+    isStaleChunkError(new Error("Failed to load chunk /_next/static/chunks/1nydp4gkw8786.js from module 64893")),
+  ).toBe(true);
+  expect(isStaleChunkError(new Error("Resource not found"))).toBe(false);
+});
+
 const shotDir = path.resolve(process.cwd(), "../../docs/demo/screenshots");
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -38,6 +47,16 @@ const leadTitle = `E2E pier ${stamp}`;
 const documentTitle = `e2e-harbor-${stamp}`;
 
 test("workspace flow uses the browser and deterministic providers", async ({ page }) => {
+  const failedChunks: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("response", (response) => {
+    if (response.url().includes("/_next/static/chunks/") && response.status() >= 400) {
+      failedChunks.push(`${response.status()} ${response.url()}`);
+    }
+  });
+  page.on("pageerror", (error) => {
+    pageErrors.push(error.message);
+  });
   await page.goto("/login");
   await page.getByLabel("Email").fill("admin@example.com");
   await page.getByLabel("Password").fill("change-me-admin");
@@ -46,7 +65,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await expect(page.getByText("Pending approvals")).toBeVisible();
   await shot(page, "01-overview.png");
 
-  await page.getByRole("link", { name: "CRM" }).click();
+  await page.getByRole("link", { name: "CRM", exact: true }).click();
   await page.getByRole("button", { name: "New company" }).click();
   await page.getByLabel("Name").fill(companyName);
   await page.getByLabel("Industry").fill("Logistics");
@@ -89,7 +108,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await expect(answer.getByText(documentTitle)).toBeVisible();
   await shot(page, "04-assistant.png");
 
-  await page.getByRole("link", { name: "CRM" }).click();
+  await page.getByRole("link", { name: "CRM", exact: true }).click();
   await page.getByRole("tab", { name: "Inquiries" }).click();
   await page.getByRole("button", { name: "New inquiry" }).click();
   await page.getByLabel("Subject").fill(`Bonded storage ${stamp}`);
@@ -126,7 +145,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
       response.url().includes("status=pending") &&
       response.ok(),
   );
-  await page.getByRole("link", { name: "Approvals" }).click();
+  await page.getByRole("link", { name: "Approvals", exact: true }).click();
   const pending = await jsonBody<{ items: ApprovalRow[] }>(await pendingApprovals);
   await selectApproval(page, leadApproval?.id ?? "", pending.items);
   const leadProposal = page
@@ -165,7 +184,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
       !response.url().includes("/leads/") &&
       response.ok(),
   );
-  await page.getByRole("link", { name: "CRM" }).click();
+  await page.getByRole("link", { name: "CRM", exact: true }).click();
   await page.getByRole("tab", { name: "Leads" }).click();
   const refreshed = await jsonBody<{ items: LeadRow[] }>(await refreshedLeads);
   const updated = refreshed.items.find((item) => item.id === northPierId);
@@ -192,7 +211,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
       response.url().includes("status=pending") &&
       response.ok(),
   );
-  await page.getByRole("link", { name: "Approvals" }).click();
+  await page.getByRole("link", { name: "Approvals", exact: true }).click();
   await page.getByLabel("Filter approvals").selectOption("pending");
   const pendingAgain = await jsonBody<{ items: ApprovalRow[] }>(await pendingResponses);
   await selectApproval(page, responseApproval?.id ?? "", pendingAgain.items);
@@ -217,4 +236,50 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByRole("menuitem", { name: "Sign out" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  expect(failedChunks).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("narrow viewport opens every page without a missing chunk", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const failedChunks: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("response", (response) => {
+    if (response.url().includes("/_next/static/chunks/") && response.status() >= 400) {
+      failedChunks.push(`${response.status()} ${response.url()}`);
+    }
+  });
+  page.on("pageerror", (error) => {
+    pageErrors.push(error.message);
+  });
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("admin@example.com");
+  await page.getByLabel("Password").fill("change-me-admin");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await shot(page, "12-overview-mobile.png");
+  const pages: [string, string][] = [
+    ["CRM", "/crm"],
+    ["Knowledge", "/knowledge"],
+    ["AI Assistant", "/assistant"],
+    ["Agent Runs", "/agent-runs"],
+    ["Approvals", "/approvals"],
+    ["Workflows", "/workflows"],
+    ["Analytics", "/analytics"],
+    ["Monitoring", "/monitoring"],
+    ["Settings", "/settings"],
+  ];
+  for (const [name, href] of pages) {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("link", { name, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${href}$`));
+    await expect(page.locator("header").getByText(name, { exact: true })).toBeVisible();
+    await expect(page.getByText("This page failed to render")).toHaveCount(0);
+  }
+  await shot(page, "13-approvals-mobile.png");
+  await page.goto("/approvals");
+  await page.reload();
+  await expect(page.getByLabel("Filter approvals")).toBeVisible();
+  expect(failedChunks).toEqual([]);
+  expect(pageErrors).toEqual([]);
 });

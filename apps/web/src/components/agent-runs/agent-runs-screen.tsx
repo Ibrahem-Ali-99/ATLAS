@@ -118,7 +118,10 @@ function AgentRunsBody({
                       {run.inquiry_subject}
                     </button>
                   </TableCell>
-                  <TableCell><Badge>{run.status.replaceAll("_", " ")}</Badge></TableCell>
+                  <TableCell>
+                    <Badge>{run.status.replaceAll("_", " ")}</Badge>
+                    {run.error_code ? <p className="mt-1 text-xs text-muted-foreground">{run.error_code}</p> : null}
+                  </TableCell>
                   <TableCell>{new Date(run.started_at).toLocaleString()}</TableCell>
                 </TableRow>
               ))}
@@ -153,6 +156,50 @@ function AgentRunsBody({
   );
 }
 
+function runReason(detail: AgentRunDetail): string {
+  const run = detail.run;
+  const pending = detail.approvals.filter((item) => item.status === "pending").length;
+  if (run.error_code === "llm_unconfigured") {
+    return "The language model key is empty, so this run was stored as failed. No classification was invented.";
+  }
+  if (run.error_code === "interrupted") {
+    return "The API restarted while this run was still marked running. It was not continued automatically.";
+  }
+  if (run.status === "failed") {
+    return run.error_message ?? "The run failed and the failure was stored. Later steps were not written.";
+  }
+  if (run.status === "awaiting_approval") {
+    return `Waiting for an admin. ${pending} proposal${pending === 1 ? "" : "s"} still need a decision in Approvals. Nothing is written until Execute.`;
+  }
+  if (run.status === "completed") {
+    return "The run finished. Executed proposals are listed below. Rejected proposals were not written.";
+  }
+  return "The run is still in progress. Steps appear as they are stored.";
+}
+
+function nextAction(detail: AgentRunDetail): string {
+  if (detail.run.status === "awaiting_approval") {
+    return "Open Approvals and decide each pending proposal. Execute is the step that writes CRM data or sends sandbox email.";
+  }
+  if (detail.run.status === "failed") {
+    return "This failure stays in the history. Start a new run after the cause is fixed. Resume does not rewrite a failed run.";
+  }
+  if (detail.run.status === "completed") {
+    return "Nothing else is waiting. The execution results below are the stored outcome.";
+  }
+  return "Resume continues a paused run. A pending proposal still has to be decided first.";
+}
+
+function relatedLeadId(detail: AgentRunDetail): string | null {
+  for (const approval of detail.approvals) {
+    const leadId = approval.payload.lead_id ?? approval.execution_result?.lead_id;
+    if (typeof leadId === "string" && leadId) {
+      return leadId;
+    }
+  }
+  return null;
+}
+
 function RunDetail({
   organizationId,
   detail,
@@ -177,10 +224,14 @@ function RunDetail({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold">{detail.run.inquiry_subject}</h2>
-          <p className="text-sm text-muted-foreground">
-            {detail.run.qualification ? `Qualification: ${detail.run.qualification}. ` : ""}
-            {detail.run.error_message ?? "Steps are stored as the run proceeds."}
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{runReason(detail)}</p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">Next: {nextAction(detail)}</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Inquiry {detail.run.inquiry_subject}. Related lead {relatedLeadId(detail) ?? "not in the proposal yet"}.
           </p>
+          {detail.run.error_code ? (
+            <p className="mt-1 text-sm text-muted-foreground">Code: {detail.run.error_code}</p>
+          ) : null}
         </div>
         <Badge>{detail.run.status.replaceAll("_", " ")}</Badge>
       </div>
