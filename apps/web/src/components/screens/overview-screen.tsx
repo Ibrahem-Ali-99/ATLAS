@@ -3,53 +3,16 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
-import { MembershipTable } from "@/components/membership-table";
+import { PageHeader } from "@/components/page-header";
+import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getHealth, getReady, sessionQueryOptions } from "@/lib/api";
-import { getAnalytics } from "@/lib/intelligence";
+import { getHealth, getReady } from "@/lib/api";
+import { getAnalytics, type AnalyticsSnapshot, type StatusCount } from "@/lib/intelligence";
 import { useWorkspace } from "@/lib/use-workspace";
 
-function Probe({
-  label,
-  isPending,
-  isError,
-  message,
-  okLabel,
-}: {
-  label: string;
-  isPending: boolean;
-  isError: boolean;
-  message: string | null;
-  okLabel: string;
-}) {
-  if (isPending) {
-    return (
-      <div className="flex items-center justify-between gap-4">
-        <span className="text-sm">{label}</span>
-        <Skeleton className="h-5 w-16" />
-      </div>
-    );
-  }
-  if (isError) {
-    return (
-      <div className="flex items-start justify-between gap-4">
-        <span className="text-sm">{label}</span>
-        <span className="text-right text-sm text-red-300">{message ?? "Check failed"}</span>
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <span className="text-sm">{label}</span>
-      <Badge>{okLabel}</Badge>
-    </div>
-  );
-}
-
 export function OverviewScreen() {
-  const session = useQuery(sessionQueryOptions);
   const workspace = useWorkspace();
   const analytics = useQuery({
     queryKey: ["analytics", workspace.organizationId],
@@ -58,113 +21,150 @@ export function OverviewScreen() {
   });
   const health = useQuery({ queryKey: ["health"], queryFn: getHealth, retry: false });
   const ready = useQuery({ queryKey: ["ready"], queryFn: getReady, retry: false });
-  const user = session.data?.user;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-        <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-          {user ? `Signed in as ${user.full_name}. ` : null}
-          Account membership and API status below come from the live API. CRM, knowledge, and the assistant use the same session.
-        </p>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+    <div className="flex w-full min-w-0 flex-col gap-8">
+      <PageHeader title="Overview" eyebrow={workspace.organizationName ?? undefined}>
+        Decisions waiting, recent failures, and the stored pipeline for this organization.
+        {analytics.data ? ` ${analytics.data.synthetic_notice}` : ""}
+      </PageHeader>
+      {analytics.isPending ? <Skeleton className="h-28 w-full" /> : null}
+      {analytics.isError ? <RequestError error={analytics.error} /> : null}
+      {analytics.data ? <Operations data={analytics.data} /> : null}
+      <section className="grid gap-3 text-sm text-muted-foreground md:grid-cols-2">
+        <p>API {health.isError ? "unreachable" : health.data?.status ?? "checking"}.</p>
+        <p>Database {ready.isError ? "not ready" : ready.data?.database ?? "checking"}.</p>
+      </section>
+    </div>
+  );
+}
+
+function Operations({ data }: { data: AnalyticsSnapshot }) {
+  const maxStatus = Math.max(1, ...data.lead_status.map((item) => item.count));
+  const maxTrend = Math.max(1, ...data.lead_trend.map((item) => item.count));
+  const conversion = data.conversion.rate === null ? "No closed leads" : `${Math.round(data.conversion.rate * 1000) / 10}% won`;
+  return (
+    <>
+      <section className="grid gap-3 lg:grid-cols-3">
+        <AttentionLink href="/approvals" label="Pending approvals" value={data.approvals.pending} detail="Waiting for a decision. Execute is the write." />
+        <AttentionLink href="/approvals" label="Uncertain outcomes" value={data.approvals.needs_attention} detail="The result could not be confirmed. Do not treat these as done." />
+        <AttentionLink href="/monitoring" label="Failed runs" value={data.failed_runs} detail="Stored agent failures. Open Monitoring for the trace." />
+      </section>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(18rem,0.9fr)]">
         <Card>
           <CardHeader>
-            <CardTitle>Account</CardTitle>
-            <CardDescription>The signed-in user returned by the session endpoint.</CardDescription>
+            <CardTitle>Lead pipeline</CardTitle>
           </CardHeader>
           <CardContent>
-            {session.isPending || !user ? (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-40" />
-                <Skeleton className="h-4 w-56" />
-              </div>
+            {data.lead_status.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No leads are stored yet.</p>
             ) : (
-              <dl className="grid gap-3 text-sm">
-                <div>
-                  <dt className="text-muted-foreground">Name</dt>
-                  <dd className="mt-1">{user.full_name}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Email</dt>
-                  <dd className="mt-1 break-all">{user.email}</dd>
-                </div>
-              </dl>
+              <ul className="space-y-3">
+                {data.lead_status.map((item) => (
+                  <StatusBar key={item.status} item={item} max={maxStatus} />
+                ))}
+              </ul>
             )}
+            <p className="mt-4 text-xs leading-5 text-muted-foreground">{data.qualification.definition}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {data.qualification.open} open, {data.qualification.qualified} qualified, {data.qualification.closed} closed.
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>API status</CardTitle>
-            <CardDescription>Liveness and database readiness from the running API.</CardDescription>
+            <CardTitle>Leads created</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <Probe
-              label="Health"
-              isPending={health.isPending}
-              isError={health.isError}
-              message={health.error instanceof Error ? health.error.message : null}
-              okLabel={health.data?.status ?? "ok"}
-            />
-            <Probe
-              label="Database"
-              isPending={ready.isPending}
-              isError={ready.isError}
-              message={ready.error instanceof Error ? ready.error.message : null}
-              okLabel={ready.data?.database ?? "ok"}
-            />
+          <CardContent>
+            <LeadTrend days={data.lead_trend} windowDays={data.window_days} max={maxTrend} />
           </CardContent>
         </Card>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Memberships</CardTitle>
-          <CardDescription>Organizations returned for this session. Other tenants are not listed.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {session.isPending || !session.data ? (
-            <Skeleton className="h-16 w-full" />
-          ) : (
-            <MembershipTable memberships={session.data.memberships} />
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Operations</CardTitle>
-          <CardDescription>
-            Counts from stored records for this organization. {analytics.data?.synthetic_notice}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {analytics.isPending ? <Skeleton className="h-16 w-full" /> : null}
-          {analytics.isError ? <p className="text-sm text-red-300">Analytics could not be loaded.</p> : null}
-          {analytics.data ? (
-            <div className="grid gap-3 text-sm sm:grid-cols-3">
-              <Link href="/crm" className="rounded-lg border border-border p-3">
-                <p className="text-muted-foreground">Leads</p>
-                <p className="mt-1 text-lg font-medium">{analytics.data.leads_total}</p>
-                <p className="mt-1 text-muted-foreground">Stored leads for this organization.</p>
-              </Link>
-              <Link href="/approvals" className="rounded-lg border border-border p-3">
-                <p className="text-muted-foreground">Pending approvals</p>
-                <p className="mt-1 text-lg font-medium">{analytics.data.approvals.pending}</p>
-                <p className="mt-1 text-muted-foreground">Waiting for an admin. Execute is the write.</p>
-              </Link>
-              <Link href="/monitoring" className="rounded-lg border border-border p-3">
-                <p className="text-muted-foreground">Failed runs</p>
-                <p className="mt-1 text-lg font-medium">{analytics.data.failed_runs}</p>
-                <p className="mt-1 text-muted-foreground">
-                  {analytics.data.approvals.needs_attention} approval
-                  {analytics.data.approvals.needs_attention === 1 ? "" : "s"} need attention because the outcome was not confirmed.
-                </p>
-              </Link>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-    </div>
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <Fact label="Inquiries" value={String(data.inquiries_total)} href="/crm" detail="Stored inquiries for this organization." />
+        <Fact label="Conversion" value={conversion} href="/analytics" detail={data.conversion.definition} />
+        <Fact
+          label="Agent outcomes"
+          value={data.agent_outcomes.map((item) => `${item.count} ${item.status.replaceAll("_", " ")}`).join(", ") || "None stored"}
+          href="/agent-runs"
+          detail="Counts from stored agent runs."
+        />
+        <Fact
+          label="Automation"
+          value={data.automation.success_rate === null ? "Unavailable" : `${Math.round(data.automation.success_rate * 1000) / 10}%`}
+          href="/workflows"
+          detail={`${data.automation.definition} Sandbox email sent: ${data.email.sandbox_sent}.`}
+        />
+      </section>
+    </>
+  );
+}
+
+function AttentionLink({ href, label, value, detail }: { href: string; label: string; value: number; detail: string }) {
+  return (
+    <Link href={href} className="rounded-xl border border-border bg-card p-4 transition-colors hover:bg-accent">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="mt-2 text-3xl font-semibold tabular-nums whitespace-nowrap">{value}</p>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">{detail}</p>
+    </Link>
+  );
+}
+
+function Fact({ href, label, value, detail }: { href: string; label: string; value: string; detail: string }) {
+  return (
+    <Link href={href} className="rounded-xl border border-border bg-card p-4 transition-colors hover:bg-accent">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="mt-2 text-sm font-medium leading-6">{value}</p>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">{detail}</p>
+    </Link>
+  );
+}
+
+function LeadTrend({
+  days,
+  windowDays,
+  max,
+}: {
+  days: { day: string; count: number }[];
+  windowDays: number;
+  max: number;
+}) {
+  const active = days.filter((item) => item.count > 0);
+  const quiet = days.length - active.length;
+  return (
+    <>
+      <p className="text-xs leading-5 text-muted-foreground">
+        {quiet === days.length
+          ? `No leads were created in the last ${windowDays} days.`
+          : `${quiet} of the last ${windowDays} days had no new leads. Days with new leads are listed.`}
+      </p>
+      {active.length > 0 ? (
+        <ul className="mt-4 space-y-2">
+          {active.map((item) => (
+            <li key={item.day} className="grid grid-cols-[4.5rem_minmax(0,1fr)_2rem] items-center gap-3 text-xs">
+              <span className="text-muted-foreground">{item.day.slice(5)}</span>
+              <span className="h-1.5 rounded-full bg-secondary">
+                <span className="block h-1.5 rounded-full bg-primary" style={{ width: `${(item.count / max) * 100}%` }} />
+              </span>
+              <span className="text-right tabular-nums">{item.count}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </>
+  );
+}
+
+function StatusBar({ item, max }: { item: StatusCount; max: number }) {
+  return (
+    <li>
+      <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+        <span className="capitalize">{item.status.replaceAll("_", " ")}</span>
+        <Badge variant="secondary">{item.count}</Badge>
+      </div>
+      <div className="h-1.5 rounded-full bg-secondary">
+        <div className="h-1.5 rounded-full bg-primary" style={{ width: `${(item.count / max) * 100}%` }} />
+      </div>
+    </li>
   );
 }

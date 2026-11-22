@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
+import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { executionSummary, type Approval, type ApprovalStatus } from "@/lib/agent";
 import { decideApproval, executeApproval, listApprovals, resumeAgentRun } from "@/lib/agent-api";
+import { getAutomations } from "@/lib/automations";
 import { useWorkspace } from "@/lib/use-workspace";
 
 const selectClass =
@@ -70,6 +72,10 @@ function ApprovalsBody({
     queryKey: ["approvals", organizationId, status],
     queryFn: () => listApprovals(organizationId, { status }),
   });
+  const automations = useQuery({
+    queryKey: ["automations", organizationId],
+    queryFn: () => getAutomations(organizationId),
+  });
   const selected = approvals.data?.items.find((item) => item.id === selectedId) ?? null;
   const decide = useMutation({
     mutationFn: (decision: "approve" | "reject") => {
@@ -122,7 +128,11 @@ function ApprovalsBody({
   });
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.9fr)]">
+    <div className="flex w-full flex-col gap-6">
+    <PageHeader title="Approvals">
+      Approve stores a decision. Execute writes the payload. Reject writes nothing. Email and calendar labels come from the current automation mode.
+    </PageHeader>
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
       <section className="rounded-xl border border-border bg-card">
         <div className="p-4">
           <select
@@ -170,6 +180,8 @@ function ApprovalsBody({
           <ApprovalDetail
             approval={selected}
             isAdmin={isAdmin}
+            emailMode={automations.data?.email_mode}
+            calendarProvider={automations.data?.calendar_provider}
             note={note}
             onNote={onNote}
             deciding={decide.isPending}
@@ -183,12 +195,15 @@ function ApprovalsBody({
         ) : null}
       </section>
     </div>
+    </div>
   );
 }
 
 function ApprovalDetail({
   approval,
   isAdmin,
+  emailMode,
+  calendarProvider,
   note,
   onNote,
   deciding,
@@ -201,6 +216,8 @@ function ApprovalDetail({
 }: {
   approval: Approval;
   isAdmin: boolean;
+  emailMode: string | undefined;
+  calendarProvider: string | undefined;
   note: string;
   onNote: (note: string) => void;
   deciding: boolean;
@@ -218,8 +235,19 @@ function ApprovalDetail({
           <h2 className="text-base font-semibold">{approval.action_type.replaceAll("_", " ")}</h2>
           <p className="text-sm text-muted-foreground">Requested {new Date(approval.created_at).toLocaleString()}</p>
         </div>
-        <Badge>{approval.status}</Badge>
+        <div className="flex flex-col items-end gap-2">
+          <Badge>{approval.status}</Badge>
+          <Badge variant="secondary">{scopeLabel(approval.action_type, emailMode, calendarProvider)}</Badge>
+        </div>
       </div>
+      <dl className="grid gap-3 sm:grid-cols-2">
+        {payloadFields(approval.payload).map((field) => (
+          <div key={field.label}>
+            <dt className="text-xs uppercase tracking-wide text-muted-foreground">{field.label}</dt>
+            <dd className="mt-1 whitespace-pre-wrap text-sm">{field.value}</dd>
+          </div>
+        ))}
+      </dl>
       <dl className="space-y-1 text-sm text-muted-foreground">
         <div>Target {targetLabel(approval.payload)}</div>
         <div>Expires {new Date(approval.expires_at).toLocaleString()}</div>
@@ -262,6 +290,40 @@ function ApprovalDetail({
       {error ? <RequestError error={error} /> : null}
     </div>
   );
+}
+
+function scopeLabel(actionType: string, emailMode: string | undefined, calendarProvider: string | undefined): string {
+  if (actionType === "create_lead" || actionType === "update_lead") {
+    return "Internal CRM write";
+  }
+  if (actionType === "prepare_customer_response") {
+    if (emailMode === "live") {
+      return "External email";
+    }
+    if (emailMode === "sandbox") {
+      return "Sandbox email";
+    }
+    return "Email on execute";
+  }
+  if (actionType === "request_appointment") {
+    if (calendarProvider === "simulation") {
+      return "Simulated calendar";
+    }
+    if (calendarProvider) {
+      return "External calendar";
+    }
+    return "Calendar on execute";
+  }
+  return "Stored action";
+}
+
+function payloadFields(payload: Record<string, unknown>): { label: string; value: string }[] {
+  return Object.entries(payload).flatMap(([key, value]) => {
+    if (value === null || value === undefined || value === "") {
+      return [];
+    }
+    return [{ label: key.replaceAll("_", " "), value: typeof value === "string" ? value : JSON.stringify(value) }];
+  });
 }
 
 function sideEffect(actionType: string, status: string): string {

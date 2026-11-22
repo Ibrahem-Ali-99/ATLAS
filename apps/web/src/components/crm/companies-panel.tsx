@@ -69,7 +69,7 @@ export function CompaniesPanel({ organizationId }: { organizationId: string }) {
   const selected = companies.data?.items.find((item) => item.id === selectedId) ?? null;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
       <section className="rounded-xl border border-border bg-card">
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
           <Input

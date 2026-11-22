@@ -82,11 +82,13 @@ function KnowledgeWorkspace({
   });
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <PageHeader title="Knowledge">
-        PDF and text files for {organizationName}. Indexing runs in the background. Search uses this organization&apos;s ready documents only.
+    <div className="flex w-full min-w-0 flex-col gap-6">
+      <PageHeader title="Knowledge" eyebrow={organizationName}>
+        The library lists every file. Search and extracted passages stay beside it, so indexing status and evidence can be checked without leaving the document.
       </PageHeader>
       <ProviderNotice organizationId={organizationId} />
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+      <div className="flex flex-col gap-4">
       <section className="rounded-xl border border-border bg-card p-4">
         <h2 className="text-sm font-medium">Upload</h2>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">PDF and TXT only. Other file types are rejected and nothing is stored.</p>
@@ -108,42 +110,6 @@ function KnowledgeWorkspace({
         {upload.isPending ? <p className="mt-3 text-sm text-muted-foreground">Uploading…</p> : null}
         {upload.isSuccess ? <p className="mt-3 text-sm text-muted-foreground">Uploaded. Indexing continues until the status is ready.</p> : null}
         {upload.isError ? <div className="mt-3"><RequestError error={upload.error} /></div> : null}
-      </section>
-      <section className="rounded-xl border border-border bg-card p-4">
-        <h2 className="text-sm font-medium">Search</h2>
-        <form
-          className="mt-3 flex flex-col gap-3 sm:flex-row"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setSubmitted(search.trim());
-          }}
-        >
-          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search indexed text" aria-label="Search documents" />
-          <Button type="submit">Search</Button>
-        </form>
-        {submitted.length > 0 && submitted.length < 2 ? (
-          <p className="mt-3 text-sm text-muted-foreground">Enter at least two characters.</p>
-        ) : null}
-        {hits.isFetching ? <p className="mt-3 text-sm text-muted-foreground">Searching…</p> : null}
-        {hits.isError ? <div className="mt-3"><RequestError error={hits.error} /></div> : null}
-        {submitted.length >= 2 && hits.data ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            {hits.data.items.length === 0
-              ? `No indexed excerpts matched “${submitted}”.`
-              : `${hits.data.items.length} excerpt${hits.data.items.length === 1 ? "" : "s"} matched “${submitted}”. Order follows the stored search rank.`}
-          </p>
-        ) : null}
-        <ul className="mt-3 space-y-3">
-          {hits.data?.items.map((hit) => (
-            <li key={hit.id} className="rounded-md border border-border bg-background p-3 text-sm">
-              <p className="font-medium">
-                {hit.document_title}
-                {hit.page_number !== null ? ` · page ${hit.page_number}` : ""}
-              </p>
-              <p className="mt-2 whitespace-pre-wrap leading-6 text-muted-foreground">{hit.content}</p>
-            </li>
-          ))}
-        </ul>
       </section>
       <section className="rounded-xl border border-border bg-card">
         {documents.isPending ? <div className="space-y-2 p-4"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div> : null}
@@ -182,13 +148,57 @@ function KnowledgeWorkspace({
           </Table>
         ) : null}
       </section>
+      </div>
+      <div className="flex flex-col gap-4">
+      <section className="rounded-xl border border-border bg-card p-4">
+        <h2 className="text-sm font-medium">Search</h2>
+        <form
+          className="mt-3 flex flex-col gap-3 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setSubmitted(search.trim());
+          }}
+        >
+          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search indexed text" aria-label="Search documents" />
+          <Button type="submit">Search</Button>
+        </form>
+        {submitted.length > 0 && submitted.length < 2 ? (
+          <p className="mt-3 text-sm text-muted-foreground">Enter at least two characters.</p>
+        ) : null}
+        {hits.isFetching ? <p className="mt-3 text-sm text-muted-foreground">Searching…</p> : null}
+        {hits.isError ? <div className="mt-3"><RequestError error={hits.error} /></div> : null}
+        {submitted.length >= 2 && hits.data ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            {hits.data.items.length === 0
+              ? `No indexed excerpts matched “${submitted}”.`
+              : `${hits.data.items.length} excerpt${hits.data.items.length === 1 ? "" : "s"} matched “${submitted}”. Order follows the stored search rank.`}
+          </p>
+        ) : null}
+        <ul className="mt-3 space-y-3">
+          {hits.data?.items.map((hit) => (
+            <li key={hit.id} className="rounded-md border border-border bg-background p-3 text-sm">
+              <p className="font-medium">
+                {hit.document_title}
+                {hit.page_number !== null ? ` · page ${hit.page_number}` : ""}
+              </p>
+              <p className="mt-2 whitespace-pre-wrap leading-6 text-muted-foreground">{hit.content}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
       {selectedId ? (
         <ChunkList
           organizationId={organizationId}
           documentId={selectedId}
           status={documents.data?.items.find((item) => item.id === selectedId)?.status ?? "pending"}
         />
-      ) : null}
+      ) : (
+        <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+          Select a document to inspect its extracted passages.
+        </p>
+      )}
+      </div>
+      </div>
     </div>
   );
 }

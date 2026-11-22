@@ -51,7 +51,7 @@ export function MonitoringScreen() {
   const data = diagnostics.data;
   const latest = evaluations.data.items[0];
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6">
+    <div className="w-full space-y-6">
       <PageHeader title="Monitoring">{data.hint_notice}</PageHeader>
       <div className="grid gap-3 md:grid-cols-3">
         <Stat label="Failed agent runs" value={String(data.failed_runs.length)} detail="Stored failures. Selecting one opens its trace." />
@@ -86,6 +86,28 @@ export function MonitoringScreen() {
           {detail.data ? <TraceDetail detail={detail.data} /> : null}
         </section>
       </div>
+      <section className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-2 rounded-xl border border-border bg-card p-4">
+          <h2 className="text-base font-semibold">Needs attention</h2>
+          {data.needs_attention.length === 0 ? <p className="text-sm text-muted-foreground">No approval is waiting because its outcome was uncertain.</p> : null}
+          {data.needs_attention.map((item) => (
+            <p key={item.id} className="text-sm leading-6 text-muted-foreground">
+              <span className="font-medium text-foreground">{item.action_type.replaceAll("_", " ")}</span>
+              {item.hint ? `. ${item.hint}` : ""}
+            </p>
+          ))}
+        </div>
+        <div className="space-y-2 rounded-xl border border-border bg-card p-4">
+          <h2 className="text-base font-semibold">Operation latency</h2>
+          <p className="text-xs leading-5 text-muted-foreground">Counts of stored traces that reported a latency. A missing price or usage is not shown here.</p>
+          {data.duration_buckets.map((bucket) => (
+            <p key={bucket.bucket} className="flex justify-between gap-3 text-sm text-muted-foreground">
+              <span>{bucket.bucket.replaceAll("_", " ")}</span>
+              <span className="tabular-nums text-foreground">{bucket.count}</span>
+            </p>
+          ))}
+        </div>
+      </section>
       <section className="space-y-2 rounded-xl border border-border bg-card p-4">
         <h2 className="text-base font-semibold">Slowest recorded steps</h2>
         {data.slowest_steps.length === 0 ? <p className="text-sm text-muted-foreground">No operation traces with latency are stored.</p> : null}

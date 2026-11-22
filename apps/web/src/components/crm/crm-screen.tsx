@@ -27,11 +27,11 @@ export function CrmScreen() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <PageHeader title="CRM">
-        Companies, contacts, leads, and inquiries for {organizationName}. Records are loaded from this organization only.
+    <div className="flex w-full min-w-0 flex-col gap-6">
+      <PageHeader title="CRM" eyebrow={organizationName ?? undefined}>
+        Browse companies and contacts, then work a lead without leaving the record. Every row belongs to this organization.
       </PageHeader>
-      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="CRM records">
+      <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1" role="tablist" aria-label="CRM records">
         {tabs.map((item) => (
           <Button
             key={item.id}
@@ -39,7 +39,7 @@ export function CrmScreen() {
             type="button"
             role="tab"
             aria-selected={tab === item.id}
-            variant={tab === item.id ? "default" : "outline"}
+            variant={tab === item.id ? "default" : "ghost"}
             onClick={() => setTab(item.id)}
           >
             {item.label}

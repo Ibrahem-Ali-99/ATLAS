@@ -2,18 +2,29 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
-import { PageHeader } from "@/components/page-header";
 import { ProviderNotice } from "@/components/provider-notice";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { ApiError } from "@/lib/api";
+import { isEvaluationConversation } from "@/lib/conversations";
 import { createConversation, getConversation, listConversations, streamConversationMessage } from "@/lib/records-api";
-import type { AssistantReply, ChatMessage, MessageSource } from "@/lib/records";
+import type { AssistantReply, ChatMessage, Conversation, MessageSource } from "@/lib/records";
 import { useWorkspace } from "@/lib/use-workspace";
+
+const NO_RECORDS = "I could not find relevant company documents or CRM records for that question.";
 
 export function AssistantScreen() {
   const { organizationId, organizationName } = useWorkspace();
@@ -37,8 +48,13 @@ function AssistantWorkspace({
   const conversationId = params.get("conversation");
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState("");
+  const [query, setQuery] = useState("");
   const [streaming, setStreaming] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [sourcesDialog, setSourcesDialog] = useState(false);
+  const [focusSource, setFocusSource] = useState<string | null>(null);
   const conversations = useQuery({
     queryKey: ["conversations", organizationId],
     queryFn: () => listConversations(organizationId),
@@ -52,6 +68,7 @@ function AssistantWorkspace({
     mutationFn: () => createConversation(organizationId),
     onSuccess: (conversation) => {
       void queryClient.invalidateQueries({ queryKey: ["conversations", organizationId] });
+      setHistoryOpen(false);
       router.replace(`/assistant?conversation=${conversation.id}`);
     },
   });
@@ -70,6 +87,10 @@ function AssistantWorkspace({
       setDraft("");
       setStreaming("");
       setNotice(searchNotice(reply));
+      if (reply.message.sources.length > 0) {
+        setFocusSource(sourceKey(reply.message.sources[0]));
+        revealSources();
+      }
       await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, conversationId] });
       await queryClient.invalidateQueries({ queryKey: ["conversations", organizationId] });
     },
@@ -79,90 +100,456 @@ function AssistantWorkspace({
     },
   });
 
+  const current = conversations.data?.find((item) => item.id === conversationId) ?? null;
+  const sources = useMemo(() => {
+    const messages = detail.data?.messages ?? [];
+    return messages.flatMap((message) => message.sources);
+  }, [detail.data?.messages]);
+  const focused = sources.find((source) => sourceKey(source) === focusSource) ?? sources[0] ?? null;
+
+  function submit(content = draft.trim()) {
+    if (content && conversationId && !send.isPending) {
+      send.mutate(content);
+    }
+  }
+
+  function revealSources() {
+    setPanelOpen(true);
+    if (window.matchMedia("(max-width: 1279px)").matches) {
+      setSourcesDialog(true);
+    }
+  }
+
+  const history = (
+    <ConversationHistory
+      organizationName={organizationName}
+      conversations={conversations.data}
+      pending={conversations.isPending}
+      error={conversations.isError ? conversations.error : create.isError ? create.error : null}
+      query={query}
+      onQuery={setQuery}
+      conversationId={conversationId}
+      creating={create.isPending}
+      onCreate={() => create.mutate()}
+      onOpen={(id) => {
+        setHistoryOpen(false);
+        router.replace(`/assistant?conversation=${id}`);
+      }}
+    />
+  );
+
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
-      <PageHeader title="AI Assistant">
-        Answers use stored documents and CRM records for {organizationName}. A citation is a retrieved row, not a phrase taken from the model text.
-      </PageHeader>
-      <ProviderNotice organizationId={organizationId} />
-      <div className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
-      <aside className="rounded-xl border border-border bg-card p-4">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">Conversations</h2>
-          <Button type="button" size="sm" disabled={create.isPending} onClick={() => create.mutate()}>
-            {create.isPending ? "Starting…" : "New"}
-          </Button>
+    <div className="flex h-full min-h-0 bg-background">
+      <aside className="hidden w-72 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">{history}</aside>
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{current?.title ?? "Assistant"}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              Grounded in documents and CRM records for {organizationName}.
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button type="button" size="sm" variant="outline" className="lg:hidden" onClick={() => setHistoryOpen(true)}>
+              History
+            </Button>
+            {sources.length > 0 ? (
+              <Button type="button" size="sm" variant="outline" className="xl:hidden" onClick={() => setSourcesDialog(true)}>
+                Sources
+              </Button>
+            ) : null}
+          </div>
         </div>
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">History is stored for {organizationName} and stays after refresh.</p>
-        {conversations.isPending ? <Skeleton className="mt-4 h-16 w-full" /> : null}
-        {conversations.isError ? <div className="mt-4"><RequestError error={conversations.error} /></div> : null}
-        {create.isError ? <div className="mt-4"><RequestError error={create.error} /></div> : null}
-        {conversations.data && conversations.data.length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">No conversations yet.</p>
-        ) : null}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
+            <ProviderNotice organizationId={organizationId} />
+            {!conversationId ? (
+              <p className="text-sm leading-6 text-muted-foreground">
+                No conversation is open. Start one from the list, then ask about a document or a CRM record for {organizationName}.
+              </p>
+            ) : null}
+            {conversationId && detail.data && detail.data.messages.length === 0 && !send.isPending ? (
+              <EmptyThread organizationName={organizationName} onPrompt={setDraft} />
+            ) : null}
+            {detail.isPending && conversationId ? (
+              <div className="space-y-3">
+                <Skeleton className="h-16 w-2/3" />
+                <Skeleton className="ml-auto h-12 w-1/2" />
+              </div>
+            ) : null}
+            {detail.isError ? <RequestError error={detail.error} /> : null}
+            {detail.data?.messages.map((message) => (
+              <MessageView
+                key={message.id}
+                message={message}
+                onSource={(source) => {
+                  setFocusSource(sourceKey(source));
+                  revealSources();
+                }}
+              />
+            ))}
+            {send.isPending ? (
+              <article className="text-sm" aria-live="polite">
+                <p className="text-xs font-medium text-muted-foreground">Assistant</p>
+                <p className="mt-2 whitespace-pre-wrap leading-7">{streaming || "Looking through company records…"}</p>
+              </article>
+            ) : null}
+          </div>
+        </div>
+        <div className="border-t border-border bg-background px-4 py-4">
+          <div className="mx-auto w-full max-w-3xl space-y-3">
+            {notice ? <StatusNote>{notice}</StatusNote> : null}
+            {send.isError ? <FailureNotice error={send.error} onRetry={() => submit()} canRetry={draft.trim().length > 0} /> : null}
+            <form
+              className="rounded-xl border border-border bg-card p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submit();
+              }}
+            >
+              <Textarea
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+                placeholder="Ask about a document or a CRM record"
+                disabled={!conversationId || send.isPending}
+                className="min-h-16 border-0 bg-transparent px-1 py-1 focus-visible:ring-0"
+              />
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">Enter sends. Shift+Enter adds a line.</p>
+                <Button type="submit" disabled={!conversationId || send.isPending || draft.trim().length === 0}>
+                  {send.isPending ? "Answering…" : "Send"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+      {panelOpen && focused ? (
+        <aside className="hidden w-80 shrink-0 flex-col border-l border-border bg-sidebar xl:flex">
+          <SourcePanel source={focused} sources={sources} onSelect={(source) => setFocusSource(sourceKey(source))} />
+        </aside>
+      ) : null}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Conversations</DialogTitle>
+            <DialogDescription>History for {organizationName}.</DialogDescription>
+          </DialogHeader>
+          {history}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={sourcesDialog} onOpenChange={setSourcesDialog}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto xl:hidden">
+          <DialogHeader>
+            <DialogTitle>Sources</DialogTitle>
+            <DialogDescription>Retrieved rows for this conversation. The model text is not a citation.</DialogDescription>
+          </DialogHeader>
+          {focused ? (
+            <SourcePanel source={focused} sources={sources} onSelect={(source) => setFocusSource(sourceKey(source))} />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ConversationHistory({
+  organizationName,
+  conversations,
+  pending,
+  error,
+  query,
+  onQuery,
+  conversationId,
+  creating,
+  onCreate,
+  onOpen,
+}: {
+  organizationName: string;
+  conversations: Conversation[] | undefined;
+  pending: boolean;
+  error: unknown;
+  query: string;
+  onQuery: (value: string) => void;
+  conversationId: string | null;
+  creating: boolean;
+  onCreate: () => void;
+  onOpen: (id: string) => void;
+}) {
+  const [showEvaluation, setShowEvaluation] = useState(false);
+  const filtered = (conversations ?? []).filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
+  const customer = filtered.filter((item) => !isEvaluationConversation(item));
+  const evaluation = filtered.filter((item) => isEvaluationConversation(item));
+  return (
+    <div className="flex h-full min-h-0 flex-col p-3">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">Conversations</h2>
+        <Button type="button" size="sm" disabled={creating} onClick={onCreate}>
+          {creating ? "Starting…" : "New chat"}
+        </Button>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">Stored for {organizationName}. A new chat takes its title from the first question.</p>
+      <Input className="mt-3" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" />
+      {pending ? <Skeleton className="mt-4 h-16 w-full" /> : null}
+      {error ? <div className="mt-4"><RequestError error={error} /></div> : null}
+      {conversations && customer.length === 0 && evaluation.length === 0 ? (
+        <p className="mt-4 text-sm text-muted-foreground">
+          {query.trim() ? "No conversations match this search." : "No conversations yet."}
+        </p>
+      ) : null}
+      <ul className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
+        {customer.map((conversation) => (
+          <ConversationButton
+            key={conversation.id}
+            conversation={conversation}
+            selected={conversation.id === conversationId}
+            onOpen={onOpen}
+          />
+        ))}
+      </ul>
+      {evaluation.length > 0 ? (
+        <div className="mt-3 border-t border-border pt-3">
+          <button
+            type="button"
+            className="text-xs font-medium text-muted-foreground"
+            onClick={() => setShowEvaluation((current) => !current)}
+          >
+            {showEvaluation ? "Hide" : "Show"} evaluation history ({evaluation.length})
+          </button>
+          {showEvaluation ? (
+            <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+              {evaluation.map((conversation) => (
+                <ConversationButton
+                  key={conversation.id}
+                  conversation={conversation}
+                  selected={conversation.id === conversationId}
+                  onOpen={onOpen}
+                />
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              These rows were saved by retrieval checks and are kept. They are not customer conversations.
+            </p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ConversationButton({
+  conversation,
+  selected,
+  onOpen,
+}: {
+  conversation: Conversation;
+  selected: boolean;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        className={`w-full rounded-md px-2 py-2 text-left text-sm transition-colors ${selected ? "bg-accent text-foreground" : "hover:bg-accent/60"}`}
+        onClick={() => onOpen(conversation.id)}
+      >
+        <span className="block truncate font-medium">{conversation.title}</span>
+        <span className="mt-1 block text-xs text-muted-foreground">{new Date(conversation.updated_at).toLocaleString()}</span>
+      </button>
+    </li>
+  );
+}
+
+function EmptyThread({
+  organizationName,
+  onPrompt,
+}: {
+  organizationName: string;
+  onPrompt: (value: string) => void;
+}) {
+  const prompts = [
+    "What warehousing services are documented?",
+    "Which leads mention bonded storage?",
+  ];
+  return (
+    <div className="py-8">
+      <p className="text-lg font-medium">Ask about {organizationName}</p>
+      <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+        Ask about an uploaded document or a CRM record. If neither source supports the question, the assistant refuses instead of guessing. A citation is a retrieved row. Selecting a prompt fills the composer and does not send it.
+      </p>
+      <div className="mt-5 flex flex-col gap-2">
+        {prompts.map((prompt) => (
+          <button
+            key={prompt}
+            type="button"
+            className="rounded-md border border-border px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={() => onPrompt(prompt)}
+          >
+            {prompt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MessageView({
+  message,
+  onSource,
+}: {
+  message: ChatMessage;
+  onSource: (source: MessageSource) => void;
+}) {
+  const documents = message.sources.filter((source) => source.kind === "document");
+  const records = message.sources.filter((source) => source.kind === "crm");
+  const refused = message.role === "assistant" && message.content.includes(NO_RECORDS);
+  if (message.role === "user") {
+    return (
+      <article className="ml-auto max-w-[36rem] rounded-2xl bg-secondary px-4 py-3 text-sm">
+        <p className="text-xs font-medium text-muted-foreground">You</p>
+        <p className="mt-2 whitespace-pre-wrap leading-6">{message.content}</p>
+      </article>
+    );
+  }
+  return (
+    <article className="max-w-3xl text-sm">
+      <p className="text-xs font-medium text-muted-foreground">Assistant</p>
+      {refused ? (
+        <div className="mt-2 rounded-lg border border-border bg-card px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">No relevant evidence</p>
+          <p className="mt-2 whitespace-pre-wrap leading-7">{message.content}</p>
+        </div>
+      ) : (
+        <div className="mt-2 space-y-3 leading-7">
+          {message.content.split(/\n{2,}/).map((paragraph, index) => (
+            <p key={`${message.id}-${index}`} className="whitespace-pre-wrap">{paragraph}</p>
+          ))}
+        </div>
+      )}
+      {documents.length > 0 ? <SourceList label="Company documents" sources={documents} onSource={onSource} /> : null}
+      {records.length > 0 ? <SourceList label="CRM records" sources={records} onSource={onSource} /> : null}
+    </article>
+  );
+}
+
+function SourceList({
+  label,
+  sources,
+  onSource,
+}: {
+  label: string;
+  sources: MessageSource[];
+  onSource: (source: MessageSource) => void;
+}) {
+  return (
+    <div className="mt-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <div className="mt-2 flex flex-col gap-2">
+        {sources.map((source) => (
+          <button
+            key={sourceKey(source)}
+            type="button"
+            className="rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent"
+            onClick={() => onSource(source)}
+          >
+            <span className="font-medium">{source.title}</span>
+            {source.page_number !== null ? <span className="ml-2 text-xs text-muted-foreground">page {source.page_number}</span> : null}
+            <span className="mt-1 block text-xs leading-5 text-muted-foreground">{source.excerpt}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SourcePanel({
+  source,
+  sources,
+  onSelect,
+}: {
+  source: MessageSource;
+  sources: MessageSource[];
+  onSelect: (source: MessageSource) => void;
+}) {
+  return (
+    <div className="flex h-full flex-col p-4">
+      <h2 className="text-sm font-semibold">Source</h2>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">Retrieved evidence. This is not text parsed out of the model answer.</p>
+      <div className="mt-4 rounded-lg border border-border bg-card p-3">
+        <Badge variant="secondary">{source.kind === "document" ? "Document" : source.record_type ?? "CRM"}</Badge>
+        <p className="mt-2 font-medium">{source.title}</p>
+        {source.page_number !== null ? <p className="mt-1 text-xs text-muted-foreground">Page {source.page_number}</p> : null}
+        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{source.excerpt}</p>
+      </div>
+      {sources.length > 1 ? (
         <ul className="mt-4 space-y-1">
-          {conversations.data?.map((conversation) => (
-            <li key={conversation.id}>
-              <button
-                type="button"
-                className={`w-full rounded-md px-2 py-2 text-left text-sm ${conversation.id === conversationId ? "bg-accent" : "hover:bg-accent/50"}`}
-                onClick={() => router.replace(`/assistant?conversation=${conversation.id}`)}
-              >
-                <span className="block truncate font-medium">{conversation.title}</span>
-                <span className="mt-1 block text-xs text-muted-foreground">{new Date(conversation.updated_at).toLocaleString()}</span>
+          {sources.map((item) => (
+            <li key={sourceKey(item)}>
+              <button type="button" className="w-full truncate rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent" onClick={() => onSelect(item)}>
+                {item.title}
               </button>
             </li>
           ))}
         </ul>
-      </aside>
-      <section className="flex min-h-[32rem] flex-col rounded-xl border border-border bg-card">
-        {!conversationId ? (
-          <div className="p-6">
-            <p className="text-sm font-medium">No conversation is open</p>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-              Start one, then ask about a document you uploaded or a CRM record in this organization. The answer stays in this conversation after you refresh.
-            </p>
-          </div>
-        ) : null}
-        {detail.isPending && conversationId ? <div className="space-y-3 p-6"><Skeleton className="h-16 w-full" /><Skeleton className="h-16 w-2/3" /></div> : null}
-        {detail.isError ? <div className="p-6"><RequestError error={detail.error} /></div> : null}
-        <div className="flex-1 space-y-4 p-6">
-          {detail.data?.messages.map((message) => <MessageView key={message.id} message={message} />)}
-          {send.isPending ? (
-            <article className="rounded-lg border border-border p-4 text-sm">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Assistant</p>
-              <p className="mt-2 whitespace-pre-wrap">{streaming || "Looking through company records…"}</p>
-            </article>
-          ) : null}
-        </div>
-        {notice ? <p className="px-6 text-sm text-muted-foreground">{notice}</p> : null}
-        {send.isError ? <div className="px-6"><RequestError error={send.error} /></div> : null}
-        <form
-          className="grid gap-3 border-t border-border p-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const content = draft.trim();
-            if (content && conversationId) {
-              send.mutate(content);
-            }
-          }}
-        >
-          <Textarea
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Ask about a document or a CRM record"
-            disabled={!conversationId || send.isPending}
-          />
-          <div className="flex justify-end">
-            <Button type="submit" disabled={!conversationId || send.isPending || draft.trim().length === 0}>
-              {send.isPending ? "Answering…" : "Send"}
-            </Button>
-          </div>
-        </form>
-      </section>
-      </div>
+      ) : null}
     </div>
   );
+}
+
+function StatusNote({ children }: { children: string }) {
+  return <p className="rounded-md border border-border bg-card px-3 py-2 text-sm leading-6 text-muted-foreground">{children}</p>;
+}
+
+function FailureNotice({ error, onRetry, canRetry }: { error: unknown; onRetry: () => void; canRetry: boolean }) {
+  const copy = failureCopy(error);
+  return (
+    <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm" role="alert">
+      <p className="font-medium">{copy.heading}</p>
+      <p className="mt-1 leading-6 text-red-100">{copy.detail}</p>
+      {canRetry ? (
+        <Button type="button" size="sm" variant="outline" className="mt-3" onClick={onRetry}>
+          Retry
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function failureCopy(error: unknown): { heading: string; detail: string } {
+  if (!(error instanceof ApiError)) {
+    return {
+      heading: "The reply did not finish",
+      detail: error instanceof Error ? error.message : "Request failed",
+    };
+  }
+  if (error.code === "llm_unconfigured" || error.code === "embedding_unconfigured") {
+    return { heading: "Model credentials are missing", detail: error.message };
+  }
+  if (error.code === "llm_rate_limited" || error.code === "embedding_rate_limited") {
+    return { heading: "The provider rate limit was reached", detail: error.message };
+  }
+  if (
+    error.code === "llm_unavailable" ||
+    error.code === "embedding_unavailable" ||
+    error.code === "llm_timeout" ||
+    error.code === "embedding_timeout"
+  ) {
+    return { heading: "The provider is unavailable", detail: error.message };
+  }
+  if (error.code === "embedding_dimension_mismatch") {
+    return { heading: "Search could not use this index", detail: error.message };
+  }
+  if (error.status === 403 || error.status === 404 || error.code === "forbidden" || error.code === "not_found") {
+    return { heading: "You cannot use this conversation", detail: error.message };
+  }
+  return { heading: "The reply did not finish", detail: error.message };
 }
 
 function searchNotice(reply: AssistantReply): string | null {
@@ -178,41 +565,6 @@ function searchNotice(reply: AssistantReply): string | null {
   return null;
 }
 
-function MessageView({ message }: { message: ChatMessage }) {
-  const documents = message.sources.filter((source) => source.kind === "document");
-  const records = message.sources.filter((source) => source.kind === "crm");
-  return (
-    <article
-      className={
-        message.role === "user"
-          ? "ml-auto max-w-[40rem] rounded-lg bg-accent px-4 py-3 text-sm"
-          : "max-w-[40rem] rounded-lg border border-border bg-background px-4 py-3 text-sm"
-      }
-    >
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {message.role === "user" ? "You" : "Assistant"}
-      </p>
-      <p className="mt-2 whitespace-pre-wrap leading-6">{message.content}</p>
-      {documents.length > 0 ? <SourceList label="Company documents" sources={documents} /> : null}
-      {records.length > 0 ? <SourceList label="CRM records" sources={records} /> : null}
-    </article>
-  );
-}
-
-function SourceList({ label, sources }: { label: string; sources: MessageSource[] }) {
-  return (
-    <div className="mt-3 space-y-2">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      {sources.map((source) => (
-        <div key={`${source.kind}-${source.chunk_id ?? source.record_id ?? source.title}`} className="rounded-md bg-background p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{source.kind === "document" ? "Document" : source.record_type ?? "CRM"}</Badge>
-            <span className="font-medium">{source.title}</span>
-            {source.page_number !== null ? <span className="text-xs text-muted-foreground">page {source.page_number}</span> : null}
-          </div>
-          <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{source.excerpt}</p>
-        </div>
-      ))}
-    </div>
-  );
+function sourceKey(source: MessageSource): string {
+  return `${source.kind}-${source.chunk_id ?? source.record_id ?? source.title}`;
 }

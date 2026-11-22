@@ -47,6 +47,7 @@ const leadTitle = `E2E pier ${stamp}`;
 const documentTitle = `e2e-harbor-${stamp}`;
 
 test("workspace flow uses the browser and deterministic providers", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   const failedChunks: string[] = [];
   const pageErrors: string[] = [];
   page.on("response", (response) => {
@@ -275,8 +276,25 @@ test("narrow viewport opens every page without a missing chunk", async ({ page }
     await expect(page).toHaveURL(new RegExp(`${href}$`));
     await expect(page.locator("header").getByText(name, { exact: true })).toBeVisible();
     await expect(page.getByText("This page failed to render")).toHaveCount(0);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
   }
   await shot(page, "13-approvals-mobile.png");
+  for (const size of [
+    { width: 1920, height: 1080 },
+    { width: 768, height: 1024 },
+  ]) {
+    await page.setViewportSize(size);
+    await page.goto("/overview");
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/approvals");
   await page.reload();
   await expect(page.getByLabel("Filter approvals")).toBeVisible();

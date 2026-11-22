@@ -20,10 +20,11 @@ export function SettingsScreen() {
   const user = session.data?.user;
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader title="Settings">
-        Account details from the current session. Profile editing is not available, and these fields cannot be saved.
+        Account, workspace, and model readiness from the current session. Nothing on this page can be saved, and credentials are not shown.
       </PageHeader>
+      <div className="grid items-start gap-4 xl:grid-cols-2">
       <Card>
         <CardHeader>
           <CardTitle>Account</CardTitle>
@@ -87,6 +88,7 @@ export function SettingsScreen() {
         </CardContent>
       </Card>
       <SignOutDialog open={signOutOpen} onOpenChange={setSignOutOpen} />
+      </div>
     </div>
   );
 }

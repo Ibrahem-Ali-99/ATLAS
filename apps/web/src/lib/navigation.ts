@@ -18,18 +18,29 @@ export type NavItem = {
   icon: LucideIcon;
 };
 
-export const navigation: NavItem[] = [
-  { href: "/overview", label: "Overview", icon: LayoutDashboard },
-  { href: "/assistant", label: "AI Assistant", icon: Sparkles },
-  { href: "/crm", label: "CRM", icon: Users },
-  { href: "/knowledge", label: "Knowledge", icon: BookOpen },
-  { href: "/agent-runs", label: "Agent Runs", icon: Bot },
-  { href: "/workflows", label: "Workflows", icon: Workflow },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/monitoring", label: "Monitoring", icon: Activity },
-  { href: "/approvals", label: "Approvals", icon: CheckCheck },
-  { href: "/settings", label: "Settings", icon: Settings },
+export type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+const overview = { href: "/overview", label: "Overview", icon: LayoutDashboard };
+const assistant = { href: "/assistant", label: "AI Assistant", icon: Sparkles };
+const crm = { href: "/crm", label: "CRM", icon: Users };
+const knowledge = { href: "/knowledge", label: "Knowledge", icon: BookOpen };
+const agentRuns = { href: "/agent-runs", label: "Agent Runs", icon: Bot };
+const approvals = { href: "/approvals", label: "Approvals", icon: CheckCheck };
+const workflows = { href: "/workflows", label: "Workflows", icon: Workflow };
+const analytics = { href: "/analytics", label: "Analytics", icon: BarChart3 };
+const monitoring = { href: "/monitoring", label: "Monitoring", icon: Activity };
+const settings = { href: "/settings", label: "Settings", icon: Settings };
+
+export const navigationGroups: NavGroup[] = [
+  { label: "Workspace", items: [overview, assistant, crm, knowledge] },
+  { label: "Operations", items: [agentRuns, approvals, workflows] },
+  { label: "Insight", items: [analytics, monitoring, settings] },
 ];
+
+export const navigation: NavItem[] = navigationGroups.flatMap((group) => group.items);
 
 export function titleForPath(pathname: string): string {
   return navigation.find((item) => item.href === pathname)?.label ?? "ATLAS";

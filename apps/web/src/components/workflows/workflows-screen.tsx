@@ -43,7 +43,7 @@ export function WorkflowsScreen() {
   const calendarLabel =
     data.calendar_provider === "simulation" ? "Simulated calendar" : data.calendar_provider;
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6">
+    <div className="w-full space-y-6">
       <PageHeader title="Workflows">
         n8n starts these automations. ATLAS records the outcome. A lead webhook is attempted twice, then the failure stays on the run. This page does not start another attempt.
       </PageHeader>

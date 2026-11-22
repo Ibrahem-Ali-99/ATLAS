@@ -30,7 +30,7 @@ export function AnalyticsScreen() {
 function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
   if (data.leads_total === 0 && data.inquiries_total === 0) {
     return (
-      <div className="mx-auto w-full max-w-6xl space-y-3">
+      <div className="w-full space-y-3">
         <PageHeader title="Analytics">{data.synthetic_notice}</PageHeader>
         <p className="text-sm text-muted-foreground">No leads or inquiries are stored for this organization yet. Charts appear after the first record is saved.</p>
       </div>
@@ -40,7 +40,7 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
   const automation =
     data.automation.success_rate === null ? "unavailable" : `${Math.round(data.automation.success_rate * 1000) / 10}%`;
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6">
+    <div className="w-full space-y-6">
       <div>
         <PageHeader title="Analytics">
           {data.synthetic_notice} Lead trend uses the last {data.window_days} days. {data.conversion.definition}
@@ -64,11 +64,11 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={data.lead_status}>
-                  <CartesianGrid stroke="#32323a" strokeDasharray="3 3" />
-                  <XAxis dataKey="status" tick={{ fill: "#a1a1aa", fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fill: "#a1a1aa", fontSize: 12 }} />
+                  <CartesianGrid stroke="#2a303b" vertical={false} />
+                  <XAxis dataKey="status" tick={{ fill: "#a7b0be", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis allowDecimals={false} tick={{ fill: "#a7b0be", fontSize: 12 }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={chartTooltip} />
-                  <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="count" fill="#4c8dff" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -82,11 +82,11 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
           <CardContent className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.lead_trend}>
-                <CartesianGrid stroke="#32323a" strokeDasharray="3 3" />
-                <XAxis dataKey="day" tickFormatter={shortDay} minTickGap={28} tick={{ fill: "#a1a1aa", fontSize: 12 }} />
-                <YAxis allowDecimals={false} tick={{ fill: "#a1a1aa", fontSize: 12 }} />
+                <CartesianGrid stroke="#2a303b" vertical={false} />
+                <XAxis dataKey="day" tickFormatter={shortDay} minTickGap={28} tick={{ fill: "#a7b0be", fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fill: "#a7b0be", fontSize: 12 }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={chartTooltip} />
-                <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="count" stroke="#4c8dff" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -106,8 +106,8 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
 }
 
 const chartTooltip = {
-  background: "#141418",
-  border: "1px solid #32323a",
+  background: "#11141a",
+  border: "1px solid #2a303b",
   borderRadius: 8,
   color: "#fafafa",
 };

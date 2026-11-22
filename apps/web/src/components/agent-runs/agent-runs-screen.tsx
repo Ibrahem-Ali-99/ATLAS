@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -77,7 +78,11 @@ function AgentRunsBody({
   });
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.9fr)]">
+    <div className="flex w-full flex-col gap-6">
+    <PageHeader title="Agent Runs">
+      Each run reads one inquiry, proposes changes, and waits. Nothing in CRM, email, or the calendar is written until an approval is executed.
+    </PageHeader>
+    <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.9fr)]">
       <section className="rounded-xl border border-border bg-card">
         <div className="flex flex-col gap-3 p-4 sm:flex-row">
           <select
@@ -152,6 +157,7 @@ function AgentRunsBody({
           onOpen(false);
         }}
       />
+    </div>
     </div>
   );
 }
