@@ -14,7 +14,7 @@ docker compose up -d postgres mailpit n8n
 
 `POSTGRES_PORT` in `.env` overrides the host port. The example uses 5432. If another Postgres already owns that port, set `POSTGRES_PORT` and the same port in `ATLAS_DATABASE_URL`. Do not commit that local override.
 
-Run the API from `apps/api` with `uv run uvicorn app.main:app --host 127.0.0.1 --port 8000`. Run the web from `apps/web` with `npm run dev` or `npm run start`. Do not also start the Compose `api` or `web` services while those host processes are running. They publish the same ports.
+Run the API from `apps/api` with `uv run uvicorn app.main:app --host 127.0.0.1 --port 8000`. Run the web from `apps/web` with `npm run dev` or `npm run start`. `next start` records the static files that exist when the process starts. After `npm run build`, restart that process. A page can otherwise ask for a new chunk and receive 404. The browser test sets `NEXT_DIST_DIR=.next-e2e` so its dev server does not replace the production `.next` directory. Do not also start the Compose `api` or `web` services while those host processes are running. They publish the same ports.
 
 `docker compose --profile demo up` builds the API and web containers. Use it when you want the container path, not alongside the host processes.
 

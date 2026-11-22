@@ -32,6 +32,7 @@ export default defineConfig({
     env: {
       ...withLocalNode(process.env),
       NEXT_PUBLIC_API_URL: "http://127.0.0.1:8010",
+      NEXT_DIST_DIR: ".next-e2e",
     },
   },
 });
