@@ -108,9 +108,9 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
                 <span className="flex size-8 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
                   {initials(user.full_name)}
                 </span>
-                <span className="hidden sm:block">
-                  <span className="block text-sm font-medium">{user.full_name}</span>
-                  <span className="block text-xs text-muted-foreground">{user.email}</span>
+                <span className="hidden max-w-48 sm:block">
+                  <span className="block truncate text-sm font-medium">{user.full_name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{user.email}</span>
                 </span>
               </button>
             </DropdownMenuTrigger>

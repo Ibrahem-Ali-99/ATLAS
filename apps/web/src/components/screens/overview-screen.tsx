@@ -88,7 +88,7 @@ export function OverviewScreen() {
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Email</dt>
-                  <dd className="mt-1">{user.email}</dd>
+                  <dd className="mt-1 break-all">{user.email}</dd>
                 </div>
               </dl>
             )}

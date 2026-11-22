@@ -40,16 +40,18 @@ export function SettingsScreen() {
                 <span className="font-medium">Name</span>
                 <input
                   readOnly
+                  aria-readonly="true"
                   value={user.full_name}
-                  className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  className="h-10 cursor-default rounded-md border border-input bg-muted px-3 text-sm"
                 />
               </label>
               <label className="grid gap-2 text-sm">
                 <span className="font-medium">Email</span>
                 <input
                   readOnly
+                  aria-readonly="true"
                   value={user.email}
-                  className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  className="h-10 cursor-default rounded-md border border-input bg-muted px-3 text-sm"
                 />
               </label>
             </div>

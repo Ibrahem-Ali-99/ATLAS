@@ -21,6 +21,7 @@ export function ApprovalsScreen() {
   const [status, setStatus] = useState<ApprovalStatus | "">("pending");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
   if (!organizationId) {
     return <Skeleton className="h-40 w-full" />;
   }
@@ -34,6 +35,8 @@ export function ApprovalsScreen() {
       onSelect={setSelectedId}
       note={note}
       onNote={setNote}
+      notice={notice}
+      onNotice={setNotice}
     />
   );
 }
@@ -47,6 +50,8 @@ function ApprovalsBody({
   onSelect,
   note,
   onNote,
+  notice,
+  onNotice,
 }: {
   organizationId: string;
   isAdmin: boolean;
@@ -56,6 +61,8 @@ function ApprovalsBody({
   onSelect: (id: string | null) => void;
   note: string;
   onNote: (note: string) => void;
+  notice: string | null;
+  onNotice: (notice: string | null) => void;
 }) {
   const queryClient = useQueryClient();
   const approvals = useQuery({
@@ -70,8 +77,13 @@ function ApprovalsBody({
       }
       return decideApproval(organizationId, selected.id, decision, note);
     },
-    onSuccess: async () => {
+    onSuccess: async (_approval, decision) => {
       onNote("");
+      onNotice(
+        decision === "approve"
+          ? "Approved. Execute writes the stored payload. Nothing is sent until then."
+          : "Rejected. No CRM change or external action was written.",
+      );
       await queryClient.invalidateQueries({ queryKey: ["approvals", organizationId] });
       await queryClient.invalidateQueries({ queryKey: ["agent-runs", organizationId] });
     },
@@ -86,6 +98,7 @@ function ApprovalsBody({
   const execute = useMutation({
     mutationFn: (approvalId: string) => executeApproval(organizationId, approvalId),
     onSuccess: async () => {
+      onNotice("Executed. The stored result is on this approval.");
       await queryClient.invalidateQueries({ queryKey: ["approvals", organizationId] });
       await queryClient.invalidateQueries({ queryKey: ["agent-runs", organizationId] });
       await queryClient.invalidateQueries({ queryKey: ["automations", organizationId] });
@@ -135,6 +148,7 @@ function ApprovalsBody({
         </div>
       </section>
       <section className="rounded-xl border border-border bg-card p-4">
+        {notice ? <p className="mb-3 text-sm text-muted-foreground">{notice}</p> : null}
         {!selected ? <p className="text-sm text-muted-foreground">Select a proposal to see its exact payload.</p> : null}
         {selected ? (
           <ApprovalDetail
