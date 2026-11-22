@@ -180,3 +180,67 @@ def test_assistant_cites_the_42_pallet_passage_and_not_the_brochure(
     refused_message = refused.json()["message"]
     assert "99" not in refused_message["content"]
     assert refused_message["sources"] == []
+
+
+class _SplitDraft:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def ensure_configured(self) -> None:
+        return None
+
+    def complete(self, system: str, user: str) -> str:
+        return "".join(self.stream(system, user))
+
+    def stream(self, system: str, user: str) -> Iterator[str]:
+        self.calls += 1
+        if self.calls > 1:
+            yield "The yard stores "
+            yield "99"
+            yield " extra pallets."
+            return
+        yield "Acceptance Yard stores "
+        yield "42 bonded pallets."
+
+
+def test_grounded_stream_emits_the_verified_answer_only(client: TestClient, db: Session) -> None:
+    admin = make_user(db, "ada@example.com")
+    atlas = make_organization(db, "Atlas Demo", "atlas-demo")
+    make_membership(db, admin, atlas, MembershipRole.admin)
+    draft = _SplitDraft()
+    client.app.dependency_overrides[get_embedding_client] = lambda: HashEmbeddingClient()
+    client.app.dependency_overrides[get_chat_client] = lambda: draft
+    ada = login(client, "ada@example.com", PASSWORD)
+    headers = _csrf(ada)
+    org = _org(ada)
+    uploaded = client.post(
+        f"/api/v1/organizations/{org}/documents",
+        files={"file": ("acceptance-yard.txt", YARD.encode(), "text/plain")},
+        headers=headers,
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    created = client.post(
+        f"/api/v1/organizations/{org}/conversations", json={"title": "Stream"}, headers=headers
+    )
+    supported = client.post(
+        f"/api/v1/organizations/{org}/conversations/{created.json()['id']}/messages/stream",
+        json={"content": "How many bonded pallets does Acceptance Yard store?"},
+        headers=headers,
+    )
+    assert supported.status_code == 200, supported.text
+    assert '"phase": "verifying"' in supported.text
+    assert supported.text.index('"phase": "verifying"') < supported.text.index("event: token")
+    assert '"text": "Acceptance Yard stores "' not in supported.text
+    assert '"text": "Acceptance Yard stores 42 bonded pallets."' in supported.text
+    refused = client.post(
+        f"/api/v1/organizations/{org}/conversations/{created.json()['id']}/messages/stream",
+        json={"content": "How many bonded pallets does Acceptance Yard store?"},
+        headers=headers,
+    )
+    assert refused.status_code == 200, refused.text
+    assert '"text": "The yard stores "' not in refused.text
+    assert '"text": "99"' not in refused.text
+    assert f'"text": "{QUALIFIED_ANSWER}"' in refused.text
+    done = refused.text.rsplit("event: done\n", 1)[-1]
+    assert QUALIFIED_ANSWER in done
+    assert "99 extra pallets" not in done

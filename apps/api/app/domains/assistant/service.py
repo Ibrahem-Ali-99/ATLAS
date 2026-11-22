@@ -71,6 +71,10 @@ class PreparedTurn:
     inventory_documents: list[InventoryDocument] = field(default_factory=list)
     question: str = ""
 
+    def holds_evidence(self) -> bool:
+        """A grounded draft can state a fact the retrieved rows do not support."""
+        return self.needs_model and bool(self.documents or self.crm_records)
+
 
 def conversation_title(content: str) -> str:
     """Name a new conversation from its first question, without calling a model."""

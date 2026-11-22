@@ -377,6 +377,34 @@ def test_capability_stream_reports_preparing_and_not_a_search(
     assert "event: done" in streamed.text
 
 
+def test_general_stream_still_sends_tokens_as_they_arrive(client: TestClient, db: Session) -> None:
+    class Pieces:
+        def ensure_configured(self) -> None:
+            return None
+
+        def complete(self, system: str, user: str) -> str:
+            return "One warehouse."
+
+        def stream(self, system: str, user: str) -> Iterator[str]:
+            yield "One "
+            yield "warehouse."
+
+    client.app.dependency_overrides[get_chat_client] = lambda: Pieces()
+    client.app.dependency_overrides[get_embedding_client] = lambda: HashEmbeddingClient()
+    org, headers = _session(client, db, "ada@example.com", "Atlas Demo", "atlas-demo")
+    created = client.post(f"/api/v1/organizations/{org}/conversations", json={}, headers=headers)
+    streamed = client.post(
+        f"/api/v1/organizations/{org}/conversations/{created.json()['id']}/messages/stream",
+        json={"content": "Tell me a joke about a warehouse."},
+        headers=headers,
+    )
+    assert streamed.status_code == 200, streamed.text
+    assert '"phase": "streaming"' in streamed.text
+    assert "verifying" not in streamed.text
+    assert '"text": "One "' in streamed.text
+    assert streamed.text.index('"text": "One "') < streamed.text.index("event: done")
+
+
 @pytest.mark.parametrize(
     ("question", "intent"),
     [
