@@ -19,6 +19,7 @@ from app.domains.knowledge.retrieval import RetrievedChunk, search_chunks
 from app.integrations.language import ChatClient, EmbeddingClient
 
 NO_RECORDS = "I could not find relevant company documents or CRM records for that question."
+UNTITLED = "New conversation"
 _EMBEDDING_UNAVAILABLE = {
     "embedding_unavailable",
     "embedding_unauthorized",
@@ -48,6 +49,20 @@ class PreparedTurn:
     refusal: str | None = None
 
 
+def conversation_title(content: str) -> str:
+    """Name a new conversation from its first question, without calling a model."""
+    collapsed = " ".join(content.split())
+    if not collapsed:
+        return "Untitled conversation"
+    limit = 72
+    if len(collapsed) <= limit:
+        return collapsed
+    shortened = collapsed[:limit].rsplit(" ", 1)[0].rstrip(".,;:!?")
+    if len(shortened) < 12:
+        shortened = collapsed[:limit].rstrip()
+    return shortened
+
+
 def list_conversations(
     db: Session, organization_id: uuid.UUID, user_id: uuid.UUID
 ) -> list[Conversation]:
@@ -66,7 +81,7 @@ def create_conversation(
     conversation = Conversation(
         organization_id=organization_id,
         user_id=user_id,
-        title=(title or "New conversation")[:200],
+        title=(title or UNTITLED)[:200],
     )
     db.add(conversation)
     db.commit()
@@ -115,8 +130,8 @@ def prepare_turn(
     embedder: EmbeddingClient,
 ) -> PreparedTurn:
     conversation = get_conversation(db, organization_id, user_id, conversation_id)
-    if conversation.title == "New conversation":
-        conversation.title = content.strip()[:80]
+    if conversation.title == UNTITLED:
+        conversation.title = conversation_title(content)
     db.add(
         Message(
             conversation_id=conversation.id,
