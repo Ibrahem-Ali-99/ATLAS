@@ -11,6 +11,17 @@ uv run python -m app.scripts.seed
 
 The command is idempotent. It resets the three development passwords and prints the emails, not the passwords. It refuses production and `ATLAS_PUBLIC_DEMO=true`. The example passwords live only in `.env.example`.
 
+To clear stored agent runs, approvals, workflow rows, traces, and documents for the `atlas-demo` organization without changing passwords or CRM rows:
+
+```powershell
+cd apps\api
+$env:ATLAS_ENVIRONMENT = "development"
+$env:ATLAS_DEMO_RESET = "yes"
+uv run python -m app.scripts.reset_demo
+```
+
+The command refuses any other environment, a public demo, and any database name outside `atlas`, `atlas_demo`, `atlas_e2e`, and `atlas_test`. Failed historical runs stay available until that command is used. It was not run against the current development database as part of this change.
+
 ## Modes
 
 | Mode | What you are seeing |
@@ -34,4 +45,4 @@ n8n on port 5678 is a local integration. The editor should stay on localhost. A 
 7. Open Analytics and Monitoring. The figures are counts and traces already stored for Atlas Demo. A missing conversion rate stays empty instead of becoming zero.
 8. Sign out from the account menu or from Settings.
 
-The browser test in `apps/web/e2e/workspace.spec.ts` follows this path with deterministic providers and an isolated `atlas_e2e` database. Screenshots from that run are in `docs/demo/screenshots/`. The assistant image shows the fixed sentence `Grounded answer from the supplied company records.`, not a hosted model. The workflows image shows `n8n_not_configured` because that test process has an empty webhook URL. A local API with `ATLAS_N8N_LEAD_WEBHOOK_URL` set is a different mode. The Next.js development badge is visible because the shots were taken from the test server.
+The browser test in `apps/web/e2e/workspace.spec.ts` follows this path with deterministic providers and an isolated `atlas_e2e` database. Screenshots `01` through `13` are from that test server. The assistant image shows the fixed sentence `Grounded answer from the supplied company records.`, not a hosted model. The workflows image shows `n8n_not_configured` because that test process has an empty webhook URL. A local API with `ATLAS_N8N_LEAD_WEBHOOK_URL` set is a different mode. The Next.js development badge is visible on those shots. Screenshots `14` through `17` are from `next start` against the local development database and do not include that badge.
