@@ -62,29 +62,18 @@ export function LoginScreen() {
         : null;
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-[1.1fr_0.9fr]">
-      <section className="hidden flex-col justify-between border-r border-border px-12 py-10 lg:flex">
-        <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
-            A
-          </div>
-          <div>
-            <p className="text-sm font-semibold tracking-wide">ATLAS</p>
-            <p className="text-xs text-muted-foreground">Operations</p>
-          </div>
-        </div>
-        <div className="max-w-md">
-          <h1 className="text-4xl font-semibold tracking-tight">Business operations command center</h1>
-          <p className="mt-4 text-sm leading-6 text-muted-foreground">
-            Sign in to review CRM records, agent runs, approvals, workflows, and analytics for your organization.
-          </p>
-        </div>
-        <p className="text-xs text-muted-foreground">Local seed accounts are listed in the project README.</p>
+    <div className="grid min-h-screen bg-background lg:grid-cols-2">
+      <section className="hidden flex-col justify-between px-12 py-10 lg:flex">
+        <p className="text-[28px] text-foreground">ATLAS</p>
+        <p className="max-w-md text-base text-muted-foreground">
+          Sign in to the organization you belong to.
+        </p>
+        <p className="text-xs text-subtle">There is no account creation or SSO on this screen.</p>
       </section>
       <section className="flex items-center justify-center px-6 py-12">
-        <div className="w-full max-w-sm">
-          <h2 className="text-2xl font-semibold tracking-tight">Sign in</h2>
-          <p className="mt-2 text-sm text-muted-foreground">Use an account from your organization.</p>
+        <div className="w-full max-w-sm rounded-[10px] bg-muted p-8">
+          <h2 className="text-[31px] leading-none text-foreground">Sign in</h2>
+          <p className="mt-3 text-sm text-muted-foreground">Use an account from your organization.</p>
           <form
             className="mt-8 space-y-4"
             onSubmit={form.handleSubmit((values) => mutation.mutate(values))}
