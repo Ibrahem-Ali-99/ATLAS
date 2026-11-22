@@ -60,7 +60,7 @@ os.environ["ATLAS_N8N_LEAD_WEBHOOK_URL"] = ""
 
 
 def ensure_database(name: str) -> None:
-    if name not in {"atlas_test", "atlas_migration_test"}:
+    if name not in {"atlas_test", "atlas_migration_test", "atlas_e2e"}:
         raise RuntimeError(f"Refusing to create unexpected database {name}")
     admin = create_engine(ADMIN_DATABASE_URL, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
     try:

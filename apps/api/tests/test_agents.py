@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import AppError
+from app.domains.agents.models import AgentRun, RunStatus
+from app.domains.agents.service import prepare_checkpoints, recover_runs
 from app.domains.agents.workflow import TOOL_RETRY, graph_node_names, retry_tool_error
 from app.domains.crm.models import Lead
 from app.domains.crm.service import create_company, create_contact, create_inquiry
@@ -285,6 +287,33 @@ def _steps(body: dict[str, object], step: str) -> list[object]:
             assert isinstance(detail, dict)
             found.append(detail.get("category"))
     return found
+
+
+def test_checkpoint_tables_initialize() -> None:
+    prepare_checkpoints()
+
+
+def test_restart_marks_a_running_agent_interrupted(db: Session) -> None:
+    user = make_user(db, "restart-agent@example.com")
+    organization = make_organization(db, "Restart Atlas", "restart-atlas")
+    make_membership(db, user, organization, MembershipRole.admin)
+    inquiry = create_inquiry(
+        db,
+        organization.id,
+        {"subject": "Restart", "body": "The worker stopped during classification."},
+    )
+    run = AgentRun(
+        organization_id=organization.id,
+        inquiry_id=inquiry.id,
+        started_by=user.id,
+        status=RunStatus.running,
+    )
+    db.add(run)
+    db.commit()
+    recover_runs(db)
+    db.refresh(run)
+    assert run.status == RunStatus.failed
+    assert run.error_code == "interrupted"
 
 
 def _lead_count(db: Session, organization_id: uuid.UUID) -> int:
