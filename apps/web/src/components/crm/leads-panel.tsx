@@ -329,12 +329,16 @@ function LeadScore({ organizationId, leadId }: { organizationId: string; leadId:
         <div className="mt-3 space-y-2 text-sm">
           <p>{prediction.data.label}. Confidence: {prediction.data.confidence ?? "unavailable"}</p>
           <p className="text-muted-foreground">{prediction.data.notice}</p>
+          <p className="text-muted-foreground">{prediction.data.explanation}</p>
           {prediction.data.contributions.length === 0 ? (
             <p className="text-muted-foreground">Feature influence is unavailable for this model.</p>
           ) : (
             <ul className="space-y-1 text-muted-foreground">
               {prediction.data.contributions.map((item) => (
-                <li key={item.feature}>{item.feature}: {item.contribution}</li>
+                <li key={`${item.feature}-${item.relation ?? "weight"}`}>
+                  {item.feature}: {item.contribution}
+                  {item.relation ? ` (${item.relation} ${item.threshold})` : ""}
+                </li>
               ))}
             </ul>
           )}

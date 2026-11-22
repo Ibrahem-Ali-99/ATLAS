@@ -77,6 +77,9 @@ def test_prediction_is_advisory_and_isolated(client: TestClient, db: Session) ->
     body = scored.json()
     assert body["synthetic"] is True
     assert body["label"] in {"likely", "unlikely"}
+    assert "decision tree" in body["explanation"]
+    assert body["contributions"]
+    assert all("relation" in item for item in body["contributions"])
     assert "artifact" not in body
     assert "Synthetic-data demonstration" in body["notice"]
     stored = db.get(Lead, uuid.UUID(lead_id))
@@ -170,6 +173,25 @@ def test_traces_redact_secrets_and_skip_unknown_cost(db: Session, monkeypatch) -
     )
     monkeypatch.setattr("app.domains.observability.tracing.get_settings", lambda: priced)
     assert estimate_cost(1_000_000, 1_000_000) == 3.0
+
+
+def test_model_artifact_must_stay_in_the_model_directory() -> None:
+    from app.domains.ml.models import ModelVersion
+    from app.domains.ml.training import load_pipeline
+
+    row = ModelVersion(
+        version="outside",
+        algorithm="decision_tree",
+        dataset_version="lead-synthetic-1",
+        synthetic=True,
+        metrics={},
+        artifact_path="C:/Windows/Temp/evil.joblib",
+    )
+    try:
+        load_pipeline(row)
+    except ValueError:
+        return
+    raise AssertionError("an artifact outside the model directory was loaded")
 
 
 def test_langfuse_failure_keeps_the_local_trace(db: Session, monkeypatch) -> None:

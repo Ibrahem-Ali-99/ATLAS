@@ -47,7 +47,6 @@ def score_lead(db: Session, organization_id: uuid.UUID, lead: Lead) -> LeadPredi
         bundle = load_pipeline(version)
         pipeline = bundle["pipeline"]
         calibrator = bundle.get("calibrator")
-        explainer = bundle.get("explainer")
     except (OSError, FileNotFoundError, ValueError, KeyError, TypeError) as exc:
         raise AppError(
             503, "model_unavailable", "The trained lead model could not be loaded"
@@ -56,7 +55,7 @@ def score_lead(db: Session, organization_id: uuid.UUID, lead: Lead) -> LeadPredi
     try:
         probability = _positive_probability(calibrator or pipeline, features)
         label = "likely" if pipeline.predict([features])[0] == 1 else "unlikely"
-        contributions = _contributions(explainer, features)
+        contributions = explain_prediction(pipeline, features)
     except (IndexError, ValueError, AttributeError) as exc:
         raise AppError(503, "model_failed", "The lead model could not score this lead") from exc
     prediction = LeadPrediction(
@@ -107,19 +106,73 @@ def _features(db: Session, organization_id: uuid.UUID, lead: Lead) -> list[objec
     return [source, has_email, has_company, len(lead.title), len(lead.notes or ""), industry]
 
 
-def _contributions(pipeline: Any, features: list[object]) -> list[dict[str, Any]]:
+def explain_prediction(pipeline: Any, features: list[object]) -> list[dict[str, Any]]:
+    """Explain the served pipeline. A different model is not used."""
+
     model = pipeline.named_steps.get("model")
     prepare = pipeline.named_steps.get("prepare")
-    if model is None or prepare is None or not hasattr(model, "coef_"):
+    if model is None or prepare is None:
         return []
+    if hasattr(model, "tree_"):
+        return _tree_path(prepare, model, features)
+    if hasattr(model, "coef_"):
+        return _linear_contributions(prepare, model, features)
+    return []
+
+
+def _transformed_row(prepare: Any, features: list[object]) -> tuple[list[str], list[float]]:
     transformed = prepare.transform([features])
     if hasattr(transformed, "toarray"):
         transformed = transformed.toarray()
     names = [str(name) for name in prepare.get_feature_names_out()]
+    row = [float(value) for value in transformed[0]]
+    return names, row
+
+
+def _tree_path(prepare: Any, model: Any, features: list[object]) -> list[dict[str, Any]]:
+    names, row = _transformed_row(prepare, features)
+    tree = model.tree_
+    classes = [int(value) for value in model.classes_]
+    if 1 not in classes:
+        return []
+    positive = classes.index(1)
+    node = 0
+    steps: list[dict[str, Any]] = []
+    while int(tree.children_left[node]) != -1:
+        feature_index = int(tree.feature[node])
+        threshold = float(tree.threshold[node])
+        before = _leaf_probability(tree, node, positive)
+        if row[feature_index] <= threshold:
+            node = int(tree.children_left[node])
+            relation = "<="
+        else:
+            node = int(tree.children_right[node])
+            relation = ">"
+        after = _leaf_probability(tree, node, positive)
+        steps.append(
+            {
+                "feature": names[feature_index],
+                "contribution": round(after - before, 6),
+                "relation": relation,
+                "threshold": round(threshold, 6),
+            }
+        )
+    steps.sort(key=_magnitude, reverse=True)
+    return steps[:5]
+
+
+def _leaf_probability(tree: Any, node: int, positive: int) -> float:
+    counts = tree.value[node][0]
+    total = float(sum(float(count) for count in counts)) or 1.0
+    return float(counts[positive]) / total
+
+
+def _linear_contributions(prepare: Any, model: Any, features: list[object]) -> list[dict[str, Any]]:
+    names, row = _transformed_row(prepare, features)
     weights = [float(value) for value in model.coef_[0]]
     ranked = [
-        {"feature": name, "contribution": round(float(row) * weight, 6)}
-        for name, row, weight in zip(names, transformed[0], weights, strict=True)
+        {"feature": name, "contribution": round(value * weight, 6)}
+        for name, value, weight in zip(names, row, weights, strict=True)
     ]
     ranked.sort(key=_magnitude, reverse=True)
     return ranked[:5]

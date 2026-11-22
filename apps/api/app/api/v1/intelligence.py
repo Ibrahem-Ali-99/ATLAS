@@ -11,14 +11,13 @@ from app.domains.crm import service as crm
 from app.domains.evaluation.service import list_evaluations, start_evaluation
 from app.domains.identity.dependencies import CsrfAdmin, CsrfMember, DbSession, Member
 from app.domains.ml.inference import latest_model, latest_prediction, score_lead, start_training
-from app.domains.ml.models import LeadPrediction
+from app.domains.ml.models import LeadPrediction, ModelVersion
 from app.domains.monitoring.service import diagnostics, trace_run
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["intelligence"])
 SYNTHETIC_NOTICE = (
     "Synthetic-data demonstration. This score does not measure real conversion "
-    "and does not authorize a CRM change or an external action. "
-    "Feature contributions come from the uncalibrated logistic model."
+    "and does not authorize a CRM change or an external action."
 )
 
 
@@ -32,6 +31,7 @@ class PredictionOut(BaseModel):
     synthetic: bool
     model_version: str
     notice: str
+    explanation: str
 
 
 @router.get("/analytics")
@@ -64,7 +64,7 @@ def create_prediction(lead_id: uuid.UUID, member: CsrfMember, db: DbSession) -> 
     lead = crm.get_lead(db, member.organization.id, lead_id)
     prediction = score_lead(db, member.organization.id, lead)
     version = latest_model(db)
-    return _prediction_out(prediction, "" if version is None else version.version)
+    return _prediction_out(prediction, version)
 
 
 @router.get("/leads/{lead_id}/predictions", response_model=PredictionOut)
@@ -74,7 +74,7 @@ def get_prediction(lead_id: uuid.UUID, member: Member, db: DbSession) -> Predict
     if prediction is None:
         raise AppError(404, "not_found", "Resource not found")
     version = latest_model(db)
-    return _prediction_out(prediction, "" if version is None else version.version)
+    return _prediction_out(prediction, version)
 
 
 @router.post("/evaluations", status_code=202)
@@ -116,7 +116,14 @@ def get_diagnostic_run(run_id: uuid.UUID, member: Member, db: DbSession) -> dict
     return trace_run(db, member.organization.id, run_id)
 
 
-def _prediction_out(prediction: LeadPrediction, version: str) -> PredictionOut:
+def _prediction_out(prediction: LeadPrediction, version: ModelVersion | None) -> PredictionOut:
+    algorithm = "" if version is None else version.algorithm
+    if algorithm == "decision_tree":
+        explanation = "Each step is a split on the served decision tree."
+    elif algorithm == "logistic_regression":
+        explanation = "Each step is a coefficient from the served logistic model."
+    else:
+        explanation = "Feature influence is unavailable for this model."
     return PredictionOut(
         id=prediction.id,
         lead_id=prediction.lead_id,
@@ -125,6 +132,7 @@ def _prediction_out(prediction: LeadPrediction, version: str) -> PredictionOut:
         confidence=prediction.confidence,
         contributions=list(prediction.contributions),
         synthetic=True,
-        model_version=version,
+        model_version="" if version is None else version.version,
         notice=SYNTHETIC_NOTICE,
+        explanation=explanation,
     )

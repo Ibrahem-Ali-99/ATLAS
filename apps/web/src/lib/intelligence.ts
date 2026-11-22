@@ -55,10 +55,11 @@ export type LeadPrediction = {
   label: string;
   probability: number;
   confidence: number | null;
-  contributions: { feature: string; contribution: number }[];
+  contributions: { feature: string; contribution: number; relation?: string; threshold?: number }[];
   synthetic: boolean;
   model_version: string;
   notice: string;
+  explanation: string;
 };
 
 export type DiagnosticRun = {

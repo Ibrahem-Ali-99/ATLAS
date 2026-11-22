@@ -84,7 +84,6 @@ def train_lead_model() -> dict[str, Any]:
         "excluded": ["budget_band", "converted", "status"],
         "pipeline": fitted[winner],
         "calibrator": calibrator,
-        "explainer": fitted["logistic_regression"],
         "version": f"{DATASET_VERSION}-{winner}",
     }
 
@@ -136,7 +135,6 @@ def publish_model(db: Session) -> ModelVersion:
         {
             "pipeline": pipeline,
             "calibrator": trained.pop("calibrator"),
-            "explainer": trained.pop("explainer"),
             "features": trained["features"],
         },
         artifact,
@@ -191,7 +189,7 @@ def load_pipeline(version: ModelVersion) -> Any:
     cached = _CACHE.get("version")
     if cached == str(version.id):
         return _CACHE["pipeline"]
-    path = Path(version.artifact_path)
+    path = _artifact_path(version)
     if not path.is_file():
         raise FileNotFoundError(path)
     bundle = joblib.load(path)
@@ -200,3 +198,11 @@ def load_pipeline(version: ModelVersion) -> Any:
     _CACHE["version"] = str(version.id)
     _CACHE["pipeline"] = bundle
     return bundle
+
+
+def _artifact_path(version: ModelVersion) -> Path:
+    root = get_settings().model_storage_dir.resolve()
+    path = Path(version.artifact_path).resolve()
+    if path.suffix != ".joblib" or (path != root and root not in path.parents):
+        raise ValueError("model artifact is outside the model directory")
+    return path
