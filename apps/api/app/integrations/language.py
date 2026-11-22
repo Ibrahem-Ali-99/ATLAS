@@ -1,11 +1,14 @@
 import json
 from collections.abc import Iterator
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
+import structlog
 
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
+
+logger = structlog.get_logger(__name__)
 
 
 class EmbeddingClient(Protocol):
@@ -43,13 +46,14 @@ class OpenAICompatibleEmbeddingClient:
         )
         if response.status_code >= 400:
             raise AppError(502, "embedding_failed", "The embedding provider rejected the request")
-        payload = response.json()
-        rows = sorted(payload.get("data", []), key=lambda item: item.get("index", 0))
-        vectors = [row.get("embedding") for row in rows]
-        if len(vectors) != len(texts) or any(not isinstance(vector, list) for vector in vectors):
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as exc:
             raise AppError(
                 502, "embedding_failed", "The embedding provider returned an unexpected response"
-            )
+            ) from exc
+        vectors = _embedding_vectors(payload, len(texts), self._settings.embedding_dimensions)
+        _log_usage("embedding_usage", payload)
         return vectors
 
 
@@ -97,13 +101,66 @@ class OpenAICompatibleChatClient:
                     payload = json.loads(data)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(payload, dict):
+                    raise AppError(
+                        502, "llm_failed", "The language model returned an unexpected response"
+                    )
+                _log_usage("llm_usage", payload)
+                if isinstance(payload.get("error"), dict):
+                    raise AppError(
+                        502, "llm_failed", "The language model returned an unexpected response"
+                    )
                 choices = payload.get("choices") or []
-                if not choices:
+                if not isinstance(choices, list) or not choices:
                     continue
-                delta = choices[0].get("delta") or {}
+                choice = choices[0] if isinstance(choices[0], dict) else {}
+                delta_raw = choice.get("delta")
+                delta = delta_raw if isinstance(delta_raw, dict) else {}
                 text = delta.get("content")
                 if isinstance(text, str) and text:
                     yield text
+
+
+def _embedding_vectors(payload: object, count: int, dimensions: int) -> list[list[float]]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        raise AppError(
+            502, "embedding_failed", "The embedding provider returned an unexpected response"
+        )
+    rows = payload["data"]
+    if any(not isinstance(row, dict) for row in rows):
+        raise AppError(
+            502, "embedding_failed", "The embedding provider returned an unexpected response"
+        )
+    ordered = sorted(rows, key=lambda item: item.get("index", 0))
+    vectors: list[list[float]] = []
+    for row in ordered:
+        vector = row.get("embedding")
+        if not isinstance(vector, list) or len(vector) != dimensions:
+            raise AppError(
+                502, "embedding_failed", "The embedding provider returned an unexpected response"
+            )
+        if any(type(value) not in {int, float} for value in vector):
+            raise AppError(
+                502, "embedding_failed", "The embedding provider returned an unexpected response"
+            )
+        vectors.append([float(value) for value in vector])
+    if len(vectors) != count:
+        raise AppError(
+            502, "embedding_failed", "The embedding provider returned an unexpected response"
+        )
+    return vectors
+
+
+def _log_usage(event: str, payload: dict[str, Any]) -> None:
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return
+    logger.info(
+        event,
+        prompt_tokens=usage.get("prompt_tokens"),
+        completion_tokens=usage.get("completion_tokens"),
+        total_tokens=usage.get("total_tokens"),
+    )
 
 
 def get_embedding_client() -> EmbeddingClient:

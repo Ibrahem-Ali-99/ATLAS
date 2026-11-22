@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.core.errors import AppError
 from app.domains.identity.models import MembershipRole
 from app.integrations.language import get_chat_client, get_embedding_client
 from tests.ai_clients import GroundedChatClient, HashEmbeddingClient
@@ -151,3 +152,31 @@ def test_assistant_reports_missing_model_credentials(client: TestClient, db: Ses
     history = client.get(f"/api/v1/organizations/{org}/conversations/{created.json()['id']}")
     assert history.status_code == 200
     assert any("not configured" in item["content"].lower() for item in history.json()["messages"])
+
+
+def test_assistant_stores_a_malformed_embedding_failure(client: TestClient, db: Session) -> None:
+    class BrokenEmbedder:
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            raise AppError(
+                502, "embedding_failed", "The embedding provider returned an unexpected response"
+            )
+
+    client.app.dependency_overrides[get_embedding_client] = lambda: BrokenEmbedder()
+    user = make_user(db, "ada@example.com")
+    atlas = make_organization(db, "Atlas Demo", "atlas-demo")
+    make_membership(db, user, atlas, MembershipRole.admin)
+    ada = login(client, "ada@example.com", PASSWORD)
+    headers = _csrf(ada)
+    org = _org(ada)
+    created = client.post(f"/api/v1/organizations/{org}/conversations", json={}, headers=headers)
+    response = client.post(
+        f"/api/v1/organizations/{org}/conversations/{created.json()['id']}/messages",
+        json={"content": "zzzzqqqq unknown glacier policy"},
+        headers=headers,
+    )
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "embedding_failed"
+    history = client.get(f"/api/v1/organizations/{org}/conversations/{created.json()['id']}")
+    assert history.status_code == 200
+    assert history.json()["messages"][-1]["sources"] == []
+    assert "unexpected response" in history.json()["messages"][-1]["content"]
