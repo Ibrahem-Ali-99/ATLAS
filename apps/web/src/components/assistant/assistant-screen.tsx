@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
 import { isEvaluationConversation } from "@/lib/conversations";
+import { RichText } from "@/components/assistant/rich-text";
 import { createConversation, getConversation, listConversations, streamConversationMessage } from "@/lib/records-api";
 import type { AssistantReply, ChatMessage, Conversation, MessageSource } from "@/lib/records";
 import { useWorkspace } from "@/lib/use-workspace";
@@ -50,6 +51,7 @@ function AssistantWorkspace({
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
   const [streaming, setStreaming] = useState("");
+  const [phases, setPhases] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -78,14 +80,24 @@ function AssistantWorkspace({
         throw new Error("Start a conversation first.");
       }
       setStreaming("");
+      setPhases([]);
       setNotice(null);
-      return streamConversationMessage(organizationId, conversationId, content, (token) => {
-        setStreaming((current) => current + token);
-      });
+      return streamConversationMessage(
+        organizationId,
+        conversationId,
+        content,
+        (token) => {
+          setStreaming((current) => current + token);
+        },
+        (phase) => {
+          setPhases((current) => (current.at(-1) === phase ? current : [...current, phase]));
+        },
+      );
     },
     onSuccess: async (reply) => {
       setDraft("");
       setStreaming("");
+      setPhases([]);
       setNotice(searchNotice(reply));
       if (reply.message.sources.length > 0) {
         setFocusSource(sourceKey(reply.message.sources[0]));
@@ -96,6 +108,7 @@ function AssistantWorkspace({
     },
     onError: async () => {
       setStreaming("");
+      setPhases([]);
       await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, conversationId] });
     },
   });
@@ -146,7 +159,7 @@ function AssistantWorkspace({
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{current?.title ?? "Assistant"}</p>
             <p className="truncate text-xs text-muted-foreground">
-              Grounded in documents and CRM records for {organizationName}.
+              Ask about ATLAS, a follow-up, or a record for {organizationName}.
             </p>
           </div>
           <div className="flex shrink-0 gap-2">
@@ -190,8 +203,8 @@ function AssistantWorkspace({
             ))}
             {send.isPending ? (
               <article className="text-sm" aria-live="polite">
-                <p className="text-xs font-medium text-muted-foreground">Assistant</p>
-                <p className="mt-2 whitespace-pre-wrap leading-7">{streaming || "Looking through company records…"}</p>
+                <p className="text-xs font-medium text-muted-foreground">{streamStatus(phases, streaming)}</p>
+                {streaming ? <div className="mt-2"><RichText id="streaming" text={streaming} /></div> : null}
               </article>
             ) : null}
           </div>
@@ -221,7 +234,7 @@ function AssistantWorkspace({
                 className="min-h-16 border-0 bg-transparent px-1 py-1 focus-visible:ring-0"
               />
               <div className="mt-2 flex items-center justify-between gap-3">
-                <p className="text-xs text-muted-foreground">Enter sends. Shift+Enter adds a line.</p>
+                <p className="text-xs text-muted-foreground">Enter sends. Shift+Enter adds a line. Follow-ups stay in this chat.</p>
                 <Button type="submit" disabled={!conversationId || send.isPending || draft.trim().length === 0}>
                   {send.isPending ? "Answering…" : "Send"}
                 </Button>
@@ -375,14 +388,16 @@ function EmptyThread({
   onPrompt: (value: string) => void;
 }) {
   const prompts = [
-    "What warehousing services are documented?",
-    "Which leads mention bonded storage?",
+    "What can you help me with?",
+    "What information do you have?",
+    "Which companies are in my CRM?",
+    "What documents are available?",
   ];
   return (
     <div className="py-8">
       <p className="text-lg font-medium">Ask about {organizationName}</p>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-        Ask about an uploaded document or a CRM record. If neither source supports the question, the assistant refuses instead of guessing. A citation is a retrieved row. Selecting a prompt fills the composer and does not send it.
+        Ask what ATLAS can do, what this organization has stored, or a fact from a document or CRM record. A company fact is answered only when a retrieved row supports it. Selecting a prompt fills the composer and does not send it.
       </p>
       <div className="mt-5 flex flex-col gap-2">
         {prompts.map((prompt) => (
@@ -423,14 +438,12 @@ function MessageView({
       <p className="text-xs font-medium text-muted-foreground">Assistant</p>
       {refused ? (
         <div className="mt-2 rounded-lg border border-border bg-card px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">No relevant evidence</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">No supporting evidence</p>
           <p className="mt-2 whitespace-pre-wrap leading-7">{message.content}</p>
         </div>
       ) : (
-        <div className="mt-2 space-y-3 leading-7">
-          {message.content.split(/\n{2,}/).map((paragraph, index) => (
-            <p key={`${message.id}-${index}`} className="whitespace-pre-wrap">{paragraph}</p>
-          ))}
+        <div className="mt-2">
+          <RichText id={message.id} text={message.content} />
         </div>
       )}
       {documents.length > 0 ? <SourceList label="Company documents" sources={documents} onSource={onSource} /> : null}
@@ -481,7 +494,10 @@ function SourcePanel({
   return (
     <div className="flex h-full flex-col p-4">
       <h2 className="text-sm font-semibold">Source</h2>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">Retrieved evidence. This is not text parsed out of the model answer.</p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        Retrieved evidence or an inventory row. This is not text parsed out of the model answer.
+      </p>
+      <p className="mt-2 text-xs text-muted-foreground">{sourceKindLabel(source)}</p>
       <div className="mt-4 rounded-lg border border-border bg-card p-3">
         <Badge variant="secondary">{source.kind === "document" ? "Document" : source.record_type ?? "CRM"}</Badge>
         <p className="mt-2 font-medium">{source.title}</p>
@@ -490,8 +506,8 @@ function SourcePanel({
       </div>
       {sources.length > 1 ? (
         <ul className="mt-4 space-y-1">
-          {sources.map((item) => (
-            <li key={sourceKey(item)}>
+          {sources.map((item, index) => (
+            <li key={`${sourceKey(item)}-${index}`}>
               <button type="button" className="w-full truncate rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent" onClick={() => onSelect(item)}>
                 {item.title}
               </button>
@@ -546,13 +562,19 @@ function failureCopy(error: unknown): { heading: string; detail: string } {
   if (error.code === "embedding_dimension_mismatch") {
     return { heading: "Search could not use this index", detail: error.message };
   }
-  if (error.status === 403 || error.status === 404 || error.code === "forbidden" || error.code === "not_found") {
+  if (error.status === 403 || error.code === "forbidden") {
+    return { heading: "Permission denied", detail: error.message };
+  }
+  if (error.status === 404 || error.code === "not_found") {
     return { heading: "You cannot use this conversation", detail: error.message };
   }
   return { heading: "The reply did not finish", detail: error.message };
 }
 
 function searchNotice(reply: AssistantReply): string | null {
+  if (reply.document_search === "skipped") {
+    return null;
+  }
   if (reply.document_search === "unconfigured") {
     return "Document search is unavailable because embeddings are not configured. This answer used CRM records only.";
   }
@@ -566,5 +588,27 @@ function searchNotice(reply: AssistantReply): string | null {
 }
 
 function sourceKey(source: MessageSource): string {
-  return `${source.kind}-${source.chunk_id ?? source.record_id ?? source.title}`;
+  return `${source.kind}-${source.chunk_id ?? source.record_id ?? source.document_id ?? source.title}`;
+}
+
+function streamStatus(phases: string[], streaming: string): string {
+  const labels = phases.map(phaseLabel).filter((label): label is string => label !== null);
+  if (streaming) {
+    return labels.includes("Streaming an answer") ? "Streaming an answer" : "Assistant";
+  }
+  return labels.at(-1) ?? "Preparing";
+}
+
+function phaseLabel(phase: string): string | null {
+  if (phase === "preparing") return "Preparing";
+  if (phase === "searching_crm") return "Searching company records";
+  if (phase === "retrieving_documents") return "Retrieving documents";
+  if (phase === "streaming") return "Streaming an answer";
+  return null;
+}
+
+function sourceKindLabel(source: MessageSource): string {
+  if (source.chunk_id) return "Retrieved passage";
+  if (source.kind === "document") return "Document inventory";
+  return "CRM record";
 }
