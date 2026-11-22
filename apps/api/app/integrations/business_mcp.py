@@ -82,11 +82,15 @@ def call_tool(organization_id: uuid.UUID, name: str, arguments: dict[str, Any]) 
     if name not in ALLOWED_TOOLS:
         raise BusinessToolError("This tool is not available to the agent")
     try:
-        return asyncio.run(_call(organization_id, name, arguments))
+        result = asyncio.run(_call(organization_id, name, arguments))
     except BusinessToolError:
+        _trace_tool(organization_id, name, "failed")
         raise
     except (TimeoutError, OSError, ConnectionError) as exc:
+        _trace_tool(organization_id, name, "failed")
         raise TransientToolError("The business tool is unavailable") from exc
+    _trace_tool(organization_id, name, "succeeded")
+    return result
 
 
 async def _call(organization_id: uuid.UUID, name: str, arguments: dict[str, Any]) -> Any:
@@ -118,3 +122,14 @@ def _text(result: Any) -> str:
 
 def _env(name: str, fallback: str) -> str:
     return os.environ.get(name, fallback)
+
+
+def _trace_tool(organization_id: uuid.UUID, name: str, status: str) -> None:
+    from app.domains.observability.tracing import record_operation
+
+    record_operation(
+        operation="mcp_tool",
+        status=status,
+        organization_id=organization_id,
+        detail={"tool": name},
+    )

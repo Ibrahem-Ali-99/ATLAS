@@ -29,17 +29,25 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.error("ingestion_resume_failed")
     try:
         from app.core.database import SessionLocal
+        from app.domains.agents.service import recover_runs
         from app.domains.automation.intents import recover_intents
         from app.domains.automation.workflows import recover_workflows
 
         session = SessionLocal()
         try:
+            recover_runs(session)
             recover_intents(session)
             recover_workflows(session)
         finally:
             session.close()
     except Exception:
         logger.error("automation_recovery_failed")
+    try:
+        from app.domains.agents.service import prepare_checkpoints
+
+        prepare_checkpoints()
+    except Exception:
+        logger.error("checkpoint_setup_failed")
     yield
     logger.info("shutdown")
 

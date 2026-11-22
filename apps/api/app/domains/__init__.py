@@ -8,7 +8,9 @@ Implemented:
 - agents: LangGraph inquiry workflow over CRM and knowledge.
 - approvals: human decisions required before an agent writes CRM records.
 - automation: webhooks, execution intents, sandbox email, and simulated calendar bookings.
-
-Reserved and intentionally not implemented:
-- ml, analytics, monitoring.
+- ml: synthetic lead scoring. Predictions are advisory.
+- analytics: organization-scoped counts from persisted records.
+- observability: local operation traces, with optional Langfuse export.
+- evaluation: deterministic benchmark checks. They are not live-model accuracy.
+- monitoring: diagnostics assembled from stored runs and traces.
 """

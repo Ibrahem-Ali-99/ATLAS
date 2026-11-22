@@ -52,10 +52,14 @@ def dispatch_intent(
     if intent is None:
         return _when_unclaimed(db, organization_id, intent_id)
     attempt = _start_attempt(db, intent)
+    action = intent.action_type.value
     try:
         plan = _plan(db, intent)
     except OutcomeUncertain as exc:
         _fail(db, intent.id, attempt.id, AttemptOutcome.uncertain, "outcome_uncertain")
+        _trace_adapter(
+            organization_id, intent.approval_id, "uncertain", "outcome_uncertain", action
+        )
         raise AppError(
             409, "needs_attention", "The external outcome could not be determined"
         ) from exc
@@ -64,13 +68,17 @@ def dispatch_intent(
             _requeue(db, intent.id, attempt.id, "delivery_failed")
             return dispatch_intent(db, organization_id, intent_id)
         _fail(db, intent.id, attempt.id, AttemptOutcome.failed, "delivery_failed")
+        _trace_adapter(organization_id, intent.approval_id, "failed", "delivery_failed", action)
         raise AppError(
             502, "delivery_failed", "The external service did not accept the action"
         ) from exc
     except AppError as exc:
         _fail(db, intent.id, attempt.id, AttemptOutcome.failed, exc.message[:500])
+        _trace_adapter(organization_id, intent.approval_id, "failed", exc.code, action)
         raise
-    return _succeed(db, intent.id, attempt.id, plan)
+    result = _succeed(db, intent.id, attempt.id, plan)
+    _trace_adapter(organization_id, intent.approval_id, "succeeded", None, action)
+    return result
 
 
 def resume_intent(db: Session, approval: Approval) -> dict[str, Any]:
@@ -487,3 +495,22 @@ def _time(value: object) -> datetime:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _trace_adapter(
+    organization_id: uuid.UUID,
+    approval_id: uuid.UUID,
+    status: str,
+    error_code: str | None,
+    action: str,
+) -> None:
+    from app.domains.observability.tracing import record_operation
+
+    record_operation(
+        operation="external_adapter",
+        status=status,
+        organization_id=organization_id,
+        approval_id=approval_id,
+        error_code=error_code,
+        detail={"action": action},
+    )

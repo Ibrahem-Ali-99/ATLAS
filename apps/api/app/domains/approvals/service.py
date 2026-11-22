@@ -119,6 +119,15 @@ def decide(
     approval.decision_note = note
     db.commit()
     db.refresh(approval)
+    from app.domains.observability.tracing import record_operation
+
+    record_operation(
+        operation="approval_decision",
+        status="succeeded" if approved else "rejected",
+        organization_id=approval.organization_id,
+        agent_run_id=approval.run_id,
+        approval_id=approval.id,
+    )
     return approval
 
 

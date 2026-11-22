@@ -255,6 +255,16 @@ def _finish(
     run.status = status
     run.last_error = error
     db.commit()
+    from app.domains.observability.tracing import record_operation
+
+    record_operation(
+        operation="workflow",
+        status=status.value,
+        organization_id=run.organization_id,
+        workflow_run_id=run.id,
+        agent_run_id=run.agent_run_id,
+        error_code=error,
+    )
     logger.info("workflow_finished", workflow_run_id=str(run_id), status=status.value)
 
 

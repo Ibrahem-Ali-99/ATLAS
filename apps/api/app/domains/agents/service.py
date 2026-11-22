@@ -119,6 +119,9 @@ def _drive(db: Session, run: AgentRun, chat: ChatClient, *, resume: bool) -> Age
     )
     url = _checkpoint_url()
     config: RunnableConfig = {"configurable": {"thread_id": str(run.id)}}
+    # Checkpoint setup uses CREATE INDEX CONCURRENTLY, which waits for every
+    # open transaction. The session may still be in one after loading the run.
+    db.commit()
     token = bind_run(context)
     try:
         with PostgresSaver.from_conn_string(url) as saver:
@@ -134,15 +137,18 @@ def _drive(db: Session, run: AgentRun, chat: ChatClient, *, resume: bool) -> Age
                 raise AppError(409, "invalid_transition", "This run cannot be resumed") from exc
             except AppError as exc:
                 _mark_failed(db, run.id, exc)
+                _trace_finished(db, run)
                 raise
             except BusinessToolError as exc:
                 wrapped = AppError(502, "tool_failed", exc.message)
                 _mark_failed(db, run.id, wrapped)
+                _trace_finished(db, run)
                 raise wrapped from exc
             except Exception as exc:
                 logger.error("agent_run_failed", run_id=str(run.id), error_type=type(exc).__name__)
                 wrapped = AppError(500, "agent_failed", "The agent run failed")
                 _mark_failed(db, run.id, wrapped)
+                _trace_finished(db, run)
                 raise wrapped from exc
             snapshot = graph.get_state(config)
         _reconcile(db, run.id, snapshot)
@@ -153,7 +159,34 @@ def _drive(db: Session, run: AgentRun, chat: ChatClient, *, resume: bool) -> Age
         logger.info("agent_run_completed", run_id=str(finished.id))
     elif finished.status == RunStatus.awaiting_approval:
         logger.info("agent_run_paused", run_id=str(finished.id))
+    _record_advisory(db, finished)
+    _trace_finished(db, finished)
     return finished
+
+
+def _record_advisory(db: Session, finished: AgentRun) -> None:
+    inquiry = db.get(Inquiry, finished.inquiry_id)
+    if inquiry is None or inquiry.lead_id is None:
+        return
+    from app.domains.ml.inference import latest_prediction
+
+    prediction = latest_prediction(db, finished.organization_id, inquiry.lead_id)
+    if prediction is None:
+        return
+    db.add(
+        AgentEvent(
+            organization_id=finished.organization_id,
+            run_id=finished.id,
+            step="lead_score",
+            status="advisory",
+            detail={
+                "prediction_id": str(prediction.id),
+                "label": prediction.label,
+                "synthetic": True,
+            },
+        )
+    )
+    db.commit()
 
 
 def _invoke(graph: Any, config: RunnableConfig, context: RunContext, resume: bool) -> None:
@@ -187,6 +220,34 @@ def _reconcile(db: Session, run_id: uuid.UUID, snapshot: Any) -> None:
     db.commit()
 
 
+def recover_runs(db: Session) -> None:
+    """Mark runs left in progress by a stopped process as interrupted."""
+
+    stuck = list(db.scalars(select(AgentRun).where(AgentRun.status == RunStatus.running)))
+    if not stuck:
+        return
+    now = datetime.now(UTC)
+    for run in stuck:
+        run.status = RunStatus.failed
+        run.error_code = "interrupted"
+        run.error_message = "The API restarted before this run finished."
+        run.finished_at = now
+    db.commit()
+
+
+def _trace_finished(db: Session, run: AgentRun) -> None:
+    from app.domains.observability.tracing import record_operation
+
+    record_operation(
+        operation="agent_run",
+        status=run.status.value,
+        organization_id=run.organization_id,
+        inquiry_id=run.inquiry_id,
+        agent_run_id=run.id,
+        error_code=run.error_code,
+    )
+
+
 def _mark_failed(db: Session, run_id: uuid.UUID, exc: AppError) -> None:
     db.rollback()
     run = db.get(AgentRun, run_id)
@@ -205,6 +266,13 @@ def _has_pending(db: Session, organization_id: uuid.UUID, run_id: uuid.UUID) -> 
     return any(
         item.status == ApprovalStatus.pending for item in list_for_run(db, organization_id, run_id)
     )
+
+
+def prepare_checkpoints() -> None:
+    url = _checkpoint_url()
+    with PostgresSaver.from_conn_string(url) as saver:
+        saver.setup()
+        _checkpoint_ready.add(url)
 
 
 def _checkpoint_url() -> str:

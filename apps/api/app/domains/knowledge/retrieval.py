@@ -63,6 +63,14 @@ def search_chunks(
     _fuse_vector(fused, vector_rows, get_settings().max_cosine_distance)
     _fuse_text(fused, text_rows)
     ranked = sorted(fused.values(), key=lambda item: item.score, reverse=True)
+    from app.domains.observability.tracing import record_operation
+
+    record_operation(
+        operation="retrieval",
+        status="succeeded",
+        organization_id=organization_id,
+        detail={"count": len(ranked[:limit])},
+    )
     return ranked[:limit]
 
 

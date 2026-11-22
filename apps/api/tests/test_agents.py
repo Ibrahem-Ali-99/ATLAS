@@ -63,6 +63,15 @@ def test_missing_model_credentials_fail_the_run(client: TestClient, db: Session)
     assert run["status"] == "failed"
     assert run["error_code"] == "llm_unconfigured"
     assert _lead_count(db, uuid.UUID(org)) == 0
+    from app.domains.observability.models import OperationTrace
+
+    trace = db.scalar(
+        select(OperationTrace).where(OperationTrace.agent_run_id == uuid.UUID(str(run["id"])))
+    )
+    assert trace is not None
+    assert trace.status == "failed"
+    assert trace.error_code == "llm_unconfigured"
+    assert trace.langfuse_status == "unconfigured"
 
 
 def test_successful_run_pauses_resumes_and_writes_once(client: TestClient, db: Session) -> None:

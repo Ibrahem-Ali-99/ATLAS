@@ -155,11 +155,19 @@ def _log_usage(event: str, payload: dict[str, Any]) -> None:
     usage = payload.get("usage")
     if not isinstance(usage, dict):
         return
-    logger.info(
-        event,
-        prompt_tokens=usage.get("prompt_tokens"),
-        completion_tokens=usage.get("completion_tokens"),
-        total_tokens=usage.get("total_tokens"),
+    prompt = usage.get("prompt_tokens")
+    completion = usage.get("completion_tokens")
+    logger.info(event, prompt_tokens=prompt, completion_tokens=completion)
+    from app.domains.observability.tracing import record_operation
+
+    settings = get_settings()
+    record_operation(
+        operation=event,
+        status="succeeded",
+        provider="openai-compatible",
+        model_name=settings.llm_model if event == "chat_usage" else settings.embedding_model,
+        tokens_in=prompt if isinstance(prompt, int) else None,
+        tokens_out=completion if isinstance(completion, int) else None,
     )
 
 

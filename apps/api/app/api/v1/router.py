@@ -9,6 +9,7 @@ from app.api.v1 import (
     crm,
     health,
     hooks,
+    intelligence,
     knowledge,
     organizations,
 )
@@ -23,4 +24,5 @@ router.include_router(assistant.router)
 router.include_router(agents.router)
 router.include_router(approvals.router)
 router.include_router(automation.router)
+router.include_router(intelligence.router)
 router.include_router(hooks.router)

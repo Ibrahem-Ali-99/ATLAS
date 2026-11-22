@@ -1,0 +1,15 @@
+{
+  "version": "ai-benchmark-1",
+  "method": "deterministic_double",
+  "notice": "These checks use local code and doubles. They are not measurements of a live model.",
+  "scenarios": [
+    {"id": "rag-empty-refusal", "group": "rag", "check": "empty_refusal"},
+    {"id": "rag-feature-isolation", "group": "rag", "check": "feature_isolation"},
+    {"id": "agent-baseline-stable", "group": "agents", "check": "baseline_stable"},
+    {"id": "agent-signature-mismatch", "group": "agents", "check": "signature_mismatch"},
+    {"id": "reliability-missing-llm", "group": "reliability", "check": "missing_llm"},
+    {"id": "reliability-uncertain-not-retried", "group": "reliability", "check": "uncertain_not_retried"},
+    {"id": "reliability-redact-secrets", "group": "reliability", "check": "redact_secrets"},
+    {"id": "reliability-duplicate-dataset", "group": "reliability", "check": "dataset_repeat"}
+  ]
+}
