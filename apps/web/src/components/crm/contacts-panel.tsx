@@ -1,0 +1,265 @@
+"use client";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+
+import { Pager } from "@/components/pager";
+import { RequestError } from "@/components/request-error";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { createContact, deleteContact, listCompanies, listContacts, updateContact } from "@/lib/records-api";
+import { blankToNull, type Contact } from "@/lib/records";
+
+const schema = z.object({
+  full_name: z.string().trim().min(1, "Name is required").max(200),
+  email: z.string().max(320),
+  phone: z.string().max(40),
+  title: z.string().max(120),
+  company_id: z.string(),
+});
+
+type FormValues = z.infer<typeof schema>;
+
+function payload(values: FormValues) {
+  return {
+    full_name: values.full_name.trim(),
+    email: blankToNull(values.email),
+    phone: blankToNull(values.phone),
+    title: blankToNull(values.title),
+    company_id: blankToNull(values.company_id),
+  };
+}
+
+export function ContactsPanel({ organizationId }: { organizationId: string }) {
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [open, setOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const contacts = useQuery({
+    queryKey: ["contacts", organizationId, query, page],
+    queryFn: () => listContacts(organizationId, { q: query, page }),
+  });
+  const companies = useQuery({
+    queryKey: ["companies", organizationId, "options"],
+    queryFn: () => listCompanies(organizationId, { pageSize: 100 }),
+  });
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const selected = contacts.data?.items.find((item) => item.id === selectedId) ?? null;
+  const companyName = (companyId: string | null) =>
+    companies.data?.items.find((company) => company.id === companyId)?.name ?? "—";
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
+      <section className="rounded-xl border border-border bg-card">
+        <div className="flex flex-col gap-3 p-4 sm:flex-row">
+          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search contacts" aria-label="Search contacts" />
+          <Button type="button" onClick={() => setOpen(true)}>New contact</Button>
+        </div>
+        {contacts.isPending ? <div className="space-y-2 px-4 pb-4"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div> : null}
+        {contacts.isError ? <div className="px-4 pb-4"><RequestError error={contacts.error} /></div> : null}
+        {contacts.data && contacts.data.items.length === 0 ? (
+          <p className="px-4 pb-6 text-sm text-muted-foreground">No contacts match this search.</p>
+        ) : null}
+        {contacts.data && contacts.data.items.length > 0 ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Company</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {contacts.data.items.map((contact) => (
+                <TableRow key={contact.id} className={contact.id === selectedId ? "bg-accent/40" : undefined}>
+                  <TableCell>
+                    <button type="button" className="text-left font-medium" onClick={() => setSelectedId(contact.id)}>
+                      {contact.full_name}
+                    </button>
+                  </TableCell>
+                  <TableCell>{contact.email ?? "—"}</TableCell>
+                  <TableCell>{companyName(contact.company_id)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : null}
+        {contacts.data ? <Pager page={contacts.data.page} pageSize={contacts.data.page_size} total={contacts.data.total} onPage={setPage} /> : null}
+      </section>
+      {selected ? (
+        <ContactEditor
+          key={selected.id}
+          organizationId={organizationId}
+          contact={selected}
+          companies={companies.data?.items ?? []}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: ["contacts", organizationId] })}
+          onDeleted={() => {
+            setSelectedId(null);
+            void queryClient.invalidateQueries({ queryKey: ["contacts", organizationId] });
+          }}
+        />
+      ) : (
+        <aside className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+          Select a contact to view and edit it.
+        </aside>
+      )}
+      <ContactDialog
+        organizationId={organizationId}
+        companies={companies.data?.items ?? []}
+        open={open}
+        onOpenChange={setOpen}
+        onCreated={(contact) => {
+          setSelectedId(contact.id);
+          void queryClient.invalidateQueries({ queryKey: ["contacts", organizationId] });
+        }}
+      />
+    </div>
+  );
+}
+
+function ContactDialog({
+  organizationId,
+  companies,
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  organizationId: string;
+  companies: { id: string; name: string }[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: (contact: Contact) => void;
+}) {
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: { full_name: "", email: "", phone: "", title: "", company_id: "" },
+  });
+  const mutation = useMutation({
+    mutationFn: (values: FormValues) => createContact(organizationId, payload(values)),
+    onSuccess: (contact) => {
+      form.reset();
+      onOpenChange(false);
+      onCreated(contact);
+    },
+  });
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New contact</DialogTitle>
+          <DialogDescription>Contacts belong to the signed-in organization.</DialogDescription>
+        </DialogHeader>
+        <ContactFields form={form} companies={companies} onSubmit={(values) => mutation.mutate(values)} />
+        {mutation.isError ? <RequestError error={mutation.error} /> : null}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" form="contact-create" disabled={mutation.isPending}>{mutation.isPending ? "Saving…" : "Create"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ContactEditor({
+  organizationId,
+  contact,
+  companies,
+  onSaved,
+  onDeleted,
+}: {
+  organizationId: string;
+  contact: Contact;
+  companies: { id: string; name: string }[];
+  onSaved: () => void;
+  onDeleted: () => void;
+}) {
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      full_name: contact.full_name,
+      email: contact.email ?? "",
+      phone: contact.phone ?? "",
+      title: contact.title ?? "",
+      company_id: contact.company_id ?? "",
+    },
+  });
+  const save = useMutation({
+    mutationFn: (values: FormValues) => updateContact(organizationId, contact.id, payload(values)),
+    onSuccess: onSaved,
+  });
+  const remove = useMutation({ mutationFn: () => deleteContact(organizationId, contact.id), onSuccess: onDeleted });
+  return (
+    <aside className="rounded-xl border border-border bg-card p-6">
+      <h2 className="text-base font-semibold">{contact.full_name}</h2>
+      <div className="mt-4">
+        <ContactFields form={form} formId="contact-edit" companies={companies} onSubmit={(values) => save.mutate(values)} />
+      </div>
+      {save.isError ? <div className="mt-3"><RequestError error={save.error} /></div> : null}
+      {remove.isError ? <div className="mt-3"><RequestError error={remove.error} /></div> : null}
+      <div className="mt-4 flex gap-2">
+        <Button type="submit" form="contact-edit" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
+        <Button type="button" variant="outline" disabled={remove.isPending} onClick={() => remove.mutate()}>Delete</Button>
+      </div>
+    </aside>
+  );
+}
+
+function ContactFields({
+  form,
+  companies,
+  formId = "contact-create",
+  onSubmit,
+}: {
+  form: ReturnType<typeof useForm<FormValues>>;
+  companies: { id: string; name: string }[];
+  formId?: string;
+  onSubmit: (values: FormValues) => void;
+}) {
+  return (
+    <form id={formId} className="grid gap-3" onSubmit={form.handleSubmit(onSubmit)}>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${formId}-name`}>Name</Label>
+        <Input id={`${formId}-name`} {...form.register("full_name")} />
+        {form.formState.errors.full_name ? <p className="text-sm text-red-300">{form.formState.errors.full_name.message}</p> : null}
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${formId}-email`}>Email</Label>
+        <Input id={`${formId}-email`} {...form.register("email")} />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${formId}-phone`}>Phone</Label>
+        <Input id={`${formId}-phone`} {...form.register("phone")} />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${formId}-title`}>Title</Label>
+        <Input id={`${formId}-title`} {...form.register("title")} />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${formId}-company`}>Company</Label>
+        <select id={`${formId}-company`} className="h-10 rounded-md border border-input bg-background px-3 text-sm" {...form.register("company_id")}>
+          <option value="">No company</option>
+          {companies.map((company) => (
+            <option key={company.id} value={company.id}>{company.name}</option>
+          ))}
+        </select>
+      </div>
+    </form>
+  );
+}

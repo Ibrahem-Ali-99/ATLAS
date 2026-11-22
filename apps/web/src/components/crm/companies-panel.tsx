@@ -1,0 +1,293 @@
+"use client";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+
+import { Pager } from "@/components/pager";
+import { RequestError } from "@/components/request-error";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
+import { createCompany, deleteCompany, listCompanies, updateCompany } from "@/lib/records-api";
+import { blankToNull, type Company } from "@/lib/records";
+
+const schema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(200),
+  website: z.string().max(300),
+  industry: z.string().max(120),
+  notes: z.string().max(4000),
+});
+
+type FormValues = z.infer<typeof schema>;
+
+function valuesOf(company?: Company): FormValues {
+  return {
+    name: company?.name ?? "",
+    website: company?.website ?? "",
+    industry: company?.industry ?? "",
+    notes: company?.notes ?? "",
+  };
+}
+
+function payload(values: FormValues) {
+  return {
+    name: values.name.trim(),
+    website: blankToNull(values.website),
+    industry: blankToNull(values.industry),
+    notes: blankToNull(values.notes),
+  };
+}
+
+export function CompaniesPanel({ organizationId }: { organizationId: string }) {
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [open, setOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const companies = useQuery({
+    queryKey: ["companies", organizationId, query, page],
+    queryFn: () => listCompanies(organizationId, { q: query, page }),
+  });
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const selected = companies.data?.items.find((item) => item.id === selectedId) ?? null;
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
+      <section className="rounded-xl border border-border bg-card">
+        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search companies"
+            aria-label="Search companies"
+          />
+          <Button type="button" onClick={() => setOpen(true)}>
+            New company
+          </Button>
+        </div>
+        {companies.isPending ? (
+          <div className="space-y-2 px-4 pb-4">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+          </div>
+        ) : null}
+        {companies.isError ? (
+          <div className="px-4 pb-4">
+            <RequestError error={companies.error} />
+          </div>
+        ) : null}
+        {companies.data && companies.data.items.length === 0 ? (
+          <p className="px-4 pb-6 text-sm text-muted-foreground">No companies match this search.</p>
+        ) : null}
+        {companies.data && companies.data.items.length > 0 ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Industry</TableHead>
+                <TableHead>Website</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {companies.data.items.map((company) => (
+                <TableRow
+                  key={company.id}
+                  className={company.id === selectedId ? "bg-accent/40" : undefined}
+                  onClick={() => setSelectedId(company.id)}
+                >
+                  <TableCell>
+                    <button type="button" className="text-left font-medium" onClick={() => setSelectedId(company.id)}>
+                      {company.name}
+                    </button>
+                  </TableCell>
+                  <TableCell>{company.industry ?? "—"}</TableCell>
+                  <TableCell>{company.website ?? "—"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : null}
+        {companies.data ? (
+          <Pager page={companies.data.page} pageSize={companies.data.page_size} total={companies.data.total} onPage={setPage} />
+        ) : null}
+      </section>
+      <CompanyEditor
+        organizationId={organizationId}
+        company={selected}
+        onDeleted={() => {
+          setSelectedId(null);
+          void queryClient.invalidateQueries({ queryKey: ["companies", organizationId] });
+        }}
+        onSaved={() => void queryClient.invalidateQueries({ queryKey: ["companies", organizationId] })}
+      />
+      <CompanyDialog
+        organizationId={organizationId}
+        open={open}
+        onOpenChange={setOpen}
+        onCreated={(company) => {
+          setSelectedId(company.id);
+          void queryClient.invalidateQueries({ queryKey: ["companies", organizationId] });
+        }}
+      />
+    </div>
+  );
+}
+
+function CompanyDialog({
+  organizationId,
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  organizationId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: (company: Company) => void;
+}) {
+  const form = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: valuesOf() });
+  const mutation = useMutation({
+    mutationFn: (values: FormValues) => createCompany(organizationId, payload(values)),
+    onSuccess: (company) => {
+      form.reset(valuesOf());
+      onOpenChange(false);
+      onCreated(company);
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New company</DialogTitle>
+          <DialogDescription>The company is saved in this organization only.</DialogDescription>
+        </DialogHeader>
+        <CompanyFields form={form} onSubmit={(values) => mutation.mutate(values)} />
+        {mutation.isError ? <RequestError error={mutation.error} /> : null}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="submit" form="company-create" disabled={mutation.isPending}>
+            {mutation.isPending ? "Saving…" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CompanyEditor({
+  organizationId,
+  company,
+  onSaved,
+  onDeleted,
+}: {
+  organizationId: string;
+  company: Company | null;
+  onSaved: () => void;
+  onDeleted: () => void;
+}) {
+  if (!company) {
+    return (
+      <aside className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+        Select a company to view and edit it.
+      </aside>
+    );
+  }
+  return (
+    <CompanyEditorForm
+      key={company.id}
+      organizationId={organizationId}
+      company={company}
+      onSaved={onSaved}
+      onDeleted={onDeleted}
+    />
+  );
+}
+
+function CompanyEditorForm({
+  organizationId,
+  company,
+  onSaved,
+  onDeleted,
+}: {
+  organizationId: string;
+  company: Company;
+  onSaved: () => void;
+  onDeleted: () => void;
+}) {
+  const form = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: valuesOf(company) });
+  const save = useMutation({
+    mutationFn: (values: FormValues) => updateCompany(organizationId, company.id, payload(values)),
+    onSuccess: onSaved,
+  });
+  const remove = useMutation({ mutationFn: () => deleteCompany(organizationId, company.id), onSuccess: onDeleted });
+
+  return (
+    <aside className="rounded-xl border border-border bg-card p-6">
+      <h2 className="text-base font-semibold">{company.name}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Updated {new Date(company.updated_at).toLocaleString()}</p>
+      <div className="mt-4">
+        <CompanyFields form={form} formId="company-edit" onSubmit={(values) => save.mutate(values)} />
+      </div>
+      {save.isError ? <div className="mt-3"><RequestError error={save.error} /></div> : null}
+      {remove.isError ? <div className="mt-3"><RequestError error={remove.error} /></div> : null}
+      <div className="mt-4 flex gap-2">
+        <Button type="submit" form="company-edit" disabled={save.isPending}>
+          {save.isPending ? "Saving…" : "Save"}
+        </Button>
+        <Button type="button" variant="outline" disabled={remove.isPending} onClick={() => remove.mutate()}>
+          Delete
+        </Button>
+      </div>
+    </aside>
+  );
+}
+
+function CompanyFields({
+  form,
+  formId = "company-create",
+  onSubmit,
+}: {
+  form: ReturnType<typeof useForm<FormValues>>;
+  formId?: string;
+  onSubmit: (values: FormValues) => void;
+}) {
+  return (
+    <form id={formId} className="grid gap-3" onSubmit={form.handleSubmit(onSubmit)}>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${formId}-name`}>Name</Label>
+        <Input id={`${formId}-name`} {...form.register("name")} />
+        {form.formState.errors.name ? <RequestError error={new Error(form.formState.errors.name.message)} /> : null}
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${formId}-industry`}>Industry</Label>
+        <Input id={`${formId}-industry`} {...form.register("industry")} />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${formId}-website`}>Website</Label>
+        <Input id={`${formId}-website`} {...form.register("website")} />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${formId}-notes`}>Notes</Label>
+        <Textarea id={`${formId}-notes`} {...form.register("notes")} />
+      </div>
+    </form>
+  );
+}

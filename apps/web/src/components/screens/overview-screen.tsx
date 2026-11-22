@@ -57,7 +57,7 @@ export function OverviewScreen() {
         <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           {user ? `Signed in as ${user.full_name}. ` : null}
-          Account membership and API status below come from the live API. Later modules do not have data yet.
+          Account membership and API status below come from the live API. CRM, knowledge, and the assistant use the same session.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">

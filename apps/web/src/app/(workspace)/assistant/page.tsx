@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
-import { UnavailableModule } from "@/components/unavailable-module";
+import { AssistantScreen } from "@/components/assistant/assistant-screen";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export const metadata: Metadata = {
   title: "AI Assistant",
@@ -8,9 +10,8 @@ export const metadata: Metadata = {
 
 export default function AssistantPage() {
   return (
-    <UnavailableModule
-      title="AI Assistant"
-      description="Conversational assistance is planned for a later sprint. There is no assistant to message in this release."
-    />
+    <Suspense fallback={<Skeleton className="h-64 w-full" />}>
+      <AssistantScreen />
+    </Suspense>
   );
 }

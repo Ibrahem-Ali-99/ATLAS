@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  BookOpen,
   Bot,
   CheckCheck,
   LayoutDashboard,
@@ -20,6 +21,7 @@ export const navigation: NavItem[] = [
   { href: "/overview", label: "Overview", icon: LayoutDashboard },
   { href: "/assistant", label: "AI Assistant", icon: Sparkles },
   { href: "/crm", label: "CRM", icon: Users },
+  { href: "/knowledge", label: "Knowledge", icon: BookOpen },
   { href: "/agent-runs", label: "Agent Runs", icon: Bot },
   { href: "/workflows", label: "Workflows", icon: Workflow },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
