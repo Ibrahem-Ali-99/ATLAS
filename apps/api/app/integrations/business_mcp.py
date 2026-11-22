@@ -9,9 +9,9 @@ from typing import Any
 from mcp import Client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
-from app.core.config import get_settings
 from app.integrations.mcp_runtime import (
     log_mcp_status,
+    mcp_process_env,
     observed_status,
     public_tool_message,
     resolve_mcp_python,
@@ -32,29 +32,8 @@ class TransientToolError(BusinessToolError):
 
 
 def server_parameters(organization_id: uuid.UUID) -> StdioServerParameters:
-    settings = get_settings()
     api_root = Path(__file__).resolve().parents[2]
-    env = {
-        "ATLAS_MCP_ORGANIZATION_ID": str(organization_id),
-        "ATLAS_DATABASE_URL": _env("ATLAS_DATABASE_URL", settings.database_url),
-        "ATLAS_SECRET_KEY": _env("ATLAS_SECRET_KEY", settings.secret_key),
-        "ATLAS_ENVIRONMENT": _env("ATLAS_ENVIRONMENT", settings.environment),
-        "ATLAS_EMBEDDING_PROVIDER": _env("ATLAS_EMBEDDING_PROVIDER", settings.embedding_provider),
-        "ATLAS_LLM_PROVIDER": _env("ATLAS_LLM_PROVIDER", settings.llm_provider),
-        "ATLAS_LLM_BASE_URL": _env("ATLAS_LLM_BASE_URL", settings.llm_base_url),
-        "ATLAS_LLM_MODEL": _env("ATLAS_LLM_MODEL", settings.llm_model),
-        "ATLAS_PUBLIC_DEMO": "true" if settings.public_demo else "false",
-        "ATLAS_EMBEDDING_API_KEY": _env("ATLAS_EMBEDDING_API_KEY", settings.embedding_api_key),
-        "ATLAS_EMBEDDING_BASE_URL": _env("ATLAS_EMBEDDING_BASE_URL", settings.embedding_base_url),
-        "ATLAS_EMBEDDING_MODEL": _env("ATLAS_EMBEDDING_MODEL", settings.embedding_model),
-        "ATLAS_EMBEDDING_DIMENSIONS": _env(
-            "ATLAS_EMBEDDING_DIMENSIONS", str(settings.embedding_dimensions)
-        ),
-        "ATLAS_MAX_COSINE_DISTANCE": _env(
-            "ATLAS_MAX_COSINE_DISTANCE", str(settings.max_cosine_distance)
-        ),
-        "ATLAS_LOG_LEVEL": "WARNING",
-    }
+    env = mcp_process_env(organization_id=str(organization_id))
     command = resolve_mcp_python()
     root = virtualenv_root(command)
     if root is not None:
@@ -171,10 +150,6 @@ def _text(result: Any) -> str:
         if isinstance(text, str):
             parts.append(text)
     return "".join(parts)
-
-
-def _env(name: str, fallback: str) -> str:
-    return os.environ.get(name, fallback)
 
 
 def _trace_tool(organization_id: uuid.UUID, name: str, status: str) -> None:

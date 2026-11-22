@@ -105,13 +105,53 @@ def virtualenv_root(executable: str) -> str | None:
     return str(root)
 
 
+def mcp_process_env(*, organization_id: str | None = None) -> dict[str, str]:
+    """Environment for an MCP child. The chat key is not included."""
+
+    settings = get_settings()
+    env = _process_env()
+    env.update(
+        {
+            "ATLAS_DATABASE_URL": _configured("ATLAS_DATABASE_URL", settings.database_url),
+            "ATLAS_SECRET_KEY": _configured("ATLAS_SECRET_KEY", settings.secret_key),
+            "ATLAS_ENVIRONMENT": _configured("ATLAS_ENVIRONMENT", settings.environment),
+            "ATLAS_EMBEDDING_PROVIDER": _configured(
+                "ATLAS_EMBEDDING_PROVIDER", settings.embedding_provider
+            ),
+            "ATLAS_LLM_PROVIDER": _configured("ATLAS_LLM_PROVIDER", settings.llm_provider),
+            "ATLAS_LLM_BASE_URL": _configured("ATLAS_LLM_BASE_URL", settings.llm_base_url),
+            "ATLAS_LLM_MODEL": _configured("ATLAS_LLM_MODEL", settings.llm_model),
+            "ATLAS_PUBLIC_DEMO": _configured(
+                "ATLAS_PUBLIC_DEMO", "true" if settings.public_demo else "false"
+            ),
+            "ATLAS_EMBEDDING_API_KEY": _configured(
+                "ATLAS_EMBEDDING_API_KEY", settings.embedding_api_key
+            ),
+            "ATLAS_EMBEDDING_BASE_URL": _configured(
+                "ATLAS_EMBEDDING_BASE_URL", settings.embedding_base_url
+            ),
+            "ATLAS_EMBEDDING_MODEL": _configured("ATLAS_EMBEDDING_MODEL", settings.embedding_model),
+            "ATLAS_EMBEDDING_DIMENSIONS": _configured(
+                "ATLAS_EMBEDDING_DIMENSIONS", str(settings.embedding_dimensions)
+            ),
+            "ATLAS_MAX_COSINE_DISTANCE": _configured(
+                "ATLAS_MAX_COSINE_DISTANCE", str(settings.max_cosine_distance)
+            ),
+            "ATLAS_LOG_LEVEL": "WARNING",
+        }
+    )
+    if organization_id is not None:
+        env["ATLAS_MCP_ORGANIZATION_ID"] = organization_id
+    return env
+
+
 def probe_mcp_interpreter(
     executable: str | None = None, *, statement: str = _READY_STATEMENT
 ) -> McpProcessStatus:
     selected = executable or resolve_mcp_python()
     if not Path(selected).is_file():
         return McpProcessStatus(selected, "missing", None, None)
-    env = _process_env()
+    env = mcp_process_env()
     root = virtualenv_root(selected)
     if root is not None:
         env["VIRTUAL_ENV"] = root
@@ -192,6 +232,10 @@ def log_mcp_status(status: McpProcessStatus, *, tool: str | None = None) -> None
 
 def _process_env() -> dict[str, str]:
     return {key: os.environ[key] for key in _INHERITED if key in os.environ}
+
+
+def _configured(name: str, fallback: str) -> str:
+    return os.environ.get(name, fallback)
 
 
 def _exception_type(stderr: str) -> str | None:
