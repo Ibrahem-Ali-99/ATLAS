@@ -1,8 +1,8 @@
 # ATLAS AI
 
-Day 1 foundation for the ATLAS business operations command center: a Next.js dashboard, a FastAPI modular monolith, and PostgreSQL with pgvector.
+ATLAS is a business operations command center: a Next.js dashboard, a FastAPI modular monolith, and PostgreSQL with pgvector.
 
-This release implements authentication, organizations, memberships, session authorization, and dashboard navigation. CRM, AI assistant, agent runs, workflows, analytics, and approvals are visible as labeled empty states. They are not implemented.
+Day 1 covers authentication, organizations, memberships, and the dashboard shell. Day 2 adds organization-scoped CRM, document ingestion with hybrid retrieval, and a read-only assistant. Agent runs, workflows, analytics, and approvals remain empty states. The assistant does not create or change CRM records.
 
 ## Stack
 
@@ -47,7 +47,13 @@ Open http://127.0.0.1:3000. The page and `NEXT_PUBLIC_API_URL` must use the same
 
 If another Postgres instance already owns host port 5432, set `POSTGRES_PORT` and the port in `ATLAS_DATABASE_URL` to a free port, then run `docker compose up -d postgres` again. The API container still reaches Postgres on the internal port 5432.
 
-The API container can be started with `docker compose up --build api` after `.env` exists. It runs migrations on startup. The seed command stays manual because it resets the three synthetic passwords.
+The API container can be started with `docker compose up --build api` after `.env` exists. It runs migrations on startup and stores uploads in the `atlas_uploads` volume. The seed command stays manual because it resets the three synthetic passwords. It also inserts clearly synthetic CRM rows for Atlas Demo and Northwind.
+
+## Documents and the assistant
+
+Uploads accept PDF and UTF-8 text files up to `ATLAS_MAX_UPLOAD_BYTES` (10 MiB by default). Chat and embeddings are OpenAI-compatible HTTP calls. The defaults are `gpt-4o-mini` and `text-embedding-3-small` at `https://api.openai.com/v1`, with embeddings fixed at 1536 dimensions. Leave `ATLAS_LLM_API_KEY` and `ATLAS_EMBEDDING_API_KEY` empty until you have a provider. Empty keys return an error. The API does not invent a successful answer or a citation.
+
+The assistant answers from retrieved document excerpts and from CRM records it is allowed to read. Citations are the retrieved rows, shown separately as company documents or CRM records. A question with no matching records gets an explicit refusal and does not call the model.
 
 ## Synthetic local accounts
 

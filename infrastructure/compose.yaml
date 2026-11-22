@@ -28,6 +28,17 @@ services:
       ATLAS_CORS_ORIGINS: ${ATLAS_CORS_ORIGINS:-http://127.0.0.1:3000,http://localhost:3000}
       ATLAS_COOKIE_SECURE: ${ATLAS_COOKIE_SECURE:-false}
       ATLAS_LOG_LEVEL: ${ATLAS_LOG_LEVEL:-INFO}
+      ATLAS_LLM_BASE_URL: ${ATLAS_LLM_BASE_URL:-https://api.openai.com/v1}
+      ATLAS_LLM_API_KEY: ${ATLAS_LLM_API_KEY:-}
+      ATLAS_LLM_MODEL: ${ATLAS_LLM_MODEL:-gpt-4o-mini}
+      ATLAS_EMBEDDING_BASE_URL: ${ATLAS_EMBEDDING_BASE_URL:-https://api.openai.com/v1}
+      ATLAS_EMBEDDING_API_KEY: ${ATLAS_EMBEDDING_API_KEY:-}
+      ATLAS_EMBEDDING_MODEL: ${ATLAS_EMBEDDING_MODEL:-text-embedding-3-small}
+      ATLAS_EMBEDDING_DIMENSIONS: ${ATLAS_EMBEDDING_DIMENSIONS:-1536}
+      ATLAS_MAX_UPLOAD_BYTES: ${ATLAS_MAX_UPLOAD_BYTES:-10485760}
+      ATLAS_STORAGE_DIR: /var/lib/atlas/storage
+    volumes:
+      - atlas_uploads:/var/lib/atlas/storage
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -49,3 +60,4 @@ services:
 
 volumes:
   atlas_postgres_data:
+  atlas_uploads:
