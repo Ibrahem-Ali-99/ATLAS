@@ -4,10 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
 
-import { PageHeader } from "@/components/page-header";
+import { Pager } from "@/components/pager";
 import { RequestError } from "@/components/request-error";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { executionSummary, type Approval, type ApprovalStatus } from "@/lib/agent";
@@ -70,15 +70,27 @@ function ApprovalsBody({
 }) {
   const queryClient = useQueryClient();
   const executeGuard = useRef(false);
+  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState("");
   const approvals = useQuery({
-    queryKey: ["approvals", organizationId, status],
-    queryFn: () => listApprovals(organizationId, { status }),
+    queryKey: ["approvals", organizationId, status, page],
+    queryFn: () => listApprovals(organizationId, { status, page }),
   });
   const automations = useQuery({
     queryKey: ["automations", organizationId],
     queryFn: () => getAutomations(organizationId),
   });
-  const selected = approvals.data?.items.find((item) => item.id === selectedId) ?? null;
+  const needle = query.trim().toLowerCase();
+  const visible = (approvals.data?.items ?? []).filter((approval) => {
+    if (needle.length === 0) {
+      return true;
+    }
+    const haystack = `${approval.action_type} ${JSON.stringify(approval.payload)}`.toLowerCase();
+    return haystack.includes(needle);
+  });
+  const selected = visible.find((item) => item.id === selectedId)
+    ?? approvals.data?.items.find((item) => item.id === selectedId)
+    ?? null;
   const decide = useMutation({
     mutationFn: (decision: "approve" | "reject") => {
       if (!selected) {
@@ -130,18 +142,30 @@ function ApprovalsBody({
   });
 
   return (
-    <div className="flex w-full flex-col gap-6">
-    <PageHeader title="Approvals">
-      Approve stores a decision. Execute writes the payload. Reject writes nothing. Email and calendar labels come from the current automation mode.
-    </PageHeader>
+    <div className="flex w-full min-w-0 flex-col gap-6">
+    <header>
+      <h1 className="text-[31px] leading-none text-foreground">Decisions</h1>
+      <p className="mt-3 max-w-3xl text-sm text-muted-foreground">
+        A person approves, rejects, or executes the stored proposal. Approve stores a decision. Execute writes the payload. Reject writes nothing.
+      </p>
+    </header>
     <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-      <section className="rounded-xl border border-border bg-card">
-        <div className="p-4">
+      <section className="min-w-0 rounded-[10px] bg-muted">
+        <div className="flex flex-col gap-3 p-4">
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Filter loaded decisions"
+            aria-label="Filter loaded decisions"
+          />
           <select
             className={selectClass}
             aria-label="Filter approvals"
             value={status}
-            onChange={(event) => onStatus(event.target.value as ApprovalStatus | "")}
+            onChange={(event) => {
+              onStatus(event.target.value as ApprovalStatus | "");
+              setPage(1);
+            }}
           >
             <option value="">All decisions</option>
             <option value="pending">Pending</option>
@@ -156,11 +180,11 @@ function ApprovalsBody({
         </div>
         {approvals.isPending ? <div className="px-4 pb-4"><Skeleton className="h-8 w-full" /></div> : null}
         {approvals.isError ? <div className="px-4 pb-4"><RequestError error={approvals.error} /></div> : null}
-        {approvals.data && approvals.data.items.length === 0 ? (
+        {approvals.data && visible.length === 0 ? (
           <p className="px-4 pb-6 text-sm text-muted-foreground">No approvals match this filter.</p>
         ) : null}
-        <div className="divide-y divide-border">
-          {approvals.data?.items.map((approval) => (
+        <div>
+          {visible.map((approval) => (
             <button
               key={approval.id}
               type="button"
@@ -169,13 +193,18 @@ function ApprovalsBody({
             >
               <span className="font-medium">{approval.action_type.replaceAll("_", " ")}</span>
               <span className="mt-1 block text-sm text-muted-foreground">
-                {approval.status} · {new Date(approval.created_at).toLocaleString()}
+                {scopeLabel(approval.action_type, automations.data?.email_mode, automations.data?.calendar_provider)}
+                {" · "}
+                <span className={statusClass(approval.status)}>{approval.status}</span>
               </span>
             </button>
           ))}
         </div>
+        {approvals.data ? (
+          <Pager page={approvals.data.page} pageSize={approvals.data.page_size} total={approvals.data.total} onPage={setPage} />
+        ) : null}
       </section>
-      <section className="rounded-xl border border-border bg-card p-4">
+      <section className="rounded-[10px] bg-muted p-4">
         {notice ? <p className="mb-3 text-sm text-muted-foreground">{notice}</p> : null}
         {!selected ? <p className="text-sm text-muted-foreground">Select a proposal to see its exact payload.</p> : null}
         {selected ? (
@@ -234,13 +263,13 @@ function ApprovalDetail({
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold">{approval.action_type.replaceAll("_", " ")}</h2>
+          <h2 className="text-lg text-foreground">{approval.action_type.replaceAll("_", " ")}</h2>
+          <p className={`mt-1 text-xs uppercase tracking-[0.12em] ${approval.action_type === "prepare_customer_response" || approval.action_type === "request_appointment" ? "text-warning" : "text-success"}`}>
+            {scopeLabel(approval.action_type, emailMode, calendarProvider)}
+          </p>
           <p className="text-sm text-muted-foreground">Requested {new Date(approval.created_at).toLocaleString()}</p>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <Badge>{approval.status}</Badge>
-          <Badge variant="secondary">{scopeLabel(approval.action_type, emailMode, calendarProvider)}</Badge>
-        </div>
+        <p className={`text-xs uppercase tracking-[0.12em] ${statusClass(approval.status)}`}>{approval.status}</p>
       </div>
       <dl className="grid gap-3 sm:grid-cols-2">
         {payloadFields(approval.payload).map((field) => (
@@ -257,8 +286,9 @@ function ApprovalDetail({
         {approval.executed_at ? <div>Executed {new Date(approval.executed_at).toLocaleString()}</div> : null}
         {approval.decision_note ? <div>Note: {approval.decision_note}</div> : null}
       </dl>
+      <p className="text-xs text-subtle">Previous field values are not stored on this proposal. The fields below are the stored payload.</p>
       <p className="text-sm leading-6 text-muted-foreground">{sideEffect(approval.action_type, approval.status)}</p>
-      <pre className="overflow-x-auto rounded-md bg-background p-3 text-xs">{JSON.stringify(approval.payload, null, 2)}</pre>
+      <pre className="overflow-x-auto rounded-[10px] bg-background p-3 text-xs">{JSON.stringify(approval.payload, null, 2)}</pre>
       {executionSummary(approval.execution_result) ? (
         <p className="text-sm text-muted-foreground">{executionSummary(approval.execution_result)}</p>
       ) : null}
@@ -292,6 +322,19 @@ function ApprovalDetail({
       {error ? <RequestError error={error} /> : null}
     </div>
   );
+}
+
+function statusClass(status: string): string {
+  if (status === "executed" || status === "approved" || status === "succeeded") {
+    return "text-success";
+  }
+  if (status === "failed" || status === "needs_attention" || status === "rejected") {
+    return "text-destructive";
+  }
+  if (status === "pending" || status === "expired") {
+    return "text-warning";
+  }
+  return "text-primary";
 }
 
 function scopeLabel(actionType: string, emailMode: string | undefined, calendarProvider: string | undefined): string {

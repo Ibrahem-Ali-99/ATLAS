@@ -191,7 +191,15 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
     .locator("pre");
   await expect(leadProposal).toContainText(northPierId);
   await expect(leadProposal).toContainText("Rates for bonded storage");
+  const approvedDecision = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().includes(`/approvals/${leadApproval?.id}/approve`) &&
+      response.ok(),
+  );
   await page.getByRole("button", { name: "Approve" }).click();
+  await approvedDecision;
+  await expect(page.getByText("Approved. Execute writes the stored payload. Nothing is sent until then.")).toBeVisible();
   const approvedApprovals = page.waitForResponse(
     (response) =>
       response.request().method() === "GET" &&

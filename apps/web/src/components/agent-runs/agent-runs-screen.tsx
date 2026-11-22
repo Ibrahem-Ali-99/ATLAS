@@ -1,17 +1,18 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useState } from "react";
 
-import { PageHeader } from "@/components/page-header";
+import { Pager } from "@/components/pager";
 import { RequestError } from "@/components/request-error";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getAgentRun, listAgentRuns, resumeAgentRun, startAgentRun } from "@/lib/agent-api";
-import { executionSummary, type AgentRunDetail, type RunStatus } from "@/lib/agent";
+import { executionSummary, type AgentEvent, type AgentRunDetail, type RunStatus } from "@/lib/agent";
 import { getDiagnosticRun } from "@/lib/intelligence";
 import { listInquiries } from "@/lib/records-api";
 import { useWorkspace } from "@/lib/use-workspace";
@@ -59,9 +60,11 @@ function AgentRunsBody({
   onOpen: (open: boolean) => void;
 }) {
   const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [inquiryQuery, setInquiryQuery] = useState("");
   const runs = useQuery({
-    queryKey: ["agent-runs", organizationId, status],
-    queryFn: () => listAgentRuns(organizationId, { status }),
+    queryKey: ["agent-runs", organizationId, status, page],
+    queryFn: () => listAgentRuns(organizationId, { status, page }),
   });
   const detail = useQuery({
     queryKey: ["agent-run", organizationId, selectedId],
@@ -77,19 +80,36 @@ function AgentRunsBody({
     },
   });
 
+  const needle = inquiryQuery.trim().toLowerCase();
+  const visible = (runs.data?.items ?? []).filter((run) =>
+    needle.length === 0 ? true : run.inquiry_subject.toLowerCase().includes(needle),
+  );
+
   return (
-    <div className="flex w-full flex-col gap-6">
-    <PageHeader title="Agent Runs">
-      Each run reads one inquiry, proposes changes, and waits. Nothing in CRM, email, or the calendar is written until an approval is executed.
-    </PageHeader>
-    <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.9fr)]">
-      <section className="rounded-xl border border-border bg-card">
+    <div className="flex w-full min-w-0 flex-col gap-6">
+    <header>
+      <h1 className="text-[31px] leading-none text-foreground">Agent runs</h1>
+      <p className="mt-3 max-w-3xl text-sm text-muted-foreground">
+        One inquiry, stored steps, and proposals that wait for a person. Nothing is written until an approval is executed.
+      </p>
+    </header>
+    <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
+      <section className="min-w-0 overflow-x-auto rounded-[10px] bg-muted">
         <div className="flex flex-col gap-3 p-4 sm:flex-row">
+          <Input
+            value={inquiryQuery}
+            onChange={(event) => setInquiryQuery(event.target.value)}
+            placeholder="Filter loaded inquiries"
+            aria-label="Filter loaded inquiries"
+          />
           <select
             className={selectClass}
             aria-label="Filter runs by status"
             value={status}
-            onChange={(event) => onStatus(event.target.value as RunStatus | "")}
+            onChange={(event) => {
+              onStatus(event.target.value as RunStatus | "");
+              setPage(1);
+            }}
           >
             <option value="">All statuses</option>
             <option value="running">Running</option>
@@ -103,10 +123,11 @@ function AgentRunsBody({
         </div>
         {runs.isPending ? <div className="px-4 pb-4"><Skeleton className="h-8 w-full" /></div> : null}
         {runs.isError ? <div className="px-4 pb-4"><RequestError error={runs.error} /></div> : null}
-        {runs.data && runs.data.items.length === 0 ? (
+        <p className="px-4 pb-2 text-xs text-subtle">Newest first. The inquiry field filters this page. Status asks the server for another page.</p>
+        {runs.data && visible.length === 0 ? (
           <p className="px-4 pb-6 text-sm text-muted-foreground">No agent runs match this filter.</p>
         ) : null}
-        {runs.data && runs.data.items.length > 0 ? (
+        {visible.length > 0 ? (
           <Table>
             <TableHeader>
               <TableRow>
@@ -116,7 +137,7 @@ function AgentRunsBody({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {runs.data.items.map((run) => (
+              {visible.map((run) => (
                 <TableRow key={run.id} className={run.id === selectedId ? "bg-accent/40" : undefined}>
                   <TableCell>
                     <button type="button" className="text-left font-medium" onClick={() => onSelect(run.id)}>
@@ -124,7 +145,7 @@ function AgentRunsBody({
                     </button>
                   </TableCell>
                   <TableCell>
-                    <Badge>{run.status.replaceAll("_", " ")}</Badge>
+                    <p className={`text-xs uppercase tracking-[0.12em] ${statusClass(run.status)}`}>{run.status.replaceAll("_", " ")}</p>
                     {run.error_code ? <p className="mt-1 text-xs text-muted-foreground">{run.error_code}</p> : null}
                   </TableCell>
                   <TableCell>{new Date(run.started_at).toLocaleString()}</TableCell>
@@ -133,8 +154,11 @@ function AgentRunsBody({
             </TableBody>
           </Table>
         ) : null}
+        {runs.data ? (
+          <Pager page={runs.data.page} pageSize={runs.data.page_size} total={runs.data.total} onPage={setPage} />
+        ) : null}
       </section>
-      <section className="rounded-xl border border-border bg-card p-4">
+      <section className="rounded-[10px] bg-muted p-4">
         {detail.isPending && selectedId ? <Skeleton className="h-32 w-full" /> : null}
         {detail.isError ? <RequestError error={detail.error} /> : null}
         {!selectedId ? <p className="text-sm text-muted-foreground">Select a run to inspect its steps.</p> : null}
@@ -160,6 +184,87 @@ function AgentRunsBody({
     </div>
     </div>
   );
+}
+
+function statusClass(status: string): string {
+  if (status === "completed" || status === "executed" || status === "approved") {
+    return "text-success";
+  }
+  if (status === "failed" || status === "needs_attention" || status === "rejected") {
+    return "text-destructive";
+  }
+  if (status === "awaiting_approval" || status === "pending") {
+    return "text-warning";
+  }
+  return "text-primary";
+}
+
+const stepLabels: Record<string, string> = {
+  load_inquiry: "Inquiry loaded",
+  classify: "Inquiry classified",
+  retrieve_knowledge: "Company knowledge retrieved",
+  lookup_customer: "Customer looked up",
+  qualify: "Qualification recorded",
+  propose: "Actions proposed",
+  await_approval: "Waiting for a person",
+  execute: "Approved actions written",
+  record_outcome: "Outcome recorded",
+  run: "Run stopped",
+  lead_score: "Lead score recorded",
+};
+
+function stepTitle(step: string): string {
+  return stepLabels[step] ?? step.replaceAll("_", " ");
+}
+
+function knowledgeHits(detail: Record<string, unknown>): { title: string; excerpt: string }[] {
+  const hits = detail.hits;
+  if (!Array.isArray(hits)) {
+    return [];
+  }
+  return hits.flatMap((hit) => {
+    if (!hit || typeof hit !== "object") {
+      return [];
+    }
+    const row = hit as Record<string, unknown>;
+    const title = typeof row.document_title === "string" ? row.document_title : "Untitled document";
+    const excerpt = typeof row.excerpt === "string" ? row.excerpt : "";
+    return [{ title, excerpt }];
+  });
+}
+
+function eventOutcome(event: AgentEvent): string {
+  if (event.error_message) {
+    return event.error_message;
+  }
+  const detail = event.detail;
+  if (event.step === "retrieve_knowledge") {
+    const hits = knowledgeHits(detail);
+    return hits.length === 0 ? "No matching document was stored." : hits.map((hit) => hit.title).join(", ");
+  }
+  if (event.step === "lookup_customer") {
+    const lead = typeof detail.lead_id === "string" ? `lead ${detail.lead_id}` : "no existing lead";
+    const contact = typeof detail.contact_id === "string" ? `contact ${detail.contact_id}` : "no contact";
+    return `${contact} · ${lead}`;
+  }
+  if (event.step === "classify") {
+    const category = typeof detail.category === "string" ? detail.category : event.status;
+    const contact = typeof detail.contact_name === "string" ? detail.contact_name : "";
+    return contact ? `${category} · ${contact}` : category;
+  }
+  if (event.step === "propose" && Array.isArray(detail.actions)) {
+    return detail.actions.filter((item) => typeof item === "string").join(" · ").replaceAll("_", " ");
+  }
+  if (event.step === "execute") {
+    return `${detail.executed ?? 0} executed, ${detail.rejected ?? 0} rejected, ${detail.failed ?? 0} failed`;
+  }
+  if (typeof detail.outcome === "string" && detail.outcome) {
+    return detail.outcome;
+  }
+  if (typeof detail.qualification === "string") {
+    return detail.qualification;
+  }
+  return event.status;
 }
 
 function runReason(detail: AgentRunDetail): string {
@@ -229,17 +334,19 @@ function RunDetail({
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold">{detail.run.inquiry_subject}</h2>
+          <h2 className="text-lg text-foreground">{detail.run.inquiry_subject}</h2>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">{runReason(detail)}</p>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">Next: {nextAction(detail)}</p>
+          <p className="mt-1 text-sm leading-6 text-primary">Next: {nextAction(detail)}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Inquiry {detail.run.inquiry_subject}. Related lead {relatedLeadId(detail) ?? "not in the proposal yet"}.
+            <Link className="underline" href="/crm?tab=inquiries">Inquiries</Link>
+            {" · "}
+            Related lead {relatedLeadId(detail) ?? "not in the proposal yet"}.
           </p>
           {detail.run.error_code ? (
             <p className="mt-1 text-sm text-muted-foreground">Code: {detail.run.error_code}</p>
           ) : null}
         </div>
-        <Badge>{detail.run.status.replaceAll("_", " ")}</Badge>
+        <p className={`text-xs uppercase tracking-[0.12em] ${statusClass(detail.run.status)}`}>{detail.run.status.replaceAll("_", " ")}</p>
       </div>
       {canResume ? (
         <div className="space-y-2">
@@ -259,7 +366,13 @@ function RunDetail({
           {trace.data.traces.length === 0 ? <p className="text-sm text-muted-foreground">No operation trace is stored for this run.</p> : null}
           {trace.data.traces.map((item, index) => (
             <p key={`${item.operation}-${index}`} className="text-sm text-muted-foreground">
-              {item.operation} {item.status}. Latency: {item.latency_ms ?? "unavailable"} ms. Tokens: {item.tokens_in ?? "unavailable"}/{item.tokens_out ?? "unavailable"}. Cost: {item.cost_usd ?? "unavailable"}. Langfuse: {item.langfuse_status}
+              {item.operation} {item.status}.
+              {item.latency_ms !== null ? ` ${item.latency_ms} ms.` : " Latency was not recorded."}
+              {item.tokens_in !== null || item.tokens_out !== null
+                ? ` Tokens ${item.tokens_in ?? 0}/${item.tokens_out ?? 0}.`
+                : " Tokens were not recorded."}
+              {item.cost_usd !== null ? ` Cost ${item.cost_usd}.` : ""}
+              {` Langfuse: ${item.langfuse_status}`}
             </p>
           ))}
         </div>
@@ -267,16 +380,20 @@ function RunDetail({
       <div>
         <h3 className="mb-2 text-sm font-medium">Timeline</h3>
         <ol className="space-y-2">
+          {detail.events.length === 0 ? <li className="text-sm text-muted-foreground">No steps are stored for this run.</li> : null}
           {detail.events.map((event) => (
-            <li key={event.id} className="rounded-md border border-border px-3 py-2 text-sm">
+            <li key={event.id} className="rounded-[10px] bg-secondary px-3 py-2 text-sm">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-medium">{event.step}</span>
-                <span className="text-muted-foreground">{new Date(event.created_at).toLocaleString()}</span>
+                <span className="font-medium">{stepTitle(event.step)}</span>
+                <span className={`text-xs uppercase tracking-[0.12em] ${statusClass(event.status)}`}>{event.status}</span>
               </div>
-              <p className="text-muted-foreground">{event.status}{event.error_message ? `: ${event.error_message}` : ""}</p>
-              {Object.keys(event.detail).length > 0 ? (
-                <pre className="mt-2 overflow-x-auto rounded-md bg-background p-2 text-xs">{JSON.stringify(event.detail, null, 2)}</pre>
-              ) : null}
+              <p className="mt-1 text-muted-foreground">{eventOutcome(event)}</p>
+              <p className="mt-1 text-xs text-subtle">{new Date(event.created_at).toLocaleString()}</p>
+              {knowledgeHits(event.detail).map((hit) => (
+                <p key={`${event.id}-${hit.title}`} className="mt-2 whitespace-pre-wrap text-muted-foreground">
+                  {hit.title}{hit.excerpt ? ` — ${hit.excerpt}` : ""}
+                </p>
+              ))}
             </li>
           ))}
         </ol>
@@ -286,12 +403,13 @@ function RunDetail({
         {detail.approvals.length === 0 ? <p className="text-sm text-muted-foreground">No actions have been proposed.</p> : null}
         <div className="space-y-3">
           {detail.approvals.map((approval) => (
-            <article key={approval.id} className="rounded-md border border-border p-3 text-sm">
+            <article key={approval.id} className="rounded-[10px] bg-secondary p-3 text-sm">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <span className="font-medium">{approval.action_type.replaceAll("_", " ")}</span>
-                <Badge variant="secondary">{approval.status}</Badge>
+                <span className={`text-xs uppercase tracking-[0.12em] ${statusClass(approval.status)}`}>{approval.status}</span>
               </div>
-              <pre className="overflow-x-auto rounded-md bg-background p-2 text-xs">{JSON.stringify(approval.payload, null, 2)}</pre>
+              <Link className="text-sm text-primary underline" href={`/approvals?approval=${approval.id}`}>Open the decision</Link>
+              <pre className="mt-2 overflow-x-auto rounded-[10px] bg-background p-2 text-xs">{JSON.stringify(approval.payload, null, 2)}</pre>
               {executionSummary(approval.execution_result) ? (
                 <p className="mt-2 text-muted-foreground">{executionSummary(approval.execution_result)}</p>
               ) : null}
