@@ -121,16 +121,29 @@ def decide(
 def execute_approved(
     db: Session, organization_id: uuid.UUID, approval_id: uuid.UUID
 ) -> dict[str, Any]:
-    """Persist the executing status before the CRM write so a retry cannot apply it twice."""
+    """Commit a CRM write and its approval completion in one transaction.
+
+    A committed ``executing`` row from an older process is not applied again. The
+    business write may already be visible, and this process cannot prove that it is not.
+    """
 
     approval = _locked(db, organization_id, approval_id)
     if approval.status == ApprovalStatus.executed:
         raise AppError(409, "already_executed", "This action was already executed")
+    if approval.status == ApprovalStatus.needs_attention:
+        raise AppError(
+            409, "needs_attention", "The outcome of this action could not be determined"
+        )
     _reject_if_stale(db, approval)
+    if approval.status == ApprovalStatus.executing:
+        approval.status = ApprovalStatus.needs_attention
+        approval.execution_error = "execution_uncertain"
+        db.commit()
+        raise AppError(
+            409, "needs_attention", "The outcome of this action could not be determined"
+        )
     if approval.status != ApprovalStatus.approved:
         raise AppError(409, "invalid_transition", "This approval cannot be executed")
-    approval.status = ApprovalStatus.executing
-    db.commit()
     try:
         result = _apply(db, organization_id, approval)
     except AppError as exc:
@@ -140,11 +153,10 @@ def execute_approved(
         failed.execution_error = exc.message[:500]
         db.commit()
         raise
-    finished = _locked(db, organization_id, approval_id)
-    finished.status = ApprovalStatus.executed
-    finished.execution_result = result
-    finished.executed_at = datetime.now(UTC)
-    finished.execution_error = None
+    approval.status = ApprovalStatus.executed
+    approval.execution_result = result
+    approval.executed_at = datetime.now(UTC)
+    approval.execution_error = None
     db.commit()
     return result
 
@@ -169,7 +181,10 @@ def execute_decisions(
         if row.status == ApprovalStatus.executed:
             executed += 1
             continue
-        if row.status != ApprovalStatus.approved:
+        if row.status == ApprovalStatus.needs_attention:
+            failed += 1
+            continue
+        if row.status not in {ApprovalStatus.approved, ApprovalStatus.executing}:
             raise AppError(409, "invalid_transition", "This approval cannot be executed")
         try:
             execute_approved(db, organization_id, row.id)
@@ -214,7 +229,9 @@ def _reject_if_stale(db: Session, approval: Approval) -> None:
 def _apply(db: Session, organization_id: uuid.UUID, approval: Approval) -> dict[str, Any]:
     payload = approval.payload
     if approval.action_type == ActionType.create_lead:
-        lead = crm.create_lead(db, organization_id, approval.requested_by, _lead_values(payload))
+        lead = crm.create_lead(
+            db, organization_id, approval.requested_by, _lead_values(payload), commit=False
+        )
         return {"lead_id": str(lead.id)}
     if approval.action_type == ActionType.update_lead:
         lead = crm.update_lead(
@@ -222,6 +239,7 @@ def _apply(db: Session, organization_id: uuid.UUID, approval: Approval) -> dict[
             organization_id,
             _uuid_value(payload.get("lead_id")),
             _lead_updates(payload),
+            commit=False,
         )
         return {"lead_id": str(lead.id)}
     if approval.action_type in {
@@ -246,6 +264,7 @@ def _apply(db: Session, organization_id: uuid.UUID, approval: Approval) -> dict[
             lead_id,
             author,
             {"kind": kind, "body": body.strip()[:4000]},
+            commit=False,
         )
         return {"lead_id": str(lead_id), "interaction_id": str(interaction.id)}
     raise AppError(422, "invalid_action", "This action type is not supported")

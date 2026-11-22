@@ -203,8 +203,21 @@ def list_leads(
     return _page(db, query, page, page_size)
 
 
+def _persist(db: Session, row: Any, *, commit: bool) -> None:
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+    db.refresh(row)
+
+
 def create_lead(
-    db: Session, organization_id: uuid.UUID, actor_user_id: uuid.UUID, values: dict[str, object]
+    db: Session,
+    organization_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    values: dict[str, object],
+    *,
+    commit: bool = True,
 ) -> Lead:
     owner_id = values.get("owner_user_id") or actor_user_id
     if not isinstance(owner_id, uuid.UUID):
@@ -219,8 +232,7 @@ def create_lead(
     values["owner_user_id"] = owner_id
     lead = Lead(organization_id=organization_id, **values)
     db.add(lead)
-    db.commit()
-    db.refresh(lead)
+    _persist(db, lead, commit=commit)
     return lead
 
 
@@ -229,7 +241,12 @@ def get_lead(db: Session, organization_id: uuid.UUID, lead_id: uuid.UUID) -> Lea
 
 
 def update_lead(
-    db: Session, organization_id: uuid.UUID, lead_id: uuid.UUID, values: dict[str, object]
+    db: Session,
+    organization_id: uuid.UUID,
+    lead_id: uuid.UUID,
+    values: dict[str, object],
+    *,
+    commit: bool = True,
 ) -> Lead:
     lead = _lead(db, organization_id, lead_id)
     owner_id = values.get("owner_user_id")
@@ -242,8 +259,7 @@ def update_lead(
     if isinstance(contact_id, uuid.UUID):
         _contact(db, organization_id, contact_id)
     _apply(lead, values)
-    db.commit()
-    db.refresh(lead)
+    _persist(db, lead, commit=commit)
     return lead
 
 
@@ -337,6 +353,8 @@ def add_interaction(
     lead_id: uuid.UUID,
     author_user_id: uuid.UUID,
     values: dict[str, object],
+    *,
+    commit: bool = True,
 ) -> Interaction:
     _lead(db, organization_id, lead_id)
     interaction = Interaction(
@@ -346,8 +364,7 @@ def add_interaction(
         **values,
     )
     db.add(interaction)
-    db.commit()
-    db.refresh(interaction)
+    _persist(db, interaction, commit=commit)
     return interaction
 
 

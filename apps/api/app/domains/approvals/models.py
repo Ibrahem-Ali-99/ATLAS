@@ -36,6 +36,7 @@ class ApprovalStatus(enum.StrEnum):
     executed = "executed"
     failed = "failed"
     expired = "expired"
+    needs_attention = "needs_attention"
 
 
 ACTION_TYPE = Enum(

@@ -1,4 +1,6 @@
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -15,7 +17,8 @@ from app.domains.approvals.service import (
     execute_approved,
     execute_decisions,
 )
-from app.domains.crm.models import Lead
+from app.core.database import SessionLocal
+from app.domains.crm.models import Interaction, Lead
 from app.domains.crm.service import create_inquiry
 from app.domains.identity.models import MembershipRole, Organization
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
@@ -211,6 +214,127 @@ def test_resume_of_unknown_run_is_not_found(client: TestClient, db: Session) -> 
         headers=_csrf(ada),
     )
     assert response.status_code == 404
+
+
+def test_crash_before_commit_leaves_the_approval_and_crm_unchanged(db: Session) -> None:
+    approval = _approved(db)
+    original = db.commit
+
+    def crash() -> None:
+        raise RuntimeError("crash")
+
+    db.commit = crash  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="crash"):
+        execute_approved(db, approval.organization_id, approval.id)
+    db.commit = original  # type: ignore[method-assign]
+    db.rollback()
+    stored = db.get(Approval, approval.id)
+    assert stored is not None
+    assert stored.status == ApprovalStatus.approved
+    assert _lead_count(db, approval.organization_id) == 0
+
+    result = execute_approved(db, approval.organization_id, approval.id)
+    assert result["lead_id"]
+    assert _lead_count(db, approval.organization_id) == 1
+    with pytest.raises(AppError) as exc:
+        execute_approved(db, approval.organization_id, approval.id)
+    assert exc.value.code == "already_executed"
+    assert _lead_count(db, approval.organization_id) == 1
+
+
+def test_interaction_crash_does_not_commit_the_history_row(db: Session) -> None:
+    approval = _approved(db)
+    lead_id = execute_approved(db, approval.organization_id, approval.id)["lead_id"]
+    response = create_approval(
+        db,
+        organization_id=approval.organization_id,
+        run_id=approval.run_id,
+        requested_by=approval.requested_by,
+        action_type=ActionType.prepare_customer_response,
+        payload={"lead_id": lead_id, "body": "We can discuss bonded storage."},
+        position=1,
+    )
+    decide(
+        db,
+        response.organization_id,
+        response.id,
+        response.requested_by,
+        approved=True,
+        note=None,
+    )
+    original = db.commit
+
+    def crash() -> None:
+        raise RuntimeError("crash")
+
+    db.commit = crash  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="crash"):
+        execute_approved(db, response.organization_id, response.id)
+    db.commit = original  # type: ignore[method-assign]
+    db.rollback()
+    stored = db.get(Approval, response.id)
+    assert stored is not None
+    assert stored.status == ApprovalStatus.approved
+    total = db.scalar(select(func.count()).select_from(Interaction))
+    assert int(total or 0) == 0
+    execute_approved(db, response.organization_id, response.id)
+    total = db.scalar(select(func.count()).select_from(Interaction))
+    assert int(total or 0) == 1
+
+
+def test_interrupted_execution_is_not_applied_again(db: Session) -> None:
+    approval = _approved(db)
+    approval.status = ApprovalStatus.executing
+    db.commit()
+    with pytest.raises(AppError) as exc:
+        execute_approved(db, approval.organization_id, approval.id)
+    assert exc.value.code == "needs_attention"
+    db.rollback()
+    stored = db.get(Approval, approval.id)
+    assert stored is not None
+    assert stored.status == ApprovalStatus.needs_attention
+    assert _lead_count(db, approval.organization_id) == 0
+
+
+def test_concurrent_execution_writes_one_lead(db: Session) -> None:
+    approval = _approved(db)
+    organization_id = approval.organization_id
+    approval_id = approval.id
+    db.rollback()
+    barrier = threading.Barrier(2)
+
+    def attempt() -> str:
+        session = SessionLocal()
+        try:
+            barrier.wait(timeout=5)
+            try:
+                execute_approved(session, organization_id, approval_id)
+            except AppError as exc:
+                return exc.code
+            return "ok"
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _index: attempt(), range(2)))
+    assert sorted(results) == ["already_executed", "ok"]
+    session = SessionLocal()
+    try:
+        assert _lead_count(session, organization_id) == 1
+    finally:
+        session.close()
+
+
+def _approved(db: Session) -> Approval:
+    approval = _pending(db)
+    return decide(
+        db,
+        approval.organization_id,
+        approval.id,
+        approval.requested_by,
+        approved=True,
+        note=None,
+    )
 
 
 def _lead_count(db: Session, organization_id: uuid.UUID) -> int:
