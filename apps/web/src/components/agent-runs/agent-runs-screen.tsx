@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { Pager } from "@/components/pager";
@@ -23,8 +24,9 @@ const selectClass =
 export function AgentRunsScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
+  const requestedRun = useSearchParams().get("run");
   const [status, setStatus] = useState<RunStatus | "">("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(requestedRun);
   const [open, setOpen] = useState(false);
   if (!organizationId) {
     return <Skeleton className="h-40 w-full" />;
