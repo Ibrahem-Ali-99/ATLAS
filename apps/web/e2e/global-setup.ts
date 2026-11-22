@@ -22,11 +22,21 @@ async function waitForHealth(url: string): Promise<void> {
   throw new Error("The e2e API did not become ready");
 }
 
-function spawnApi(): ChildProcess {
-  return spawn("uv", ["run", "python", "-m", "app.scripts.e2e_server"], {
-    cwd: apiRoot,
-    env: process.env,
-    stdio: "ignore",
+function spawnApi(): Promise<ChildProcess> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("uv", ["run", "python", "-m", "app.scripts.e2e_server"], {
+      cwd: apiRoot,
+      env: process.env,
+      stdio: "ignore",
+      detached: process.platform !== "win32",
+    });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      if (process.platform !== "win32") {
+        child.unref();
+      }
+      resolve(child);
+    });
   });
 }
 
@@ -37,12 +47,13 @@ export default async function globalSetup(): Promise<void> {
     env: process.env,
   });
   const code = await new Promise<number>((resolve) => {
-    prepare.on("exit", (status) => resolve(status ?? 1));
+    prepare.once("error", () => resolve(1));
+    prepare.once("exit", (status) => resolve(status ?? 1));
   });
   if (code !== 0) {
     throw new Error("The e2e database was not prepared");
   }
-  const api = spawnApi();
+  const api = await spawnApi();
   if (api.pid === undefined) {
     throw new Error("The e2e API did not start");
   }

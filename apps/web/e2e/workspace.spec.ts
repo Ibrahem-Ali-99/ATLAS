@@ -1,13 +1,35 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Response } from "@playwright/test";
 
 const shotDir = path.resolve(process.cwd(), "../../docs/demo/screenshots");
 
 async function shot(page: Page, name: string): Promise<void> {
   mkdirSync(shotDir, { recursive: true });
   await page.screenshot({ path: path.join(shotDir, name), fullPage: true });
+}
+
+type LeadRow = { id: string; title: string; notes: string | null };
+type ApprovalRow = {
+  id: string;
+  run_id: string;
+  action_type: string;
+  payload: { lead_id?: string; notes?: string };
+  execution_result?: { lead_id?: string } | null;
+  status?: string;
+};
+
+async function jsonBody<T>(response: Response): Promise<T> {
+  return response.json() as Promise<T>;
+}
+
+async function selectApproval(page: Page, approvalId: string, items: ApprovalRow[]): Promise<void> {
+  const index = items.findIndex((item) => item.id === approvalId);
+  expect(index, approvalId).toBeGreaterThanOrEqual(0);
+  const button = page.locator("section").first().getByRole("button").nth(index);
+  await expect(button).toBeVisible();
+  await button.click();
 }
 
 const stamp = Date.now().toString();
@@ -32,7 +54,15 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByLabel("Search companies").fill(companyName);
   await expect(page.getByRole("button", { name: companyName })).toBeVisible();
 
+  const seededLeads = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" && response.url().includes("/leads") && response.ok(),
+  );
   await page.getByRole("tab", { name: "Leads" }).click();
+  const seeded = await jsonBody<{ items: LeadRow[] }>(await seededLeads);
+  const northPier = seeded.items.find((item) => item.title === "North pier expansion");
+  expect(northPier).toBeTruthy();
+  const northPierId = northPier?.id ?? "";
   await page.getByRole("button", { name: "New lead" }).click();
   await page.getByLabel("Title").fill(leadTitle);
   await page.getByRole("button", { name: "Create" }).click();
@@ -69,25 +99,77 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByRole("link", { name: "Agent Runs" }).click();
   await page.getByRole("button", { name: "Start from inquiry" }).click();
   await page.getByLabel("Inquiry").selectOption({ label: `Bonded storage ${stamp}` });
+  const started = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().includes("/agent-runs") &&
+      response.ok(),
+  );
   await page.getByRole("button", { name: "Start", exact: true }).click();
+  const startedBody = await jsonBody<{ run: { id: string }; approvals: ApprovalRow[] }>(await started);
+  const runId = startedBody.run.id;
+  const leadApproval = startedBody.approvals.find((item) => item.action_type === "update_lead");
+  const responseApproval = startedBody.approvals.find(
+    (item) => item.action_type === "prepare_customer_response",
+  );
+  expect(leadApproval?.run_id).toBe(runId);
+  expect(leadApproval?.payload.lead_id).toBe(northPierId);
+  expect(leadApproval?.payload.notes).toBe("Rates for bonded storage");
+  expect(responseApproval?.run_id).toBe(runId);
   await expect(page.getByRole("cell", { name: "awaiting approval" }).first()).toBeVisible();
   await shot(page, "05-agent-runs.png");
 
+  const pendingApprovals = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.url().includes("/approvals") &&
+      response.url().includes("status=pending") &&
+      response.ok(),
+  );
   await page.getByRole("link", { name: "Approvals" }).click();
-  await page.getByRole("button", { name: /lead/ }).first().click();
+  const pending = await jsonBody<{ items: ApprovalRow[] }>(await pendingApprovals);
+  await selectApproval(page, leadApproval?.id ?? "", pending.items);
+  const leadProposal = page
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: "update lead" }) })
+    .locator("pre");
+  await expect(leadProposal).toContainText(northPierId);
+  await expect(leadProposal).toContainText("Rates for bonded storage");
   await page.getByRole("button", { name: "Approve" }).click();
+  const approvedApprovals = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.url().includes("/approvals") &&
+      response.url().includes("status=approved") &&
+      response.ok(),
+  );
   await page.getByLabel("Filter approvals").selectOption("approved");
-  await page.getByRole("button", { name: /lead/ }).first().click();
+  const approved = await jsonBody<{ items: ApprovalRow[] }>(await approvedApprovals);
+  await selectApproval(page, leadApproval?.id ?? "", approved.items);
   const executed = page.waitForResponse(
     (response) =>
-      response.url().includes("/execute") && response.request().method() === "POST" && response.ok(),
+      response.url().includes(`/approvals/${leadApproval?.id}/execute`) &&
+      response.request().method() === "POST" &&
+      response.ok(),
   );
   await page.getByRole("button", { name: "Execute" }).click();
-  await executed;
+  const executedBody = await jsonBody<ApprovalRow>(await executed);
+  expect(executedBody.status).toBe("executed");
+  expect(executedBody.execution_result?.lead_id).toBe(northPierId);
   await page.getByLabel("Filter approvals").selectOption("executed");
   await expect(page.getByRole("button", { name: "update lead" }).first()).toBeVisible();
+  const refreshedLeads = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.url().includes("/leads") &&
+      !response.url().includes("/leads/") &&
+      response.ok(),
+  );
   await page.getByRole("link", { name: "CRM" }).click();
   await page.getByRole("tab", { name: "Leads" }).click();
+  const refreshed = await jsonBody<{ items: LeadRow[] }>(await refreshedLeads);
+  const updated = refreshed.items.find((item) => item.id === northPierId);
+  expect(updated?.notes).toBe("Rates for bonded storage");
   await page.getByRole("button", { name: "North pier expansion" }).click();
   await expect(page.getByLabel("Notes")).toHaveValue("Rates for bonded storage");
   await shot(page, "06-crm-lead.png");
@@ -103,9 +185,23 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await expect(page.getByRole("heading", { name: "Monitoring" })).toBeVisible();
   await shot(page, "09-monitoring.png");
 
+  const pendingResponses = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.url().includes("/approvals") &&
+      response.url().includes("status=pending") &&
+      response.ok(),
+  );
   await page.getByRole("link", { name: "Approvals" }).click();
   await page.getByLabel("Filter approvals").selectOption("pending");
-  await page.getByRole("button", { name: /customer response/ }).first().click();
+  const pendingAgain = await jsonBody<{ items: ApprovalRow[] }>(await pendingResponses);
+  await selectApproval(page, responseApproval?.id ?? "", pendingAgain.items);
+  await expect(
+    page
+      .locator("section")
+      .filter({ has: page.getByRole("heading", { name: "prepare customer response" }) })
+      .locator("pre"),
+  ).toContainText("We can discuss bonded storage.");
   await page.getByRole("button", { name: "Reject" }).click();
   await expect(page.getByText("Rejected. No CRM change or external action was written.")).toBeVisible();
   await page.getByLabel("Filter approvals").selectOption("rejected");

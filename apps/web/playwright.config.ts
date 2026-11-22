@@ -1,6 +1,14 @@
+import path from "node:path";
+
 import { defineConfig, devices } from "@playwright/test";
 
-const nodeBin = `${process.env.USERPROFILE ?? ""}\\.local\\node`;
+function withLocalNode(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (process.platform !== "win32" || !env.USERPROFILE) {
+    return env;
+  }
+  const nodeBin = path.join(env.USERPROFILE, ".local", "node");
+  return { ...env, PATH: `${nodeBin}${path.delimiter}${env.PATH ?? ""}` };
+}
 
 export default defineConfig({
   testDir: "./e2e",
@@ -22,8 +30,7 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120_000,
     env: {
-      ...process.env,
-      PATH: `${nodeBin};${process.env.PATH ?? ""}`,
+      ...withLocalNode(process.env),
       NEXT_PUBLIC_API_URL: "http://127.0.0.1:8010",
     },
   },
