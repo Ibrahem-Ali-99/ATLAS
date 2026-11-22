@@ -2,7 +2,7 @@
 
 ATLAS is a business operations command center: a Next.js dashboard, a FastAPI modular monolith, and PostgreSQL with pgvector.
 
-Day 1 covers authentication, organizations, memberships, and the dashboard shell. Day 2 adds organization-scoped CRM, document ingestion with hybrid retrieval, and a read-only assistant. Agent runs, workflows, analytics, and approvals remain empty states. The assistant does not create or change CRM records.
+Day 1 covers authentication, organizations, memberships, and the dashboard shell. Day 2 adds organization-scoped CRM, document ingestion with hybrid retrieval, and a read-only assistant. Day 3 adds an inquiry agent. It proposes CRM changes and waits for an admin to approve them. Workflows and analytics remain empty states. The assistant still does not create or change CRM records.
 
 ## Stack
 
@@ -58,6 +58,12 @@ Uploads accept PDF and UTF-8 text files up to `ATLAS_MAX_UPLOAD_BYTES` (10 MiB b
 If the API stops while a document is pending or processing, the next startup indexes it again. A second run replaces the same chunks instead of appending them. A failed reindex keeps the earlier chunks when they already exist.
 
 The assistant answers from retrieved document excerpts and from CRM records it is allowed to read. Citations are the retrieved rows, shown separately as company documents or CRM records. A question with no matching records gets an explicit refusal and does not call the model.
+
+## Agent runs and approvals
+
+From Agent Runs, choose an inquiry and start a run. The agent classifies it, searches company documents, and looks up the contact through a read-only MCP server bound to the current organization. It then stores proposed actions and pauses. An admin approves or rejects each one in Approvals. Resume the run to apply the approved payload. Rejected actions do not write. The customer response and the appointment request are saved as CRM interactions. They are not emailed and they do not book a calendar.
+
+`ATLAS_APPROVAL_TTL_HOURS` defaults to 24. Changing the stored payload after it was proposed invalidates that approval. An empty `ATLAS_LLM_API_KEY` fails the run with `llm_unconfigured` instead of inventing a classification.
 
 ## Synthetic local accounts
 
