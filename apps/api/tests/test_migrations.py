@@ -33,6 +33,9 @@ def test_migrations_upgrade_downgrade_and_reupgrade() -> None:
         "companies",
         "documents",
         "conversations",
+        "agent_runs",
+        "agent_events",
+        "approvals",
     } <= tables
     with engine.connect() as connection:
         vector_installed = connection.execute(

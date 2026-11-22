@@ -5,7 +5,9 @@ Implemented:
 - crm: companies, contacts, leads, inquiries, and interaction history.
 - knowledge: document ingestion, chunking, and hybrid retrieval.
 - assistant: grounded chat over documents and read-only CRM records.
+- agents: LangGraph inquiry workflow over CRM and knowledge.
+- approvals: human decisions required before an agent writes CRM records.
 
 Reserved and intentionally not implemented:
-- agents, automation, approvals, ml, analytics, monitoring.
+- automation, ml, analytics, monitoring.
 """

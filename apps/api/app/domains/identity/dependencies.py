@@ -99,3 +99,10 @@ def require_admin(context: Member) -> MemberContext:
 
 
 Admin = Annotated[MemberContext, Depends(require_admin)]
+
+
+def require_admin_csrf(_csrf: CsrfSession, admin: Admin) -> MemberContext:
+    return admin
+
+
+CsrfAdmin = Annotated[MemberContext, Depends(require_admin_csrf)]

@@ -38,6 +38,7 @@ def clean_tables() -> None:
         connection.execute(
             text(
                 "TRUNCATE TABLE message_sources, messages, conversations, chunks, documents, "
+                "agent_events, approvals, agent_runs, "
                 "interactions, inquiries, leads, contacts, companies, "
                 "sessions, memberships, users, organizations "
                 "RESTART IDENTITY CASCADE"

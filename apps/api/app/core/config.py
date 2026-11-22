@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     max_cosine_distance: float = Field(default=0.55, ge=0, le=2)
     max_upload_bytes: int = Field(default=10_485_760, ge=1, le=52_428_800)
     storage_dir: str = ""
+    approval_ttl_hours: int = Field(default=24, ge=1, le=168)
 
     @field_validator("database_url")
     @classmethod

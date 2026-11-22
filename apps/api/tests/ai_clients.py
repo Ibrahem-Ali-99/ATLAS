@@ -21,6 +21,23 @@ class HashEmbeddingClient:
         return [hash_embedding(text) for text in texts]
 
 
+class ClassificationDouble:
+    """Deterministic inquiry classifier for tests. This is not a live model provider."""
+
+    def ensure_configured(self) -> None:
+        return None
+
+    def complete(self, system: str, user: str) -> str:
+        return (
+            '{"category":"warehousing","contact_name":"Mina Patel","company_name":"Harbor",'
+            '"summary":"Rates for bonded storage","lead_title":"Bonded storage inquiry",'
+            '"draft_response":"We can discuss bonded storage."}'
+        )
+
+    def stream(self, system: str, user: str) -> Iterator[str]:
+        yield self.complete(system, user)
+
+
 class GroundedChatClient:
     def ensure_configured(self) -> None:
         return None
