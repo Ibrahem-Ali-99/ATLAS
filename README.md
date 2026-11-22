@@ -2,7 +2,7 @@
 
 ATLAS is a business operations command center: a Next.js dashboard, a FastAPI modular monolith, and PostgreSQL with pgvector.
 
-Day 1 covers authentication, organizations, memberships, and the dashboard shell. Day 2 adds organization-scoped CRM, document ingestion with hybrid retrieval, and a read-only assistant. Day 3 adds an inquiry agent. It proposes CRM changes and waits for an admin to approve them. Workflows and analytics remain empty states. The assistant still does not create or change CRM records.
+Day 1 covers authentication, organizations, memberships, and the dashboard shell. Day 2 adds organization-scoped CRM, document ingestion with hybrid retrieval, and a read-only assistant. Day 3 adds an inquiry agent. It proposes CRM changes and waits for an admin to approve them. Day 4 runs n8n workflows, signed webhooks, sandbox email through Mailpit, and simulated calendar bookings. Outbound email and bookings still wait for approval. Analytics remains an empty state. The assistant still does not create or change CRM records.
 
 ## Stack
 
@@ -26,7 +26,7 @@ From the repository root in PowerShell:
 Copy-Item .env.example .env
 # Replace ATLAS_SECRET_KEY in .env with a random string of at least 32 characters.
 
-docker compose up -d postgres
+docker compose up -d postgres mailpit n8n
 cd apps\api
 uv sync
 uv run alembic upgrade head
@@ -46,6 +46,8 @@ npm run dev -- --hostname 127.0.0.1 --port 3000
 Open http://127.0.0.1:3000. The page and `NEXT_PUBLIC_API_URL` must use the same loopback host (`127.0.0.1` or `localhost`); browsers treat those names as different sites, and the API only listens on IPv4 `127.0.0.1`. CORS allows both `http://127.0.0.1:3000` and `http://localhost:3000`. API docs are at http://127.0.0.1:8000/docs when `ATLAS_ENVIRONMENT` is not `production`.
 
 If another Postgres instance already owns host port 5432, set `POSTGRES_PORT` and the port in `ATLAS_DATABASE_URL` to a free port, then run `docker compose up -d postgres` again. The API container still reaches Postgres on the internal port 5432.
+
+Mailpit accepts sandbox SMTP on port 1025 and shows the mailbox at `http://127.0.0.1:8025`. n8n listens on port 5678. Import `infrastructure/n8n/lead-processing.json` and `infrastructure/n8n/follow-up.json`, then copy the ATLAS webhook key into `ATLAS_HOOK_KEY_ID` and `ATLAS_HOOK_SECRET` for the scheduled follow-up. Leave `ATLAS_EMAIL_MODE` as `sandbox` unless live delivery is explicitly enabled. Calendar bookings in this release use the simulation adapter and stay in ATLAS.
 
 The API container can be started with `docker compose up --build api` after `.env` exists. It runs migrations on startup and stores uploads in the `atlas_uploads` volume. The seed command stays manual because it resets the three synthetic passwords. It also inserts clearly synthetic CRM rows for Atlas Demo and Northwind.
 

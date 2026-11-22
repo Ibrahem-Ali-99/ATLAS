@@ -1,12 +1,12 @@
 # Architecture
 
-ATLAS is a modular monolith. Day 1 is the platform shell. Day 2 adds CRM, document retrieval, and a read-only assistant. Day 3 adds an inquiry agent that pauses for a human approval before it writes CRM records.
+ATLAS is a modular monolith. Day 1 is the platform shell. Day 2 adds CRM, document retrieval, and a read-only assistant. Day 3 adds an inquiry agent that pauses for a human approval before it writes CRM records. Day 4 adds n8n-triggered automation, signed webhooks, sandbox email, and a simulated calendar.
 
 ## Backend
 
-`apps/api` is a FastAPI application. HTTP routes live under `/api/v1`. Domain code lives in `app/domains/identity`, `app/domains/crm`, `app/domains/knowledge`, `app/domains/assistant`, `app/domains/agents`, and `app/domains/approvals`. Shared configuration, database sessions, logging, errors, and session cookies live in `app/core`. OpenAI-compatible chat and embedding clients live in `app/integrations`. The read-only MCP server is `python -m app.mcp_server`.
+`apps/api` is a FastAPI application. HTTP routes live under `/api/v1`. Domain code lives in `app/domains/identity`, `app/domains/crm`, `app/domains/knowledge`, `app/domains/assistant`, `app/domains/agents`, `app/domains/approvals`, and `app/domains/automation`. Shared configuration, database sessions, logging, errors, and session cookies live in `app/core`. OpenAI-compatible chat and embedding clients, the SMTP transport, the simulated calendar, and the n8n client live in `app/integrations`. The read-only MCP server is `python -m app.mcp_server`.
 
-Automation, ML, analytics, and monitoring are still reserved.
+n8n is an external workflow runner. It receives lead events and calls ATLAS webhooks. LangGraph still owns inquiry reasoning and the approval pause. ML, analytics, and a monitoring product are still reserved. Success and failure of an external action are stored on the execution record.
 
 ## Authorization
 
@@ -14,7 +14,7 @@ A session cookie identifies the user. Organization access is loaded from `member
 
 ## Data
 
-PostgreSQL is provided by the `pgvector/pgvector` image. Migration `0001` enables `vector` and creates the identity tables. `0002` adds companies, contacts, leads, inquiries, and interactions. `0003` adds documents and chunks, including a `vector(1536)` embedding and a full-text `search_vector`. `0004` adds conversations, messages, and message sources. `0005` adds agent runs, agent events, and approvals. LangGraph also creates its own checkpoint tables in the same database the first time a run starts.
+PostgreSQL is provided by the `pgvector/pgvector` image. Migration `0001` enables `vector` and creates the identity tables. `0002` adds companies, contacts, leads, inquiries, and interactions. `0003` adds documents and chunks, including a `vector(1536)` embedding and a full-text `search_vector`. `0004` adds conversations, messages, and message sources. `0005` adds agent runs, agent events, and approvals. `0006` adds the `needs_attention` approval status. `0007` adds webhook keys, workflow runs, execution intents, email deliveries, and simulated calendar bookings. LangGraph also creates its own checkpoint tables in the same database the first time a run starts.
 
 Document files are stored on disk under `ATLAS_STORAGE_DIR`, or `var/atlas-storage` when that setting is empty. Ingestion runs after the upload response, extracts PDF or text content, chunks it with page numbers when the extractor provides them, and writes embeddings. On startup the API indexes documents still marked pending or processing. Replacement of chunks and the ready status commit together, so a repeated run does not duplicate passages. A failed reindex keeps the previous chunks when they exist.
 
@@ -28,13 +28,15 @@ Chat and embeddings use configurable OpenAI-compatible HTTP endpoints (`ATLAS_LL
 
 An agent run loads one inquiry for the caller's organization, asks the configured chat model for a JSON classification, and reads company knowledge and CRM through MCP. The MCP server process is bound to that organization. Its tools are `find_contact`, `get_lead`, and `search_company_knowledge`. They do not accept an organization id and they do not write. If the chat key is empty, the run is stored as failed with `llm_unconfigured` and no classification is invented.
 
-The graph then proposes a lead create or update, a customer response, and an appointment. Those proposals are approval rows with a hash of the payload. The run pauses. An admin approves or rejects with the CSRF token. Execution writes only the stored payload, and only after the row moves from `approved` to `executing`. A rejected row writes nothing. A changed payload or an expired approval fails closed. A second execution returns `already_executed`. The response and the appointment are CRM interactions. They are not sent as email and they do not create a calendar event.
+The graph then proposes a lead create or update, a customer response, and an appointment. Those proposals are approval rows with a hash of the payload. The run pauses. An admin approves or rejects with the CSRF token. A lead create or update commits the CRM row and the `executed` approval in one transaction. A crash before that commit leaves the approval `approved` and writes nothing. A row already stuck in `executing` from an older process is marked `needs_attention` and is not applied again.
+
+A customer response or appointment is an external action. Approval first stores an execution intent with the payload and a stable idempotency key. One worker claims it. SMTP delivery uses Mailpit or another local server while email mode is `sandbox`. A timeout is `needs_attention` and is not sent again. A refused connection can be tried twice. The calendar adapter in this release is `simulation`: bookings are rows in ATLAS, with no provider event id, and can be cancelled. A rejected or expired approval creates no intent and sends nothing. This is at-least-once delivery with reconciliation. It is not an exactly-once guarantee.
 
 `ATLAS_APPROVAL_TTL_HOURS` defaults to 24. Tool reads retry up to three times. CRM writes are not retried.
 
 ## Frontend
 
-`apps/web` is a Next.js App Router client of the API. Authenticated pages call `/api/v1/auth/me`. CRM, knowledge, the assistant, agent runs, and approvals call the organization routes with the session cookie. Workflows and analytics still render an explicit empty state.
+`apps/web` is a Next.js App Router client of the API. Authenticated pages call `/api/v1/auth/me`. CRM, knowledge, the assistant, agent runs, approvals, and workflows call the organization routes with the session cookie. Workflows shows automation status, recent runs, sandbox email, and simulated bookings. It does not embed the n8n editor. Analytics still renders an explicit empty state.
 
 ## Engineering standards
 
