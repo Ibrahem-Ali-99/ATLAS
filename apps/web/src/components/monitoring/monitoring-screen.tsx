@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
@@ -15,7 +16,8 @@ export function MonitoringScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
   const queryClient = useQueryClient();
-  const [runId, setRunId] = useState<string | null>(null);
+  const requestedRun = useSearchParams().get("run");
+  const [runId, setRunId] = useState<string | null>(requestedRun);
   const diagnostics = useQuery({
     queryKey: ["diagnostics", organizationId],
     queryFn: () => getDiagnostics(organizationId ?? ""),

@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { CompaniesPanel } from "@/components/crm/companies-panel";
@@ -21,7 +22,9 @@ type TabId = (typeof tabs)[number]["id"];
 
 export function CrmScreen() {
   const { organizationId, organizationName } = useWorkspace();
-  const [tab, setTab] = useState<TabId>("companies");
+  const requested = useSearchParams().get("tab");
+  const initial = tabs.some((item) => item.id === requested) ? (requested as TabId) : "companies";
+  const [tab, setTab] = useState<TabId>(initial);
   if (!organizationId) {
     return null;
   }

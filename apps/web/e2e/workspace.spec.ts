@@ -74,15 +74,21 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByLabel("Search companies").fill(companyName);
   await expect(page.getByRole("button", { name: companyName })).toBeVisible();
 
+  await page.getByRole("tab", { name: "Leads" }).click();
   const seededLeads = page.waitForResponse(
     (response) =>
-      response.request().method() === "GET" && response.url().includes("/leads") && response.ok(),
+      response.request().method() === "GET" &&
+      response.url().includes("/leads") &&
+      response.url().includes("q=North") &&
+      response.ok(),
   );
-  await page.getByRole("tab", { name: "Leads" }).click();
+  await page.getByLabel("Search leads").fill("North pier expansion");
   const seeded = await jsonBody<{ items: LeadRow[] }>(await seededLeads);
   const northPier = seeded.items.find((item) => item.title === "North pier expansion");
   expect(northPier).toBeTruthy();
   const northPierId = northPier?.id ?? "";
+  await page.getByLabel("Search leads").fill("");
+  await page.waitForTimeout(400);
   await page.getByRole("button", { name: "New lead" }).click();
   await page.getByLabel("Title").fill(leadTitle);
   await page.getByRole("button", { name: "Create" }).click();
@@ -192,15 +198,16 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   expect(executedBody.execution_result?.lead_id).toBe(northPierId);
   await page.getByLabel("Filter approvals").selectOption("executed");
   await expect(page.getByRole("button", { name: "update lead" }).first()).toBeVisible();
+  await page.getByRole("link", { name: "CRM", exact: true }).click();
+  await page.getByRole("tab", { name: "Leads" }).click();
   const refreshedLeads = page.waitForResponse(
     (response) =>
       response.request().method() === "GET" &&
       response.url().includes("/leads") &&
-      !response.url().includes("/leads/") &&
+      response.url().includes("q=North") &&
       response.ok(),
   );
-  await page.getByRole("link", { name: "CRM", exact: true }).click();
-  await page.getByRole("tab", { name: "Leads" }).click();
+  await page.getByLabel("Search leads").fill("North pier expansion");
   const refreshed = await jsonBody<{ items: LeadRow[] }>(await refreshedLeads);
   const updated = refreshed.items.find((item) => item.id === northPierId);
   expect(updated?.notes).toBe("Rates for bonded storage");
@@ -209,7 +216,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await shot(page, "06-crm-lead.png");
 
   await page.getByRole("link", { name: "Workflows" }).click();
-  await expect(page.getByRole("heading", { name: "Workflows" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Automations" })).toBeVisible();
   await expect(page.getByText("sandbox", { exact: false }).first()).toBeVisible();
   await shot(page, "07-workflows.png");
   await page.getByRole("link", { name: "Analytics" }).click();

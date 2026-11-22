@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
@@ -21,7 +22,8 @@ export function ApprovalsScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
   const [status, setStatus] = useState<ApprovalStatus | "">("pending");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const requested = useSearchParams().get("approval");
+  const [selectedId, setSelectedId] = useState<string | null>(requested);
   const [note, setNote] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   if (!organizationId) {
