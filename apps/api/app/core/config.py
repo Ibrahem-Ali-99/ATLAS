@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     )
 
     environment: Literal["development", "test", "production"] = "development"
+    public_demo: bool = False
     secret_key: str
     database_url: str
     cors_origins: str = "http://127.0.0.1:3000,http://localhost:3000"
@@ -73,6 +74,9 @@ class Settings(BaseSettings):
     webhook_max_bytes: int = Field(default=65_536, ge=32, le=1_048_576)
     webhook_skew_seconds: int = Field(default=300, ge=30, le=3600)
     webhook_rate_limit: int = Field(default=30, ge=1, le=300)
+    login_email_limit: int = Field(default=8, ge=1, le=50)
+    login_client_limit: int = Field(default=40, ge=1, le=500)
+    login_window_seconds: int = Field(default=900, ge=60, le=86_400)
     model_dir: str = ""
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
@@ -127,6 +131,13 @@ class Settings(BaseSettings):
             self.llm_provider == "double" or self.embedding_provider == "double"
         ):
             raise ValueError("Deterministic providers are not allowed in production")
+        if self.public_demo:
+            if self.email_mode != "sandbox" or self.email_live_enabled:
+                raise ValueError("ATLAS_PUBLIC_DEMO cannot send live email")
+            if self.n8n_lead_webhook_url.strip():
+                raise ValueError("ATLAS_PUBLIC_DEMO cannot call n8n")
+            if self.llm_api_key.strip() or self.embedding_api_key.strip():
+                raise ValueError("ATLAS_PUBLIC_DEMO cannot store a paid model key")
         return self
 
     @property

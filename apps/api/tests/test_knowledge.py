@@ -60,6 +60,12 @@ def test_upload_indexes_text_and_rejects_invalid_files(
         headers=headers,
     )
     assert rejected.status_code == 415
+    model_file = embedded_client.post(
+        f"/api/v1/organizations/{org}/documents",
+        files={"file": ("lead-model.joblib", b"not-a-document", "application/octet-stream")},
+        headers=headers,
+    )
+    assert model_file.status_code == 415
     oversized = embedded_client.post(
         f"/api/v1/organizations/{org}/documents",
         files={"file": ("big.txt", b"a" * (get_settings().max_upload_bytes + 1), "text/plain")},

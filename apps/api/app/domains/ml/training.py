@@ -186,6 +186,7 @@ def _scores(y_true: list[int], predicted: Any) -> dict[str, float]:
 
 
 def load_pipeline(version: ModelVersion) -> Any:
+    """Load a model file this process wrote. Uploaded documents are never passed here."""
     cached = _CACHE.get("version")
     if cached == str(version.id):
         return _CACHE["pipeline"]

@@ -1,18 +1,24 @@
 from datetime import timedelta
 
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from starlette.responses import Response
 
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.security import attach_session_cookie, clear_session_cookie
 from app.domains.identity.dependencies import CsrfSession, CurrentSession, CurrentUser, DbSession
+from app.domains.identity.login_limit import (
+    login_is_limited,
+    note_login_failure,
+    note_login_success,
+)
 from app.domains.identity.models import User
 from app.domains.identity.schemas import AuthResponse, LoginRequest, membership_out, user_out
 from app.domains.identity.service import (
     authenticate,
     list_memberships,
+    normalize_email,
     revoke_session,
     start_session,
 )
@@ -30,11 +36,18 @@ def _auth_response(db: DbSession, user: User, csrf_token: str) -> AuthResponse:
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(body: LoginRequest, response: Response, db: DbSession) -> AuthResponse:
+def login(body: LoginRequest, request: Request, response: Response, db: DbSession) -> AuthResponse:
+    email = normalize_email(body.email)
+    client_key = request.client.host if request.client is not None else "unknown"
+    if login_is_limited(client_key, email):
+        logger.info("login_rate_limited")
+        raise AppError(429, "rate_limited", "Too many login attempts. Wait and try again.")
     user = authenticate(db, body.email, body.password)
     if user is None:
+        note_login_failure(client_key, email)
         logger.info("login_failed")
         raise AppError(401, "invalid_credentials", "Invalid email or password")
+    note_login_success(email)
     settings = get_settings()
     record = start_session(db, user, timedelta(hours=settings.session_ttl_hours))
     attach_session_cookie(response, settings, record.id)

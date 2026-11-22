@@ -1,7 +1,8 @@
 """Idempotent synthetic identity seed.
 
 Running this again updates the same users, organizations, and memberships in place.
-It also resets those users' passwords to the current seed values. Do not run it in production.
+It also resets those users' passwords to the current seed values. Those passwords are
+for local development. Production and a public demo refuse the seed.
 """
 
 from __future__ import annotations
@@ -52,7 +53,16 @@ class SeedSettings(BaseSettings):
         return self
 
 
+def assert_seed_allowed() -> None:
+    settings = get_settings()
+    if settings.environment == "production" or settings.public_demo:
+        raise RuntimeError(
+            "Seeding resets development passwords and is refused for production and public demo."
+        )
+
+
 def seed_identity(db: Session, settings: SeedSettings) -> None:
+    assert_seed_allowed()
     atlas = upsert_organization(db, name="Atlas Demo", slug="atlas-demo")
     northwind = upsert_organization(db, name="Northwind", slug="northwind")
     admin = upsert_user(
@@ -82,8 +92,10 @@ def seed_identity(db: Session, settings: SeedSettings) -> None:
 
 def main() -> int:
     app_settings = get_settings()
-    if app_settings.environment == "production":
-        print("Refusing to seed while ATLAS_ENVIRONMENT=production.", file=sys.stderr)
+    try:
+        assert_seed_allowed()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
     configure_logging(app_settings.log_level, app_settings.environment)
     seed_settings = SeedSettings()
@@ -95,7 +107,7 @@ def main() -> int:
         raise
     finally:
         db.close()
-    print("Seed complete. Passwords were not printed.")
+    print("Seed complete for local development. Passwords were not printed.")
     print(
         "- Atlas Demo (atlas-demo): "
         f"{seed_settings.seed_admin_email} (admin), "

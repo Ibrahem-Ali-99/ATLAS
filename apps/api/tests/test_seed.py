@@ -1,7 +1,9 @@
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.domains.identity.models import Membership, Organization, User
 from app.scripts.seed import SeedSettings, seed_identity
 
@@ -43,3 +45,10 @@ def test_seed_is_idempotent_and_isolates_tenants(client: TestClient, db: Session
     assert staff.status_code == 200
     assert staff.json()["memberships"][0]["role"] == "staff"
     assert staff.json()["memberships"][0]["organization_slug"] == "atlas-demo"
+
+
+def test_seed_refuses_production_and_public_demo(db: Session, monkeypatch) -> None:
+    blocked = get_settings().model_copy(update={"public_demo": True})
+    monkeypatch.setattr("app.scripts.seed.get_settings", lambda: blocked)
+    with pytest.raises(RuntimeError, match="public demo"):
+        seed_identity(db, SeedSettings(_env_file=None, **SEED))

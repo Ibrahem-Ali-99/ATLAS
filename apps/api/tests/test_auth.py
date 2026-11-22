@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.security import sign_session_id
+from app.domains.identity.login_limit import clear_login_attempts
 from app.domains.identity.models import MembershipRole, UserSession
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
 from tests.helpers import login
@@ -64,6 +65,35 @@ def test_invalid_credentials_are_indistinguishable(client: TestClient, db: Sessi
     assert unknown.status_code == wrong.status_code == inactive.status_code == 401
     assert unknown.json() == wrong.json() == inactive.json()
     assert unknown.json()["error"]["code"] == "invalid_credentials"
+
+
+def test_login_rate_limit_does_not_reveal_the_account(
+    client: TestClient, db: Session, monkeypatch
+) -> None:
+    clear_login_attempts()
+    tight = get_settings().model_copy(update={"login_email_limit": 8, "login_client_limit": 2})
+    monkeypatch.setattr("app.domains.identity.login_limit.get_settings", lambda: tight)
+    make_user(db, "limited@example.com")
+    for _ in range(2):
+        failed = client.post(
+            "/api/v1/auth/login",
+            json={"email": "limited@example.com", "password": "wrong-password"},
+        )
+        assert failed.status_code == 401
+        assert failed.json()["error"]["code"] == "invalid_credentials"
+    known = client.post(
+        "/api/v1/auth/login",
+        json={"email": "limited@example.com", "password": "wrong-password"},
+    )
+    unknown = client.post(
+        "/api/v1/auth/login",
+        json={"email": "missing@example.com", "password": "wrong-password"},
+    )
+    assert known.status_code == unknown.status_code == 429
+    assert known.json() == unknown.json()
+    assert known.json()["error"]["code"] == "rate_limited"
+    assert "limited@example.com" not in known.text
+    clear_login_attempts()
 
 
 def test_password_is_stored_as_argon2_hash(db: Session) -> None:

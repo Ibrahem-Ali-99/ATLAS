@@ -42,6 +42,26 @@ def test_production_requires_secure_cookies() -> None:
         )
 
 
+def test_public_demo_refuses_paid_calls_and_external_effects() -> None:
+    with pytest.raises(ValidationError):
+        _settings(public_demo=True, llm_api_key="sk-test")
+    with pytest.raises(ValidationError):
+        _settings(public_demo=True, n8n_lead_webhook_url="http://n8n/hook")
+    with pytest.raises(ValidationError):
+        _settings(public_demo=True, email_mode="live", email_live_enabled=True)
+
+
+def test_public_demo_blocks_the_paid_chat_client(monkeypatch) -> None:
+    from app.core.errors import AppError
+    from app.integrations.language import get_chat_client
+
+    demo = get_settings().model_copy(update={"public_demo": True, "llm_provider": "openai"})
+    monkeypatch.setattr("app.integrations.language.get_settings", lambda: demo)
+    with pytest.raises(AppError) as caught:
+        get_chat_client()
+    assert caught.value.code == "llm_unconfigured"
+
+
 def test_production_rejects_deterministic_providers() -> None:
     with pytest.raises(ValidationError):
         _settings(

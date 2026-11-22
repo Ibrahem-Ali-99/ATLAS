@@ -173,6 +173,12 @@ def _log_usage(event: str, payload: dict[str, Any]) -> None:
 
 def get_embedding_client() -> EmbeddingClient:
     settings = get_settings()
+    if settings.public_demo and settings.embedding_provider != "double":
+        raise AppError(
+            503,
+            "embedding_unconfigured",
+            "Paid model calls are disabled for this deployment.",
+        )
     if settings.embedding_provider == "double":
         from app.integrations.doubles import DeterministicEmbeddingClient
 
@@ -182,6 +188,12 @@ def get_embedding_client() -> EmbeddingClient:
 
 def get_chat_client() -> ChatClient:
     settings = get_settings()
+    if settings.public_demo and settings.llm_provider != "double":
+        raise AppError(
+            503,
+            "llm_unconfigured",
+            "Paid model calls are disabled for this deployment.",
+        )
     if settings.llm_provider == "double":
         from app.integrations.doubles import DeterministicChatClient
 
