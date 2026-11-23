@@ -114,7 +114,7 @@ def test_wrong_encryption_key_fails_closed(db: Session, monkeypatch: pytest.Monk
     )
     db.commit()
     wrong = get_settings().model_copy(
-        update={"secret_key": "wrong-secret-key-must-be-32-characters"}
+        update={"secret_key": "test-secret-key-must-be-32-chars-min"}
     )
     monkeypatch.setattr(signatures, "get_settings", lambda: wrong)
     with pytest.raises(AppError) as exc:
