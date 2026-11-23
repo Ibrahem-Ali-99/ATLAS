@@ -1,3 +1,4 @@
+import uuid
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -86,8 +87,8 @@ class EmailDomainInput(BaseModel):
 
 class EmailDomainOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    id: str
-    organization_id: str
+    id: uuid.UUID
+    organization_id: uuid.UUID
     provider: str
     domain: str
     status: str

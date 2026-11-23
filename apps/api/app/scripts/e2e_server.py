@@ -40,6 +40,35 @@ def install_provider_transport() -> None:
     integrations_api.get_chat_client = e2e_chat_client
 
 
+def install_resend_transport() -> None:
+    if os.environ.get("ATLAS_E2E_RESEND_TRANSPORT") != "1":
+        return
+    from app.domains.integrations import domain_service
+    from app.integrations.domain_verification import DnsRecord, DomainStatus
+
+    class FakeResend:
+        def register(self, domain: str) -> DomainStatus:
+            return DomainStatus(
+                provider_domain_id=f"e2e-{domain}",
+                verified=False,
+                records=[DnsRecord("TXT", f"_resend.{domain}", "resend-verification=e2e")],
+                evidence={"provider": "resend", "status": "pending"},
+            )
+
+        def status(self, provider_domain_id: str) -> DomainStatus:
+            return DomainStatus(
+                provider_domain_id=provider_domain_id,
+                verified=True,
+                records=[DnsRecord("TXT", "_resend.example.test", "resend-verification=e2e")],
+                evidence={"provider": "resend", "status": "verified"},
+            )
+
+        def revoke(self, provider_domain_id: str) -> None:
+            return None
+
+    domain_service.ResendDomainProvider = lambda _token: FakeResend()  # type: ignore[assignment,misc]
+
+
 def main() -> None:
     smtp_port = os.environ.get("ATLAS_SMTP_PORT")
     from tests.bootstrap import postgres_url
@@ -67,6 +96,7 @@ def main() -> None:
 
     get_settings.cache_clear()
     install_provider_transport()
+    install_resend_transport()
     import uvicorn
 
     from app.main import create_app

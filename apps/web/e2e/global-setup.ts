@@ -55,6 +55,7 @@ function spawnApi(): Promise<ChildProcess> {
         ATLAS_E2E_API_PORT: String(apiPort),
         ATLAS_E2E_WEB_PORT: "3011",
         ATLAS_E2E_PROVIDER_TRANSPORT: "1",
+        ATLAS_E2E_RESEND_TRANSPORT: "1",
         ATLAS_ENVIRONMENT: "development",
         ATLAS_SMTP_HOST: "127.0.0.1",
         ATLAS_SMTP_PORT: String(mailpitPort),
