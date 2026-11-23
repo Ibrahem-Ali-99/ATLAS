@@ -32,6 +32,9 @@ from backup_contract import (
     redact,
     write_manifest,
 )
+from backup_secrets import SecretStoreError
+from backup_secrets import initialize as initialize_passphrase
+from backup_secrets import resolve as resolve_passphrase
 
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = ROOT / "infrastructure" / "compose.staging.yaml"
@@ -419,14 +422,19 @@ def main() -> int:
         "--backup-dir", type=Path, default=Path(os.environ.get("ATLAS_BACKUP_DIR", DEFAULT_DIR))
     )
     parser.add_argument("--keep", type=int, default=int(os.environ.get("ATLAS_BACKUP_KEEP", "14")))
+    parser.add_argument("--init-passphrase", action="store_true")
     args = parser.parse_args()
     try:
+        if args.init_passphrase:
+            path = initialize_passphrase()
+            print(f"passphrase_store_initialized path={path}")
+            return 0
         line = create_backup(
             project=args.project,
             env_file=args.env_file,
             backup_dir=args.backup_dir,
             keep=args.keep,
-            passphrase=os.environ.get("ATLAS_BACKUP_PASSPHRASE", ""),
+            passphrase=resolve_passphrase(),
             s3_uri=os.environ.get("ATLAS_BACKUP_S3_URI", ""),
             s3_endpoint=os.environ.get("ATLAS_BACKUP_S3_ENDPOINT", ""),
             access_key=os.environ.get("AWS_ACCESS_KEY_ID", ""),
@@ -438,7 +446,7 @@ def main() -> int:
     except BackupFailed as exc:
         print(exc.reason, file=sys.stderr)
         return 2
-    except OSError as exc:
+    except (OSError, SecretStoreError) as exc:
         print(f"backup_failed {exc.__class__.__name__}", file=sys.stderr)
         return 1
     print(line)

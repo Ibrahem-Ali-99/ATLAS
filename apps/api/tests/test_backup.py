@@ -9,6 +9,7 @@ from tests.bootstrap import REPO_ROOT
 sys.path.insert(0, str(REPO_ROOT / "infrastructure" / "staging"))
 
 import backup_contract  # noqa: E402
+import backup_secrets  # noqa: E402
 
 
 def test_daily_retention_keeps_the_newest_archives(tmp_path: Path) -> None:
@@ -48,6 +49,44 @@ def test_restore_refuses_the_live_projects() -> None:
         else:
             raise AssertionError(f"{name} was accepted for restore")
     backup_contract.assert_project("atlas-staging", restore=False)
+
+
+def test_dpapi_store_persists_and_retrieves_without_plaintext_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    secret = b"a" * 64
+    monkeypatch.setattr(backup_secrets.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(backup_secrets, "_protect", lambda value: b"sealed:" + value)
+    monkeypatch.setattr(
+        backup_secrets,
+        "_unprotect",
+        lambda value: value.removeprefix(b"sealed:"),
+    )
+    monkeypatch.setattr(backup_secrets.secrets, "token_hex", lambda count: secret.decode())
+    path = backup_secrets.initialize()
+    assert path.read_bytes() == b"ATLAS-DPAPI-1\nsealed:" + secret
+    assert backup_secrets.retrieve() == secret.decode()
+    assert backup_secrets.retrieve() == secret.decode()
+
+
+def test_dpapi_store_rejects_missing_or_corrupt_data(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(backup_secrets.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    path = backup_secrets.store_path()
+    path.parent.mkdir()
+    path.write_bytes(b"corrupt")
+    try:
+        backup_secrets.retrieve()
+    except backup_secrets.SecretStoreError as exc:
+        assert exc.args[0] == "passphrase_store_corrupt"
+    else:
+        raise AssertionError("corrupt DPAPI data was accepted")
+
+
+def test_environment_passphrase_remains_compatible(monkeypatch) -> None:
+    monkeypatch.setenv("ATLAS_BACKUP_PASSPHRASE", "process-secret")
+    assert backup_secrets.resolve() == "process-secret"
     backup_contract.assert_project("atlas-backup-proof", restore=True)
 
 

@@ -8,7 +8,6 @@ volumes. The caller starts the application after this command exits.
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import subprocess
 import sys
@@ -26,6 +25,8 @@ from backup_contract import (
     restore_command,
     verify_tree,
 )
+from backup_secrets import SecretStoreError
+from backup_secrets import resolve as resolve_passphrase
 
 COMPOSE_FILE = ROOT / "infrastructure" / "compose.staging.yaml"
 
@@ -343,7 +344,7 @@ def main() -> int:
             project=args.project,
             env_file=args.env_file,
             archive=args.archive,
-            passphrase=os.environ.get("ATLAS_BACKUP_PASSPHRASE", ""),
+            passphrase=resolve_passphrase(),
         )
     except BackupContractError as exc:
         print(exc.reason, file=sys.stderr)
@@ -351,7 +352,7 @@ def main() -> int:
     except RestoreFailed as exc:
         print(exc.reason, file=sys.stderr)
         return 2
-    except (OSError, tarfile.TarError) as exc:
+    except (OSError, tarfile.TarError, SecretStoreError) as exc:
         print(f"restore_failed {exc.__class__.__name__}", file=sys.stderr)
         return 1
     print(line)

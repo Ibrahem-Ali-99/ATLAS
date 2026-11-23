@@ -57,7 +57,15 @@ set +a
 python3 infrastructure/staging/backup.py
 ```
 
-On Windows, for a drill, set `ATLAS_BACKUP_PASSPHRASE` in the process environment and pass `--project`, `--env-file`, and `--backup-dir`.
+On Windows, initialize the user-scoped DPAPI store once:
+
+```powershell
+py -3 infrastructure\staging\backup.py --init-passphrase
+```
+
+The command writes only a DPAPI-protected blob below `%LOCALAPPDATA%\ATLAS`. It does not print the passphrase. Later backup and restore commands retrieve the same passphrase from that store. An explicitly supplied `ATLAS_BACKUP_PASSPHRASE` still takes precedence for a controlled drill.
+
+DPAPI is bound to the Windows user profile and machine protection keys. The blob is not a disaster-recovery copy: after losing the Windows profile or moving to another machine, retrieve the original passphrase from the operator's password manager and set it through the process environment, or initialize a new store and create a new backup. Do not copy the DPAPI blob as the only recovery material. The Linux deployment continues to use the root-only `/etc/atlas/backup.env` file.
 
 ## Restore onto a fresh host
 
