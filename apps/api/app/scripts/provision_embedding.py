@@ -108,6 +108,12 @@ def synthetic_chunks() -> list[str]:
 
 
 def _expected_width(provider: str, model: str, dimensions: int) -> int | None:
+    if provider == "double":
+        if dimensions not in (PINNED_WIDTH, OPENAI_WIDTH):
+            raise EmbeddingProvisionError(
+                f"embedding_dimension_mismatch width={dimensions} expected=768|1536"
+            )
+        return None
     if provider == "openai":
         if dimensions not in (PINNED_WIDTH, OPENAI_WIDTH):
             raise EmbeddingProvisionError(

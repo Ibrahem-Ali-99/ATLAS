@@ -124,6 +124,12 @@ def write_env() -> dict[str, str]:
         "STAGING_HTTP_PORT": HTTP_PORT,
         "STAGING_HTTPS_PORT": HTTPS_PORT,
         "STAGING_CORS_ORIGINS": f"https://atlas.localhost:{HTTPS_PORT}",
+        # The acceptance proof validates restored vectors and retrieval without
+        # downloading a model. It deliberately uses the deterministic 768-wide
+        # test provider; production/staging defaults remain unchanged.
+        "STAGING_EMBEDDING_PROVIDER": "double",
+        "STAGING_EMBEDDING_MODEL": "restore-proof-deterministic",
+        "STAGING_EMBEDDING_DIMENSIONS": "768",
         "STAGING_HOOK_KEY_ID": "",
         "STAGING_HOOK_SECRET": "",
         "ATLAS_BOOTSTRAP_PASSWORD": password,
@@ -193,7 +199,17 @@ def wait_healthy(env: dict[str, str]) -> None:
         if states.get("api") == "healthy" and states.get("web") == "healthy":
             return
         time.sleep(2)
-    raise AcceptFailure(f"stack did not become healthy\n{last}")
+    diagnostics = compose(
+        env,
+        "logs",
+        "--no-color",
+        "api",
+        "postgres",
+        "embedding-model",
+        check=False,
+    )
+    detail = (diagnostics.stdout + diagnostics.stderr)[-4000:]
+    raise AcceptFailure(f"stack did not become healthy\n{last}\n{detail}")
 
 
 def bootstrap(env: dict[str, str]) -> str:
