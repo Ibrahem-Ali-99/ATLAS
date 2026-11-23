@@ -203,6 +203,15 @@ def _execute_external(db: Session, approval: Approval) -> dict[str, Any]:
     intent = stage_intent(db, approval, payload)
     approval.status = ApprovalStatus.executing
     db.commit()
+    if approval.action_type == ActionType.prepare_customer_response:
+        from app.core.config import get_settings
+
+        if get_settings().environment != "test":
+            return {
+                "status": "queued",
+                "intent_id": str(intent.id),
+                "approval_id": str(approval.id),
+            }
     return dispatch_intent(db, approval.organization_id, intent.id)
 
 

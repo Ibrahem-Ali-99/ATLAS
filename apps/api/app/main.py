@@ -1,3 +1,4 @@
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -51,7 +52,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         prepare_checkpoints()
     except Exception:
         logger.error("checkpoint_setup_failed")
+    worker_stop: threading.Event | None = None
+    worker_thread: threading.Thread | None = None
+    if settings.environment != "test":
+        from app.domains.automation.worker import start
+
+        worker_stop = threading.Event()
+        worker_thread = start(worker_stop)
     yield
+    if worker_stop is not None and worker_thread is not None:
+        from app.domains.automation.worker import stop
+
+        stop(worker_stop, worker_thread)
     logger.info("shutdown")
 
 
