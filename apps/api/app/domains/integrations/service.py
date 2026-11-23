@@ -131,11 +131,14 @@ def replace_configuration(
                 "Changing the embedding model or dimensions requires an explicit reindex.",
             )
     provider_changed = existing.provider != data.provider
+    config_changed = existing.config != data.config
     existing.provider = data.provider
     existing.config = data.config
     _validate_embedding_config(data)
     if data.credentials is not None:
         existing.encrypted_credentials = seal_integration_secret(data.credentials)
+        existing.credential_version += 1
+    elif provider_changed or config_changed:
         existing.credential_version += 1
     existing.status = IntegrationStatus.configured
     db.flush()

@@ -93,6 +93,7 @@ test("admin disable confirmation persists and staff cannot mutate", async ({ pag
 test("indexed knowledge blocks incompatible embedding changes", async ({ page }) => {
   await signIn(page, "admin@example.com", "change-me-admin");
   await page.getByLabel("Organization").selectOption({ label: "Northwind" });
+  await expect(page.getByLabel("Organization").locator("option:checked")).toHaveText("Northwind");
   await page.goto("/settings");
   await expect(page.getByLabel("Vector dimensions")).toHaveValue("768");
   await page.getByLabel("Vector dimensions").selectOption("1536");
@@ -127,4 +128,59 @@ test("provider connection verification reports success, invalid credentials, and
   await expect(page.getByRole("status")).toContainText(/Verification failed: The language model timed out/i, { timeout: 10_000 });
   expect(Date.now() - started).toBeLessThan(10_000);
   await page.screenshot({ path: `${screenshots}/settings-connection-verification.png`, fullPage: true });
+});
+
+test("stale configuration edits show a conflict without overwriting the newer update", async ({ page, browser }) => {
+  await signIn(page, "admin@example.com", "change-me-admin");
+  await page.goto("/settings");
+  const initialModel = page.getByLabel("Model").first();
+  if (await page.getByRole("button", { name: "Save" }).count()) {
+    await initialModel.fill("initial-concurrent-model");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("integration-configs/chat") && response.request().method() === "PUT"),
+      page.getByRole("button", { name: "Save" }).first().click(),
+    ]);
+    await expect(page.getByRole("status")).toContainText("Configuration saved", { timeout: 10_000 });
+    await page.reload();
+  }
+  const sessionB = await browser.newContext();
+  const pageB = await sessionB.newPage();
+  await signIn(pageB, "admin@example.com", "change-me-admin");
+  await pageB.goto("/settings");
+  const modelB = pageB.getByLabel("Model").first();
+  await modelB.fill("session-b-model");
+  await Promise.all([
+    pageB.waitForResponse((response) => response.url().includes("integration-configs/chat") && response.request().method() === "PUT"),
+    pageB.getByRole("button", { name: "Save" }).first().click(),
+  ]);
+  await expect(pageB.getByRole("status")).toContainText("Configuration saved", { timeout: 10_000 });
+  const modelA = page.getByLabel("Model").first();
+  await modelA.fill("stale-session-a-model");
+  const staleResponse = page.waitForResponse((response) => response.url().includes("integration-configs/chat") && response.request().method() === "PUT");
+  await page.getByRole("button", { name: "Save" }).first().click();
+  await expect((await staleResponse).status()).toBe(409);
+  await expect(page.locator("body")).toContainText(/changed; reload before updating/i, { timeout: 10_000 });
+  await page.reload();
+  await expect(page.getByLabel("Model").first()).toHaveValue("session-b-model");
+  await page.screenshot({ path: `${screenshots}/settings-version-conflict.png`, fullPage: true });
+  await sessionB.close();
+});
+
+test("invalid CSRF mutation is rejected without a success state", async ({ page }) => {
+  await signIn(page, "admin@example.com", "change-me-admin");
+  await page.goto("/settings");
+  await page.route("**/api/v1/organizations/*/integration-configs/chat", async (route) => {
+    const headers = { ...route.request().headers() };
+    delete headers["x-csrf-token"];
+    await route.continue({ headers });
+  });
+  const model = page.getByLabel("Model").first();
+  await model.fill("csrf-rejected-model");
+  await page.getByRole("button", { name: "Save" }).first().click();
+  await expect(page.getByRole("status")).toContainText(/CSRF token missing or invalid/i, { timeout: 10_000 });
+  await expect(page.getByRole("status")).not.toContainText("Configuration saved");
+  await page.unroute("**/api/v1/organizations/*/integration-configs/chat");
+  await page.reload();
+  await expect(page.getByLabel("Model").first()).not.toHaveValue("csrf-rejected-model");
+  await page.screenshot({ path: `${screenshots}/settings-csrf-rejection.png`, fullPage: true });
 });

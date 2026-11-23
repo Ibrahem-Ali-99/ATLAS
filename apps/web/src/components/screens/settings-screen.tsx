@@ -25,10 +25,10 @@ import {
 
 export function SettingsScreen() {
   const session = useQuery(sessionQueryOptions);
+  const queryClient = useQueryClient();
   const { organizationId } = useWorkspace();
   const { role } = useWorkspace();
   const isAdmin = role === "admin";
-  const queryClient = useQueryClient();
   const integrations = useQuery({
     queryKey: ["integrations", organizationId],
     queryFn: () => getIntegrations(organizationId ?? ""),
