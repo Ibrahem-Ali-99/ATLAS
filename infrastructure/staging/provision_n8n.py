@@ -90,7 +90,7 @@ def compose(
         "--project-directory",
         str(ROOT / "infrastructure"),
         "--env-file",
-        str(env_file),
+        env_file.resolve().as_posix(),
         "-f",
         str(COMPOSE_FILE),
         *args,
@@ -147,7 +147,9 @@ def export_workflows(project: str, env_file: Path, env: dict[str, str]) -> list[
             )
             if result.returncode == 0:
                 copied = compose(project, env_file, ["cp", f"n8n:{remote}", str(local)], env)
-                compose(project, env_file, ["exec", "-T", "-u", "node", "n8n", "rm", "-f", remote], env)
+                compose(
+                    project, env_file, ["exec", "-T", "-u", "node", "n8n", "rm", "-f", remote], env
+                )
                 if copied.returncode == 0 and local.is_file():
                     return parse_export(local)
             last = f"{result.stdout}\n{result.stderr}".strip()
@@ -223,7 +225,11 @@ def main(argv: list[str] | None = None) -> int:
         for workflow in exported:
             name = workflow.get("name")
             workflow_id = workflow.get("id")
-            if name in imported_names and workflow.get("active") is True and isinstance(workflow_id, str):
+            if (
+                name in imported_names
+                and workflow.get("active") is True
+                and isinstance(workflow_id, str)
+            ):
                 deactivate(args.project, args.env_file, env, workflow_id)
         exported = export_workflows(args.project, args.env_file, env)
         active = assert_imported(exported)

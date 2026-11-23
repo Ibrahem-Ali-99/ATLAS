@@ -114,7 +114,10 @@ def write_env() -> dict[str, str]:
     ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     password = secrets.token_hex(24)
     values = {
-        "STAGING_ENVIRONMENT": "production",
+        # This disposable proof uses the deterministic provider so it does not
+        # download Ollama. Production correctly rejects deterministic providers;
+        # the real staging configuration is unchanged.
+        "STAGING_ENVIRONMENT": "development",
         "STAGING_SECRET_KEY": secrets.token_hex(32),
         "STAGING_POSTGRES_USER": "atlas",
         "STAGING_POSTGRES_PASSWORD": secrets.token_hex(24),
@@ -561,7 +564,9 @@ def main() -> int:
     try:
         compose(env, "down", "-v", "--remove-orphans", check=False)
         print("Building the disposable backup proof")
-        compose(env, "up", "-d", "--build")
+        startup = compose(env, "up", "-d", "--build", check=False)
+        if startup.returncode != 0 and "dependency failed to start" not in startup.stderr:
+            raise AcceptFailure(f"disposable startup failed\n{startup.stdout}\n{startup.stderr}")
         wait_healthy(env)
         bootstrap(env)
         copy_ca(env)
