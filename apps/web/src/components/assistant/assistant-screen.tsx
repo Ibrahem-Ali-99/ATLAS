@@ -76,17 +76,14 @@ function AssistantWorkspace({
     },
   });
   const send = useMutation({
-    mutationFn: async (content: string) => {
-      if (!conversationId) {
-        throw new Error("Start a conversation first.");
-      }
+    mutationFn: async ({ content, targetConversationId }: { content: string; targetConversationId: string }) => {
       setStreaming("");
       setPhases([]);
       setNotice(null);
       let phase = "";
       return streamConversationMessage(
         organizationId,
-        conversationId,
+        targetConversationId,
         content,
         (token) => {
           if (phase === "verifying") {
@@ -108,7 +105,7 @@ function AssistantWorkspace({
       if (reply.message.sources.length > 0) {
         setFocusSource(sourceKey(reply.message.sources[0]));
       }
-      await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, conversationId] });
+      await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, reply.conversation_id] });
       await queryClient.invalidateQueries({ queryKey: ["conversations", organizationId] });
     },
     onError: async () => {
@@ -125,10 +122,19 @@ function AssistantWorkspace({
   }, [detail.data?.messages]);
   const focused = sources.find((source) => sourceKey(source) === focusSource) ?? sources[0] ?? null;
 
-  function submit(content = draft.trim()) {
-    if (content && conversationId && !send.isPending) {
-      send.mutate(content);
+  async function submit(content = draft.trim()) {
+    if (!content || send.isPending || create.isPending) return;
+    let targetConversationId = conversationId;
+    if (!targetConversationId) {
+      try {
+        const conversation = await create.mutateAsync();
+        targetConversationId = conversation.id;
+        router.replace(`/assistant?conversation=${conversation.id}`);
+      } catch {
+        return;
+      }
     }
+    send.mutate({ content, targetConversationId });
   }
 
   function revealSources() {
@@ -176,11 +182,7 @@ function AssistantWorkspace({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex w-full max-w-4xl flex-col gap-6 py-2">
-            {!conversationId ? (
-              <p className="text-sm leading-6 text-muted-foreground">
-                No conversation is open. Start one from the list, then ask about a document or a CRM record for {organizationName}.
-              </p>
-            ) : null}
+            {!conversationId ? <EmptyThread organizationName={organizationName} onPrompt={setDraft} /> : null}
             {conversationId && detail.data && detail.data.messages.length === 0 && !send.isPending ? (
               <EmptyThread organizationName={organizationName} onPrompt={setDraft} />
             ) : null}
@@ -230,14 +232,14 @@ function AssistantWorkspace({
                   }
                 }}
                 placeholder="Ask about records, documents or your organization…"
-                disabled={!conversationId || send.isPending}
+                disabled={send.isPending || create.isPending}
                 className="min-h-12 border-0 bg-transparent px-0 py-1 shadow-none focus-visible:ring-0"
               />
               <div className="mt-2 flex items-center justify-between gap-3">
                 <p className="text-[10px] uppercase tracking-[0.14em] text-subtle">
                   Enter to send · Shift + Enter for a new line
                 </p>
-                <Button type="submit" className="rounded-[10px]" disabled={!conversationId || send.isPending || draft.trim().length === 0}>
+                <Button type="submit" className="rounded-[10px]" disabled={send.isPending || create.isPending || draft.trim().length === 0}>
                   {send.isPending ? "Answering…" : "Send →"}
                 </Button>
               </div>
