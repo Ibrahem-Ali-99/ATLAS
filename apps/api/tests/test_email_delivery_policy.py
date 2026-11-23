@@ -19,6 +19,7 @@ def eligible_config(**updates: object) -> SimpleNamespace:
         "sender_domain_verified": True,
         "sender_domain_verification_method": "dns",
         "allowed_recipient_domains": ["harbor.example"],
+        "from_address": "noreply@harbor.example",
     }
     config.update(updates)
     return SimpleNamespace(
@@ -45,6 +46,7 @@ def test_live_delivery_requires_all_gates() -> None:
     approval_intent = intent(contact_id)
     db = ScalarSequence(
         eligible_config(),
+        SimpleNamespace(verified_at=datetime.now(UTC)),
         SimpleNamespace(
             organization_id=approval_intent.organization_id,
             email="mina@harbor.example",
@@ -60,7 +62,8 @@ def test_live_delivery_requires_domain_evidence() -> None:
     contact_id = uuid.uuid4()
     approval_intent = intent(contact_id)
     db = ScalarSequence(
-        eligible_config(sender_domain_verified=False),
+        eligible_config(),
+        None,
         SimpleNamespace(email="mina@harbor.example"),
     )
 
@@ -72,7 +75,11 @@ def test_live_delivery_requires_domain_evidence() -> None:
 def test_live_delivery_rejects_changed_recipient() -> None:
     contact_id = uuid.uuid4()
     approval_intent = intent(contact_id)
-    db = ScalarSequence(eligible_config(), SimpleNamespace(email="other@harbor.example"))
+    db = ScalarSequence(
+        eligible_config(),
+        SimpleNamespace(verified_at=datetime.now(UTC)),
+        SimpleNamespace(email="other@harbor.example"),
+    )
 
     result = live_delivery_eligibility(db, approval_intent)
 
@@ -84,6 +91,7 @@ def test_live_delivery_rejects_disallowed_domain() -> None:
     approval_intent = intent(contact_id, "mina@outside.example")
     db = ScalarSequence(
         eligible_config(),
+        SimpleNamespace(verified_at=datetime.now(UTC)),
         SimpleNamespace(email="mina@outside.example"),
     )
 

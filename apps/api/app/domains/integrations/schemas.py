@@ -78,3 +78,19 @@ class VerificationResult(BaseModel):
     integration: IntegrationMetadata
     verified: bool
     detail: str
+
+
+class EmailDomainInput(BaseModel):
+    domain: str = Field(min_length=3, max_length=253)
+
+
+class EmailDomainOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    organization_id: str
+    provider: str
+    domain: str
+    status: str
+    dns_records: list[dict[str, Any]]
+    verified_at: Any | None = None
+    checked_at: Any | None = None

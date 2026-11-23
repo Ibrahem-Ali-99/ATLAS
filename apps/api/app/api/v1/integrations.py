@@ -11,9 +11,13 @@ from app.core.errors import AppError
 from app.domains.audit.service import record_event
 from app.domains.automation.signatures import open_integration_secret
 from app.domains.identity.dependencies import Admin, CsrfAdmin, DbSession
+from app.domains.integrations.domain_models import EmailDomainVerification
+from app.domains.integrations.domain_service import check_domain, register_domain
 from app.domains.integrations.models import IntegrationConfig, IntegrationStatus, IntegrationType
 from app.domains.integrations.schemas import (
     CredentialUpdate,
+    EmailDomainInput,
+    EmailDomainOut,
     IntegrationInput,
     IntegrationMetadata,
     IntegrationUpdate,
@@ -36,6 +40,32 @@ from app.integrations.smtp_verification import verify_smtp
 router = APIRouter(
     prefix="/organizations/{organization_id}/integration-configs", tags=["integrations"]
 )
+
+
+@router.post("/email-domains", response_model=EmailDomainOut)
+def create_email_domain(
+    body: EmailDomainInput, admin: CsrfAdmin, db: DbSession
+) -> EmailDomainVerification:
+    record = register_domain(db, admin.organization.id, body.domain)
+    db.commit()
+    return record
+
+
+@router.post("/email-domains/{domain_id}/check", response_model=EmailDomainOut)
+def verify_email_domain(
+    domain_id: uuid.UUID, admin: CsrfAdmin, db: DbSession
+) -> EmailDomainVerification:
+    record = db.scalar(
+        select(EmailDomainVerification).where(
+            EmailDomainVerification.id == domain_id,
+            EmailDomainVerification.organization_id == admin.organization.id,
+        )
+    )
+    if record is None:
+        raise AppError(404, "domain_not_found", "Sending domain not found")
+    check_domain(db, record)
+    db.commit()
+    return record
 
 
 @router.get("", response_model=list[IntegrationMetadata])

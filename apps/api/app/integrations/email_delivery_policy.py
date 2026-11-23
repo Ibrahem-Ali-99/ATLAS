@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.domains.automation.models import ExecutionIntent
 from app.domains.crm.models import Contact
+from app.domains.integrations.domain_models import DomainVerificationStatus, EmailDomainVerification
 from app.domains.integrations.models import IntegrationConfig, IntegrationStatus, IntegrationType
 
 
@@ -52,10 +53,20 @@ def live_delivery_eligibility(
         return LiveDeliveryEligibility(False, "live_delivery_not_enabled")
     if config.verified_at is None:
         return LiveDeliveryEligibility(False, "smtp_not_verified")
-    if settings.get("sender_domain_verified") is not True:
+    sender = settings.get("from_address")
+    sender_domain = _domain(sender) if isinstance(sender, str) else None
+    if sender_domain is None:
+        return LiveDeliveryEligibility(False, "sender_address_invalid")
+    verified_domain = db.scalar(
+        select(EmailDomainVerification).where(
+            EmailDomainVerification.organization_id == intent.organization_id,
+            EmailDomainVerification.domain == sender_domain,
+            EmailDomainVerification.provider == "resend",
+            EmailDomainVerification.status == DomainVerificationStatus.verified,
+        )
+    )
+    if verified_domain is None or verified_domain.verified_at is None:
         return LiveDeliveryEligibility(False, "sender_domain_not_verified")
-    if settings.get("sender_domain_verification_method") not in {"dns", "provider_api"}:
-        return LiveDeliveryEligibility(False, "sender_domain_evidence_missing")
 
     payload = intent.payload if isinstance(intent.payload, dict) else {}
     recipient = payload.get("to")
@@ -97,3 +108,10 @@ def live_delivery_eligibility(
 def _normalize(value: str) -> str:
     _, address = parseaddr(value.strip())
     return address.casefold()
+
+
+def _domain(value: str) -> str | None:
+    address = _normalize(value)
+    if "@" not in address:
+        return None
+    return address.rsplit("@", 1)[1]

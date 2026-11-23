@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.errors import AppError
+from app.domains.automation.signatures import open_integration_secret
+from app.domains.integrations.domain_models import (
+    DomainVerificationStatus,
+    EmailDomainVerification,
+)
+from app.domains.integrations.models import IntegrationConfig, IntegrationType
+from app.integrations.domain_verification import DomainProvider, ResendDomainProvider
+
+
+def provider_for_email(db: Session, organization_id: uuid.UUID) -> DomainProvider:
+    config = db.scalar(
+        select(IntegrationConfig).where(
+            IntegrationConfig.organization_id == organization_id,
+            IntegrationConfig.integration_type == IntegrationType.email,
+        )
+    )
+    if config is None or config.provider != "smtp" or not config.encrypted_credentials:
+        raise AppError(
+            503, "email_provider_unconfigured", "Email provider credentials are unavailable."
+        )
+    try:
+        raw = json.loads(open_integration_secret(config.encrypted_credentials))
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise AppError(
+            503, "email_provider_unconfigured", "Email provider credentials are invalid."
+        ) from exc
+    token = raw.get("resend_api_key") if isinstance(raw, dict) else None
+    if not isinstance(token, str) or not token.strip():
+        raise AppError(
+            503,
+            "email_provider_unconfigured",
+            "A Resend domain-verification token is required.",
+        )
+    return ResendDomainProvider(token)
+
+
+def register_domain(
+    db: Session, organization_id: uuid.UUID, domain: str
+) -> EmailDomainVerification:
+    normalized = domain.strip().casefold().rstrip(".")
+    if not normalized or "@" in normalized or "." not in normalized:
+        raise AppError(422, "invalid_domain", "A valid sending domain is required.")
+    provider = provider_for_email(db, organization_id)
+    result = provider.register(normalized)
+    record = EmailDomainVerification(
+        organization_id=organization_id,
+        provider="resend",
+        domain=normalized,
+        status=(
+            DomainVerificationStatus.verified
+            if result.verified
+            else DomainVerificationStatus.pending
+        ),
+        dns_records=[record.__dict__ for record in result.records],
+        provider_domain_id=result.provider_domain_id,
+        evidence=result.evidence,
+        verified_at=datetime.now(UTC) if result.verified else None,
+        checked_at=datetime.now(UTC),
+    )
+    db.add(record)
+    db.flush()
+    return record
+
+
+def check_domain(db: Session, record: EmailDomainVerification) -> EmailDomainVerification:
+    result = provider_for_email(db, record.organization_id).status(record.provider_domain_id or "")
+    record.status = (
+        DomainVerificationStatus.verified
+        if result.verified
+        else DomainVerificationStatus.pending
+    )
+    record.dns_records = [item.__dict__ for item in result.records]
+    record.evidence = result.evidence
+    record.checked_at = datetime.now(UTC)
+    record.verified_at = datetime.now(UTC) if result.verified else None
+    return record
