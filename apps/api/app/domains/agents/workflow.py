@@ -65,6 +65,7 @@ class AgentState(TypedDict, total=False):
     draft_response: str
     knowledge: list[dict[str, Any]]
     contact_id: str | None
+    contact_email: str | None
     contact_company_id: str | None
     existing_lead_id: str | None
     qualification: str
@@ -173,6 +174,7 @@ def lookup_customer(state: AgentState) -> dict[str, Any]:
     run = _run(ctx)
     found = ctx.tools.find_contact(state["contact_name"])
     contact_id = found.get("id") if isinstance(found, dict) else None
+    contact_email = found.get("email") if isinstance(found, dict) else None
     company_id = found.get("company_id") if isinstance(found, dict) else None
     lead_id = found.get("lead_id") if isinstance(found, dict) else None
     if not isinstance(lead_id, str) or not lead_id:
@@ -194,6 +196,7 @@ def lookup_customer(state: AgentState) -> dict[str, Any]:
     )
     return {
         "contact_id": contact_id if isinstance(contact_id, str) else None,
+        "contact_email": contact_email if isinstance(contact_email, str) else None,
         "contact_company_id": company_id if isinstance(company_id, str) else None,
         "existing_lead_id": existing,
     }
@@ -228,7 +231,9 @@ def propose(state: AgentState) -> dict[str, Any]:
             {
                 "attach_to": "run_lead",
                 "lead_id": state.get("existing_lead_id"),
-                "to": "inbox@localhost",
+                "contact_id": state.get("contact_id"),
+                "recipient_snapshot": state.get("contact_email"),
+                "to": state.get("contact_email") or "inbox@localhost",
                 "subject": state["lead_title"][:200],
                 "body": state["draft_response"],
             },

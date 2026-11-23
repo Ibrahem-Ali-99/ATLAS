@@ -19,9 +19,9 @@ from app.domains.automation.models import (
     IntentStatus,
 )
 from app.domains.crm import service as crm
-from app.domains.crm.models import InteractionKind
+from app.domains.crm.models import Contact, InteractionKind
 from app.integrations.calendar import Slot, calendar_adapter
-from app.integrations.email import OutboundEmail, send_email
+from app.integrations.email import OutboundEmail, normalize_recipient, send_email
 from app.integrations.outcomes import DeliveryFailed, OutcomeUncertain
 
 _MAX_ATTEMPTS = 2
@@ -217,6 +217,36 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
         recipient = payload.get("to")
         if not isinstance(recipient, str):
             raise AppError(422, "invalid_recipient", "The approved action has no recipient")
+        contact_id = _uuid(payload.get("contact_id"))
+        snapshot = payload.get("recipient_snapshot")
+        if contact_id is not None:
+            contact = db.scalar(
+                select(Contact).where(
+                    Contact.id == contact_id,
+                    Contact.organization_id == intent.organization_id,
+                )
+            )
+            if contact is None or not contact.email:
+                raise AppError(
+                    422,
+                    "invalid_recipient",
+                    "The approved recipient is not an organization contact",
+                )
+            if not isinstance(snapshot, str) or normalize_recipient(
+                snapshot
+            ) != normalize_recipient(contact.email):
+                raise AppError(
+                    409,
+                    "recipient_changed",
+                    "The approved recipient changed; review the action again",
+                )
+            if normalize_recipient(recipient) != normalize_recipient(snapshot):
+                raise AppError(
+                    409,
+                    "recipient_changed",
+                    "The approved recipient changed; review the action again",
+                )
+            recipient = contact.email
         subject = payload.get("subject")
         receipt = send_email(
             OutboundEmail(
@@ -226,7 +256,9 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
                 else "Message",
                 body=body.strip()[:4000],
                 idempotency_key=intent.idempotency_key,
-            )
+            ),
+            db=db,
+            organization_id=intent.organization_id,
         )
         return {
             "kind": "email",

@@ -1,9 +1,15 @@
 import smtplib
+import uuid
 from dataclasses import dataclass
 from email.message import EmailMessage
+from email.utils import parseaddr
 
-from app.core.config import get_settings
+from sqlalchemy.orm import Session
+
+from app.core.config import Settings, get_settings
 from app.core.errors import AppError
+from app.domains.integrations.models import IntegrationStatus, IntegrationType
+from app.domains.integrations.service import read_metadata
 from app.integrations.outcomes import DeliveryFailed, OutcomeUncertain
 
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "mailpit", "::1"})
@@ -23,7 +29,53 @@ class DeliveryReceipt:
     mode: str
 
 
-def send_email(message: OutboundEmail) -> DeliveryReceipt:
+def normalize_recipient(value: str) -> str:
+    """Return a single normalized address, rejecting display-name ambiguity."""
+    _, address = parseaddr(value.strip())
+    if not address or address.count("@") != 1:
+        raise AppError(422, "invalid_recipient", "The approved action has no valid recipient")
+    local, domain = address.rsplit("@", 1)
+    if (
+        not local
+        or not domain
+        or ("." not in domain and domain.casefold() != "localhost")
+        or any(char.isspace() for char in address)
+    ):
+        raise AppError(422, "invalid_recipient", "The approved action has no valid recipient")
+    return address.casefold()
+
+
+def _sandbox_settings(db: Session | None, organization_id: uuid.UUID | None) -> Settings:
+    settings = get_settings()
+    if db is not None and organization_id is not None:
+        override = read_metadata(db, organization_id, IntegrationType.email)
+        if override is not None and override.status != IntegrationStatus.configured:
+            raise AppError(
+                503, "email_integration_disabled", "Organization email delivery is disabled"
+            )
+        if override is not None and (
+            override.provider != "smtp"
+            or not isinstance(override.config.get("host"), str)
+            or not isinstance(override.config.get("port"), int)
+        ):
+            raise AppError(503, "email_unconfigured", "Organization email configuration is invalid")
+    if settings.email_mode == "live" and not settings.email_live_enabled:
+        raise AppError(503, "email_unconfigured", "Live email is not enabled")
+    if settings.email_mode == "sandbox" and settings.smtp_host.lower() not in _LOCAL_HOSTS:
+        raise AppError(
+            503,
+            "email_unconfigured",
+            "Sandbox email only delivers to a local SMTP host",
+        )
+    return settings
+
+
+def send_email(
+    message: OutboundEmail,
+    *,
+    db: Session | None = None,
+    organization_id: uuid.UUID | None = None,
+) -> DeliveryReceipt:
     """Deliver through the configured SMTP transport.
 
     Sandbox mode refuses any host that is not local. Live mode refuses to run
@@ -31,16 +83,8 @@ def send_email(message: OutboundEmail) -> DeliveryReceipt:
     already have accepted the message.
     """
 
-    settings = get_settings()
-    if settings.email_mode == "live" and not settings.email_live_enabled:
-        raise AppError(503, "email_unconfigured", "Live email is not enabled")
-    if settings.email_mode == "sandbox" and settings.smtp_host.lower() not in _LOCAL_HOSTS:
-        raise AppError(
-            503, "email_unconfigured", "Sandbox email only delivers to a local SMTP host"
-        )
-    recipient = message.recipient.strip()
-    if "@" not in recipient:
-        raise AppError(422, "invalid_recipient", "The approved action has no recipient")
+    settings = _sandbox_settings(db, organization_id)
+    recipient = normalize_recipient(message.recipient)
     token = message.idempotency_key[:24]
     message_id = f"<{token}@atlas.local>"
     payload = EmailMessage()
