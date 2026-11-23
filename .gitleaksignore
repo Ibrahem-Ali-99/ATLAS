@@ -1,0 +1,4 @@
+# Verified historical false positive: deliberately invalid key in the
+# fail-closed integration test added by c118dd2. The current fixture was
+# corrected; this exact fingerprint does not weaken detection rules.
+c118dd214328382de94d797e9a4161c7512a332b:apps/api/tests/test_integrations_foundation.py:generic-api-key:117
