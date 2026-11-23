@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 
 import structlog
@@ -12,6 +13,7 @@ from app.domains.automation.intents import dispatch_intent
 from app.domains.automation.models import ExecutionIntent, IntentStatus
 
 logger = structlog.get_logger(__name__)
+_stdlib_logger = logging.getLogger(__name__)
 
 
 def run_once() -> int:
@@ -44,11 +46,18 @@ def run_once() -> int:
 
 def start(stop_event: threading.Event, interval_seconds: float = 1.0) -> threading.Thread:
     def loop() -> None:
+        logger.info("automation_worker_loop_started")
         while not stop_event.is_set():
-            run_once()
+            try:
+                run_once()
+            except Exception:
+                logger.exception("automation_worker_poll_failed")
+                _stdlib_logger.exception("automation_worker_poll_failed")
             stop_event.wait(interval_seconds)
+        logger.info("automation_worker_loop_stopped")
 
-    logger.info("automation_worker_started")
+    logger.info("automation_worker_started", interval_seconds=interval_seconds)
+    _stdlib_logger.info("automation_worker_started interval_seconds=%s", interval_seconds)
     thread = threading.Thread(target=loop, name="atlas-automation-worker", daemon=True)
     thread.start()
     return thread

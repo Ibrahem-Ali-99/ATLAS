@@ -1,3 +1,4 @@
+import logging
 import os
 import threading
 from collections.abc import AsyncIterator
@@ -14,6 +15,7 @@ from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware
 
 logger = structlog.get_logger(__name__)
+_stdlib_logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -55,7 +57,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.error("checkpoint_setup_failed")
     worker_stop: threading.Event | None = None
     worker_thread: threading.Thread | None = None
-    if settings.environment != "test" or os.environ.get("ATLAS_E2E_PROVIDER_TRANSPORT") == "1":
+    worker_enabled = (
+        settings.environment != "test"
+        or os.environ.get("ATLAS_E2E_PROVIDER_TRANSPORT") == "1"
+    )
+    logger.info("automation_worker_enabled", enabled=worker_enabled)
+    _stdlib_logger.info("automation_worker_enabled enabled=%s", worker_enabled)
+    if worker_enabled:
         from app.domains.automation.worker import start
 
         worker_stop = threading.Event()
@@ -65,6 +73,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         from app.domains.automation.worker import stop
 
         stop(worker_stop, worker_thread)
+    else:
+        logger.info("automation_worker_stopped", enabled=False)
     logger.info("shutdown")
 
 
