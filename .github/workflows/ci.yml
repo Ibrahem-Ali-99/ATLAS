@@ -54,6 +54,7 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
+      - run: npm run test:unit
       - run: npm run lint
       # next build writes next-env.d.ts and .next/types, which tsc needs on a clean checkout.
       - run: npm run build
