@@ -82,7 +82,7 @@ def compose(
             "--project-directory",
             str(ROOT / "infrastructure"),
             "--env-file",
-            str(ENV_FILE),
+            str(ENV_FILE.resolve()),
             "-f",
             str(COMPOSE_FILE),
             *args,
@@ -111,6 +111,7 @@ def compose(
 
 
 def write_env() -> dict[str, str]:
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     password = secrets.token_hex(24)
     values = {
         "STAGING_ENVIRONMENT": "production",
@@ -132,6 +133,8 @@ def write_env() -> dict[str, str]:
     ENV_FILE.write_text(
         "".join(f"{key}={value}\n" for key, value in values.items()), encoding="utf-8"
     )
+    if not ENV_FILE.is_file():
+        raise AcceptFailure("backup_proof_env_not_created")
     return values
 
 

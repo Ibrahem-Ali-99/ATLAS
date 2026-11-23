@@ -104,7 +104,9 @@ class DockerRestore:
         self.compose(["stop", "api", "web", "caddy", "n8n", "embedding-model"])
 
     def prepare_volumes(self) -> None:
-        created = self.compose(["create", "api", "n8n"])
+        # Only create the writers whose volumes are restored. Without --no-deps,
+        # Compose also creates embedding-model and requires its disposable image.
+        created = self.compose(["up", "--no-start", "--no-deps", "api", "n8n"])
         if created.returncode != 0:
             raise RestoreFailed(self._reason("volume_create_failed", created))
 
