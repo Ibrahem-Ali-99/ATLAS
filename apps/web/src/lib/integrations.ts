@@ -1,6 +1,6 @@
 import { apiFetch } from "@/lib/api";
 
-export type IntegrationType = "chat" | "embedding" | "n8n";
+export type IntegrationType = "chat" | "embedding" | "n8n" | "email";
 export type IntegrationStatus = "configured" | "disabled" | "verification_failed";
 
 export type IntegrationMetadata = {
@@ -68,4 +68,35 @@ export function verifyIntegration(organizationId: string, type: IntegrationType)
   return apiFetch<VerificationResult>(`${base(organizationId)}/${type}/verify`, {
     method: "POST",
   });
+}
+
+export type EmailDomain = {
+  id: string;
+  organization_id: string;
+  provider: string;
+  domain: string;
+  status: "pending" | "verified" | "failed" | "revoked";
+  dns_records: { record_type: string; name: string; value: string }[];
+  credential_version: number;
+  verified_at?: string | null;
+  checked_at?: string | null;
+};
+
+export function getEmailDomains(organizationId: string) {
+  return apiFetch<EmailDomain[]>(`${base(organizationId)}/email-domains`);
+}
+
+export function registerEmailDomain(organizationId: string, domain: string) {
+  return apiFetch<EmailDomain>(`${base(organizationId)}/email-domains`, {
+    method: "POST",
+    body: JSON.stringify({ domain }),
+  });
+}
+
+export function checkEmailDomain(organizationId: string, id: string) {
+  return apiFetch<EmailDomain>(`${base(organizationId)}/email-domains/${id}/check`, { method: "POST" });
+}
+
+export function revokeEmailDomain(organizationId: string, id: string) {
+  return apiFetch<EmailDomain>(`${base(organizationId)}/email-domains/${id}/revoke`, { method: "POST" });
 }

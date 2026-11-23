@@ -16,6 +16,10 @@ import { getAutomations } from "@/lib/automations";
 import { useWorkspace } from "@/lib/use-workspace";
 import {
   getIntegrations,
+  getEmailDomains,
+  registerEmailDomain,
+  checkEmailDomain,
+  revokeEmailDomain,
   integrationAction,
   saveIntegration,
   verifyIntegration,
@@ -172,10 +176,49 @@ function IntegrationSettings({
           <ProviderCard key="chat" organizationId={organizationId} type="chat" title="Language model" record={byType.get("chat")} isAdmin={isAdmin} onChanged={onChanged} />
           <ProviderCard key="embedding" organizationId={organizationId} type="embedding" title="Embeddings" record={byType.get("embedding")} isAdmin={isAdmin} onChanged={onChanged} />
           <N8nCard record={byType.get("n8n")} />
+          <EmailSettingsCard organizationId={organizationId} isAdmin={isAdmin} record={byType.get("email")} onChanged={onChanged} />
         </div>
       )}
     </section>
   );
+}
+
+function EmailSettingsCard({
+  organizationId, isAdmin, record, onChanged,
+}: { organizationId: string; isAdmin: boolean; record?: IntegrationMetadata; onChanged: () => void }) {
+  const queryClient = useQueryClient();
+  const domains = useQuery({ queryKey: ["email-domains", organizationId], queryFn: () => getEmailDomains(organizationId) });
+  const [host, setHost] = useState(String(record?.config.host ?? "127.0.0.1"));
+  const [port, setPort] = useState(String(record?.config.port ?? "1025"));
+  const [from, setFrom] = useState(String(record?.config.from_address ?? "atlas@localhost"));
+  const [resendKey, setResendKey] = useState("");
+  const [domain, setDomain] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: () => saveIntegration(organizationId, "email", {
+      provider: "smtp", config: { host, port: Number(port), from_address: from },
+      ...(resendKey ? { credentials: JSON.stringify({ resend_api_key: resendKey }) } : {}),
+      ...(record ? { expected_version: record.credential_version } : {}),
+    }),
+    onSuccess: () => { setResendKey(""); setMessage("Saved. Delivery remains Mailpit sandbox-only."); onChanged(); void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }); },
+    onError: (error) => setMessage(error instanceof Error ? error.message : "Could not save email settings."),
+  });
+  const register = useMutation({ mutationFn: () => registerEmailDomain(organizationId, domain), onSuccess: () => { setDomain(""); setMessage("Domain registered. Publish the DNS records shown below."); void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }); }, onError: (error) => setMessage(error instanceof Error ? error.message : "Could not register domain.") });
+  const check = useMutation({ mutationFn: (id: string) => checkEmailDomain(organizationId, id), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }), onError: (error) => setMessage(error instanceof Error ? error.message : "Verification check failed.") });
+  const revoke = useMutation({ mutationFn: (id: string) => revokeEmailDomain(organizationId, id), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }), onError: (error) => setMessage(error instanceof Error ? error.message : "Could not revoke domain.") });
+  return <div className="rounded-[10px] border border-border bg-background p-4 lg:col-span-3">
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-medium">Email delivery</h3><p className="mt-1 text-xs text-muted-foreground">Configured provider settings are separate from active delivery.</p></div><Badge variant="secondary">MAILPIT SANDBOX</Badge></div>
+    <p className="mt-3 rounded-md border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-sm leading-6 text-sky-100">All outbound email currently stays in the local Mailpit sandbox. Saving a provider or verifying a domain does not enable customer delivery.</p>
+    <div className="mt-4 grid gap-3 md:grid-cols-3">
+      <label className="grid gap-1 text-sm"><span>SMTP host</span><Input disabled={!isAdmin} value={host} onChange={(e) => setHost(e.target.value)} /></label>
+      <label className="grid gap-1 text-sm"><span>SMTP port</span><Input disabled={!isAdmin} value={port} onChange={(e) => setPort(e.target.value)} /></label>
+      <label className="grid gap-1 text-sm"><span>Sender address</span><Input disabled={!isAdmin} value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+    </div>
+    {isAdmin ? <div className="mt-3 flex flex-wrap items-end gap-3"><label className="grid min-w-[260px] flex-1 gap-1 text-sm"><span>Resend verification token</span><Input type="password" autoComplete="new-password" value={resendKey} onChange={(e) => setResendKey(e.target.value)} placeholder={record?.has_credentials ? "Leave blank to keep current token" : "Enter token"} /></label><Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save email settings"}</Button>{record ? <Button size="sm" variant="outline" onClick={() => verifyIntegration(organizationId, "email").then((result) => setMessage(result.detail)).catch(() => setMessage("Connection test failed."))}>Test SMTP connection</Button> : null}</div> : null}
+    <div className="mt-5 border-t border-border pt-4"><h4 className="text-sm font-medium">Sending domains</h4><p className="mt-1 text-xs text-muted-foreground">Register a domain, publish the provider DNS records, then refresh verification.</p>{isAdmin ? <div className="mt-3 flex gap-2"><Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="mail.example.com" /><Button size="sm" onClick={() => register.mutate()} disabled={!domain || register.isPending}>Register domain</Button></div> : null}
+      <div className="mt-3 space-y-3">{domains.isPending ? <Skeleton className="h-12 w-full" /> : domains.data?.length ? domains.data.map((item) => <div key={item.id} className="rounded-md border border-border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{item.domain}</span><Badge variant="secondary">{item.status}</Badge></div>{item.dns_records.length ? <div className="mt-2 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr className="text-muted-foreground"><th className="pr-3">Type</th><th className="pr-3">Host</th><th>Value</th></tr></thead><tbody>{item.dns_records.map((dns) => <tr key={`${dns.record_type}-${dns.name}`}><td className="pr-3">{dns.record_type}</td><td className="max-w-[220px] truncate pr-3">{dns.name}</td><td className="max-w-[320px] truncate">{dns.value}</td></tr>)}</tbody></table></div> : null}{isAdmin ? <div className="mt-3 flex gap-2"><Button size="sm" variant="outline" onClick={() => check.mutate(item.id)}>Refresh status</Button><Button size="sm" variant="ghost" onClick={() => { if (window.confirm(`Revoke ${item.domain}?`)) revoke.mutate(item.id); }}>Revoke</Button></div> : null}</div>) : <p className="text-sm text-muted-foreground">No sending domains registered.</p>}</div>
+    </div>{message ? <p className="mt-3 text-xs text-muted-foreground" role="status">{message}</p> : null}
+  </div>;
 }
 
 function ProviderCard({
