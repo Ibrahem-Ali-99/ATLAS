@@ -1,5 +1,5 @@
 import { execFileSync, type ChildProcess, spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const apiRoot = path.resolve(process.cwd(), "../api");
@@ -46,6 +46,7 @@ function spawnApi(): Promise<ChildProcess> {
         ATLAS_E2E_API_PORT: String(apiPort),
         ATLAS_E2E_WEB_PORT: "3011",
         ATLAS_E2E_PROVIDER_TRANSPORT: "1",
+        ATLAS_ENVIRONMENT: "development",
         ATLAS_SMTP_HOST: "127.0.0.1",
         ATLAS_SMTP_PORT: String(mailpitPort),
       },
@@ -98,7 +99,19 @@ function projectPython(): string {
     : "python";
 }
 
+function stopPreviousApi(): void {
+  try {
+    const previousPid = Number(readFileSync(pidFile, "utf8"));
+    if (Number.isFinite(previousPid) && previousPid > 0) {
+      execFileSync("taskkill", ["/PID", String(previousPid), "/T", "/F"], { stdio: "ignore" });
+    }
+  } catch {
+    // The previous disposable API was already stopped.
+  }
+}
+
 export default async function globalSetup(): Promise<void> {
+  stopPreviousApi();
   mkdirSync(path.dirname(logFile), { recursive: true });
   writeFileSync(logFile, "e2e API startup\n", "utf8");
   const prepare = spawn(projectPython(), ["-m", "app.scripts.e2e_database"], {
