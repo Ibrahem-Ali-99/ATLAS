@@ -20,6 +20,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, sessionQueryOptions } from "@/lib/api";
 import { titleForPath } from "@/lib/navigation";
+import { WorkspaceProvider, useWorkspace } from "@/lib/use-workspace";
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).slice(0, 2);
@@ -27,11 +28,16 @@ function initials(name: string): string {
 }
 
 export function WorkspaceShell({ children }: { children: ReactNode }) {
+  return <WorkspaceProvider><WorkspaceShellContent>{children}</WorkspaceShellContent></WorkspaceProvider>;
+}
+
+function WorkspaceShellContent({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const session = useQuery(sessionQueryOptions);
   const [navOpen, setNavOpen] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
+  const workspace = useWorkspace();
   const unauthenticated = session.error instanceof ApiError && session.error.status === 401;
 
   useEffect(() => {
@@ -77,7 +83,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   }
 
   const user = session.data.user;
-  const organizationName = session.data.memberships[0]?.organization_name ?? null;
+  const organizationName = workspace.organizationName;
   const immersive = pathname === "/assistant";
 
   return (
@@ -105,6 +111,20 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
               <span className="truncate">{titleForPath(pathname)}</span>
             </p>
           </div>
+          {workspace.memberships.length > 1 ? (
+            <label className="sr-only" htmlFor="organization-selector">Organization</label>
+          ) : null}
+          {workspace.memberships.length > 1 ? (
+            <select
+              id="organization-selector"
+              aria-label="Organization"
+              value={workspace.organizationId ?? ""}
+              onChange={(event) => workspace.setOrganizationId(event.target.value)}
+              className="mr-2 max-w-48 rounded-md border border-border bg-background px-2 py-1 text-xs"
+            >
+              {workspace.memberships.map((membership) => <option key={membership.organization_id} value={membership.organization_id}>{membership.organization_name}</option>)}
+            </select>
+          ) : null}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button

@@ -84,6 +84,7 @@ def seed_identity(db: Session, settings: SeedSettings) -> None:
         password=settings.seed_outsider_password,
     )
     upsert_membership(db, user=admin, organization=atlas, role=MembershipRole.admin)
+    upsert_membership(db, user=admin, organization=northwind, role=MembershipRole.admin)
     upsert_membership(db, user=staff, organization=atlas, role=MembershipRole.staff)
     upsert_membership(db, user=outsider, organization=northwind, role=MembershipRole.admin)
     seed_sample_crm(db, atlas=atlas, northwind=northwind, admin=admin, outsider=outsider)

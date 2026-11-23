@@ -28,6 +28,19 @@ test("admin settings expose editable provider controls and fallback state", asyn
   await page.screenshot({ path: `${screenshots}/settings-admin-mobile.png`, fullPage: true });
 });
 
+test("organization selection switches and persists the workspace", async ({ page }) => {
+  await signIn(page, "admin@example.com", "change-me-admin");
+  const selector = page.getByLabel("Organization");
+  await expect(selector).toBeVisible();
+  await expect(selector.locator("option")).toHaveCount(2);
+  await selector.selectOption({ label: "Northwind" });
+  await page.goto("/settings");
+  await expect(page.getByText("Northwind", { exact: true }).first()).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Organization")).toHaveValue(await selector.inputValue());
+  await page.screenshot({ path: `${screenshots}/settings-northwind.png`, fullPage: true });
+});
+
 test("staff settings are read-only", async ({ page }) => {
   await signIn(page, "staff@example.com", "change-me-staff");
   await page.goto("/settings");

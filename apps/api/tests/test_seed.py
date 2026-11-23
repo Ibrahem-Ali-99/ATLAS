@@ -27,7 +27,7 @@ def test_seed_is_idempotent_and_isolates_tenants(client: TestClient, db: Session
 
     assert db.scalar(select(func.count()).select_from(User)) == 3
     assert db.scalar(select(func.count()).select_from(Organization)) == 2
-    assert db.scalar(select(func.count()).select_from(Membership)) == 3
+    assert db.scalar(select(func.count()).select_from(Membership)) == 4
 
     admin = client.post(
         "/api/v1/auth/login",
@@ -35,7 +35,7 @@ def test_seed_is_idempotent_and_isolates_tenants(client: TestClient, db: Session
     )
     assert admin.status_code == 200
     slugs = {item["organization_slug"] for item in admin.json()["memberships"]}
-    assert slugs == {"atlas-demo"}
+    assert slugs == {"atlas-demo", "northwind"}
 
     client.cookies.clear()
     staff = client.post(
