@@ -8,6 +8,7 @@ volumes. The caller starts the application after this command exits.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -16,7 +17,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from backup import ROOT, BackupFailed, cipher_file, read_env_file
+from backup import CIPHER_PROGRAM, ROOT, BackupFailed, cipher_file, read_env_file
 from backup_contract import (
     BackupContractError,
     assert_project,
@@ -274,6 +275,50 @@ def decrypt(
         raise RestoreFailed(exc.reason) from exc
 
 
+def decrypt_local(source: Path, dest: Path, passphrase: str) -> None:
+    """Decrypt without Compose for read-only archive verification."""
+    result = subprocess.run(
+        [sys.executable, "-c", CIPHER_PROGRAM, "dec"],
+        input=source.read_bytes(),
+        capture_output=True,
+        env={**os.environ, "ATLAS_BACKUP_PASSPHRASE": passphrase},
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout:
+        raise RestoreFailed("restore_failed decrypt_failed")
+    dest.write_bytes(result.stdout)
+
+
+def verify_archive(*, archive: Path, passphrase: str) -> str:
+    """Validate an archive without Docker, Compose, or persistent resources."""
+    if archive.name.endswith(".tar.gz.enc") and not passphrase:
+        raise BackupContractError("backup_refused passphrase_required")
+    with tempfile.TemporaryDirectory(prefix="atlas-verify-") as temporary:
+        root = Path(temporary)
+        tar_path = root / "archive.tar.gz"
+        if archive.name.endswith(".tar.gz.enc"):
+            decrypt_local(archive, tar_path, passphrase)
+        else:
+            tar_path = archive
+        if tar_path.stat().st_size < 2 or tar_path.read_bytes()[:2] != b"\x1f\x8b":
+            raise RestoreFailed("restore_failed gzip_header")
+        extract_root = root / "tree"
+        extract_root.mkdir()
+        try:
+            with tarfile.open(tar_path, "r:gz") as packed:
+                packed.extractall(extract_root, filter="data")
+                member_count = len(packed.getmembers())
+        except (OSError, tarfile.TarError) as exc:
+            raise RestoreFailed("restore_failed archive_read") from exc
+        try:
+            manifest = read_manifest(extract_root / "manifest.json")
+            verify_tree(extract_root, manifest)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise RestoreFailed("restore_failed manifest") from exc
+        decrypted_bytes = tar_path.stat().st_size
+    return f"verify_ok archive={archive.name} members={member_count} bytes={decrypted_bytes}"
+
+
 def database_name(record_file: str) -> str:
     prefix = "postgres-"
     suffix = ".dump"
@@ -340,14 +385,19 @@ def main() -> int:
     parser.add_argument("--project", required=True)
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--archive", type=Path, required=True)
+    parser.add_argument("--verify-only", action="store_true")
     args = parser.parse_args()
     try:
-        line = restore_backup(
-            project=args.project,
-            env_file=args.env_file,
-            archive=args.archive,
-            passphrase=resolve_passphrase(),
-        )
+        passphrase = resolve_passphrase()
+        if args.verify_only:
+            line = verify_archive(archive=args.archive, passphrase=passphrase)
+        else:
+            line = restore_backup(
+                project=args.project,
+                env_file=args.env_file,
+                archive=args.archive,
+                passphrase=passphrase,
+            )
     except BackupContractError as exc:
         print(exc.reason, file=sys.stderr)
         return 2
