@@ -18,6 +18,67 @@ def _vector(value: float) -> list[float]:
     return [value] * get_settings().embedding_dimensions
 
 
+def test_injected_transport_covers_success_auth_timeout_and_network_failure() -> None:
+    seen: list[str] = []
+
+    def success(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("authorization", ""))
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+            request=request,
+        )
+
+    client = OpenAICompatibleChatClient(_configured(), transport=httpx.MockTransport(success))
+    assert client.complete("system", "user") == "ok"
+    assert seen == ["Bearer test-key"]
+
+    unauthorized = httpx.MockTransport(lambda request: httpx.Response(401, request=request))
+    with pytest.raises(AppError) as invalid:
+        OpenAICompatibleChatClient(_configured(), transport=unauthorized).complete("system", "user")
+    assert invalid.value.code == "llm_unauthorized"
+
+    def timeout(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("test timeout", request=request)
+
+    with pytest.raises(AppError) as timed_out:
+        OpenAICompatibleChatClient(_configured(), transport=httpx.MockTransport(timeout)).complete(
+            "system", "user"
+        )
+    assert timed_out.value.code == "llm_timeout"
+
+    def offline(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    with pytest.raises(AppError) as unavailable:
+        OpenAICompatibleChatClient(_configured(), transport=httpx.MockTransport(offline)).complete(
+            "system", "user"
+        )
+    assert unavailable.value.code == "llm_unavailable"
+
+
+def test_injected_embedding_transport_redacts_secret_from_response_and_uses_it_only_on_request(
+) -> None:
+    secret = "organization-secret-that-must-not-return"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == f"Bearer {secret}"
+        return httpx.Response(
+            200,
+            json={"data": [{"index": 0, "embedding": _vector(0.1)}]},
+            request=request,
+        )
+
+    client = OpenAICompatibleEmbeddingClient(
+        _configured().model_copy(update={"embedding_api_key": secret}),
+        transport=httpx.MockTransport(handler),
+    )
+    result = client.embed(["hello"])
+    assert len(result[0]) == get_settings().embedding_dimensions
+    assert secret not in repr(result)
+
+
 class _Response:
     def __init__(self, status: int, payload: object) -> None:
         self.status_code = status

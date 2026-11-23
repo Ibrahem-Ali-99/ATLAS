@@ -9,6 +9,7 @@ from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 
 logger = structlog.get_logger(__name__)
+HttpTransport = httpx.BaseTransport
 
 
 class EmbeddingClient(Protocol):
@@ -24,8 +25,9 @@ class ChatClient(Protocol):
 
 
 class OpenAICompatibleEmbeddingClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, transport: HttpTransport | None = None) -> None:
         self._settings = settings
+        self._transport = transport
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
@@ -52,6 +54,7 @@ class OpenAICompatibleEmbeddingClient:
             timeout_code="embedding_timeout",
             rate_code="embedding_rate_limited",
             unavailable_message=_embedding_unavailable_message(self._settings),
+            transport=self._transport,
         )
         _raise_for_provider_status(response.status_code, kind="embedding")
         try:
@@ -66,8 +69,9 @@ class OpenAICompatibleEmbeddingClient:
 
 
 class OpenAICompatibleChatClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, transport: HttpTransport | None = None) -> None:
         self._settings = settings
+        self._transport = transport
 
     def ensure_configured(self) -> None:
         if not self._settings.llm_api_key.strip():
@@ -114,13 +118,25 @@ class OpenAICompatibleChatClient:
             body["max_tokens"] = self._settings.llm_max_output_tokens
         if "json" in system.lower():
             body["response_format"] = {"type": "json_object"}
-        with httpx.stream(
-            "POST",
-            f"{self._settings.llm_base_url.rstrip('/')}/chat/completions",
-            headers=_bearer(self._settings.llm_api_key),
-            json=body,
-            timeout=self._settings.llm_timeout_seconds,
-        ) as response:
+        if self._transport is None:
+            response_context = httpx.stream(
+                "POST",
+                f"{self._settings.llm_base_url.rstrip('/')}/chat/completions",
+                headers=_bearer(self._settings.llm_api_key),
+                json=body,
+                timeout=self._settings.llm_timeout_seconds,
+            )
+        else:
+            client = httpx.Client(
+                transport=self._transport, timeout=self._settings.llm_timeout_seconds
+            )
+            response_context = client.stream(
+                "POST",
+                f"{self._settings.llm_base_url.rstrip('/')}/chat/completions",
+                headers=_bearer(self._settings.llm_api_key),
+                json=body,
+            )
+        with response_context as response:
             _raise_for_provider_status(response.status_code, kind="llm")
             for line in response.iter_lines():
                 if not line.startswith("data:"):
@@ -263,11 +279,16 @@ def _post_with_retry(
     timeout_code: str,
     rate_code: str,
     unavailable_message: str,
+    transport: HttpTransport | None = None,
 ) -> httpx.Response:
     response: httpx.Response | None = None
     for attempt in range(2):
         try:
-            response = httpx.post(url, headers=headers, json=body, timeout=timeout)
+            if transport is None:
+                response = httpx.post(url, headers=headers, json=body, timeout=timeout)
+            else:
+                with httpx.Client(transport=transport, timeout=timeout) as client:
+                    response = client.post(url, headers=headers, json=body)
         except httpx.TimeoutException as exc:
             if attempt == 1:
                 raise AppError(504, timeout_code, "The embedding provider timed out.") from exc
