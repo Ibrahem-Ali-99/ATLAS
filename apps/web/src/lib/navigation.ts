@@ -6,6 +6,7 @@ import {
   CheckCheck,
   LayoutDashboard,
   Settings,
+  ListChecks,
   Sparkles,
   Users,
   Workflow,
@@ -33,11 +34,12 @@ const workflows = { href: "/workflows", label: "Workflows", icon: Workflow };
 const analytics = { href: "/analytics", label: "Analytics", icon: BarChart3 };
 const monitoring = { href: "/monitoring", label: "Monitoring", icon: Activity };
 const settings = { href: "/settings", label: "Settings", icon: Settings };
+const setup = { href: "/setup", label: "First-run setup", icon: ListChecks };
 
 export const navigationGroups: NavGroup[] = [
   { label: "Business operations", items: [overview, assistant, crm, knowledge] },
   { label: "Operations", items: [agentRuns, approvals, workflows] },
-  { label: "Insight", items: [analytics, monitoring, settings] },
+  { label: "Insight", items: [analytics, monitoring, setup, settings] },
 ];
 
 export const navigation: NavItem[] = navigationGroups.flatMap((group) => group.items);

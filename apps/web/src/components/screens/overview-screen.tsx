@@ -56,6 +56,7 @@ export function OverviewScreen() {
           Decisions, customer activity and execution health
         </p>
         <DataScopeControl value={scope} onChange={setScope} />
+        <Link href="/setup" className="mt-3 inline-block text-xs text-primary">Open first-run setup checklist →</Link>
         {analytics.data ? (
           <p className="mt-2 max-w-3xl text-xs leading-5 text-subtle">{analytics.data.provenance_notice}</p>
         ) : null}
