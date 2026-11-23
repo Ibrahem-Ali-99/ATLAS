@@ -59,16 +59,17 @@ export function SetupScreen() {
   const knowledgeReady = Boolean(documents.data?.items.some((item) => item.status === "ready"));
   const crmReady = Boolean((companies.data?.total ?? 0) + (leads.data?.total ?? 0) + (inquiries.data?.total ?? 0));
   const n8nReady = Boolean(automations.data?.n8n_configured && automations.data.webhook_configured);
+  const n8nInstalled = Boolean(automations.data?.n8n_configured);
   const items = [
-    { title: "Organization details", detail: `${workspace.organizationName ?? "Organization"} is active for this workspace.`, state: "verified" as State, href: "/settings" },
-    { title: "AI provider setup", detail: provider.data?.llm_detail ?? "Checking provider configuration.", state: providerReady ? "ready" as State : "attention" as State, href: "/settings" },
-    { title: "Embedding model readiness", detail: provider.data?.embedding_detail ?? "Checking embedding service.", state: provider.data?.embedding_ready ? "ready" as State : "attention" as State, href: "/knowledge" },
-    { title: "Initial company knowledge", detail: knowledgeReady ? "At least one document is indexed and searchable." : "Upload a PDF or TXT document, then wait for Indexed and searchable.", state: knowledgeReady ? "ready" as State : "not_configured" as State, href: "/knowledge" },
-    { title: "CRM starting point", detail: crmReady ? "CRM records are available. Choose Operational or Demo scope deliberately." : "The operational CRM is empty. Create or import a record when ready.", state: crmReady ? "ready" as State : "not_configured" as State, href: "/crm" },
-    { title: "Email and calendar", detail: "Email remains sandboxed and calendar remains simulated; no external action is enabled.", state: "verified" as State, href: "/settings" },
-    { title: "n8n workflow setup", detail: n8nReady ? "Webhook key and n8n endpoint are configured." : "n8n is installed, but the webhook key is not configured. Activation is operator-managed.", state: n8nReady ? "ready" as State : "attention" as State, href: "/workflows" },
-    { title: "First grounded question", detail: providerReady && knowledgeReady ? "Ask a question in Assistant and inspect its citations." : "Requires a ready chat provider and at least one indexed document.", state: providerReady && knowledgeReady ? "ready" as State : "not_configured" as State, href: "/assistant" },
-    { title: "Approval-controlled operation", detail: "Agent runs and approvals are real records; nothing is executed without an approval action.", state: "verified" as State, href: "/agent-runs" },
+    { title: "Organization details", detail: `${workspace.organizationName ?? "Organization"} is active for this workspace.`, state: "verified" as State, href: "/settings", action: "Review organization" },
+    { title: "AI provider setup", detail: provider.data?.llm_detail ?? "Checking provider configuration.", state: providerReady ? "ready" as State : "attention" as State, href: "/settings", action: "Review provider status" },
+    { title: "Embedding model readiness", detail: provider.data?.embedding_detail ?? "Checking embedding service.", state: provider.data?.embedding_ready ? "ready" as State : "attention" as State, href: "/knowledge", action: "Open knowledge" },
+    { title: "Initial company knowledge", detail: knowledgeReady ? "Knowledge indexed and ready for search." : "Knowledge is empty. Upload a PDF or TXT document, then wait for Indexed and searchable.", state: knowledgeReady ? "ready" as State : "not_configured" as State, href: "/knowledge", action: knowledgeReady ? "Open knowledge" : "Upload knowledge" },
+    { title: "CRM starting point", detail: crmReady ? "CRM records are available. Choose Operational or Demo scope deliberately." : "Operational CRM is empty. Create the first company when ready.", state: crmReady ? "ready" as State : "not_configured" as State, href: "/crm?tab=companies", action: "Open companies" },
+    { title: "Email and calendar", detail: "Email remains sandboxed and calendar remains simulated; no external action is enabled.", state: "verified" as State, href: "/settings", action: "Review limitations" },
+    { title: "n8n workflow setup", detail: n8nReady ? "Installed, active, and callback verified." : n8nInstalled ? "Installed but inactive: callback verification is not configured." : "Not configured in this environment.", state: n8nReady ? "ready" as State : n8nInstalled ? "attention" as State : "not_configured" as State, href: "/workflows", action: "Open workflows" },
+    { title: "First grounded question", detail: providerReady && knowledgeReady ? "Ask a question in Assistant and inspect its citations." : "Requires a ready chat provider and indexed knowledge.", state: providerReady && knowledgeReady ? "ready" as State : "not_configured" as State, href: "/assistant", action: "Open Assistant" },
+    { title: "Approval-controlled operation", detail: "Agent runs and approvals are real records; nothing is executed without an approval action.", state: "verified" as State, href: "/agent-runs", action: "Review approvals" },
   ];
 
   const attentionCount = items.filter((item) => item.state === "attention" || item.state === "not_configured").length;
@@ -94,6 +95,10 @@ export function SetupScreen() {
           <Link href="/overview"><Button variant="outline">Open workspace</Button></Link>
         </div>
       </section>
+      <section className="rounded-[10px] bg-muted p-5">
+        <h2 className="text-lg text-foreground">Follow these steps in order</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Each step reflects live backend state. “Verified” means ATLAS can report the state; it does not claim an external provider is live.</p>
+      </section>
       <section className="grid gap-3 lg:grid-cols-2">
         {items.map((item, index) => {
           const state = stateCopy[item.state];
@@ -109,7 +114,7 @@ export function SetupScreen() {
                 </div>
                 <span className={`whitespace-nowrap text-xs uppercase tracking-[0.1em] ${state.className}`}>{state.label}</span>
               </div>
-              <Link className="mt-4 inline-block text-xs text-primary" href={item.href}>Open supported action →</Link>
+              <Link className="mt-4 inline-block text-xs text-primary" href={item.href}>{item.action} →</Link>
             </article>
           );
         })}

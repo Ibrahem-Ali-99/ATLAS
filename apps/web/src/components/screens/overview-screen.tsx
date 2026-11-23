@@ -63,7 +63,8 @@ export function OverviewScreen() {
       </header>
       {analytics.isPending ? <Skeleton className="h-36 w-full" /> : null}
       {analytics.isError ? <RequestError error={analytics.error} /> : null}
-      {analytics.data ? (
+      {analytics.data && isOperationalEmpty(analytics.data) ? <OperationalEmptyState /> : null}
+      {analytics.data && !isOperationalEmpty(analytics.data) ? (
         <>
           <MetricRow data={analytics.data} />
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(16rem,0.7fr)]">
@@ -90,6 +91,25 @@ export function OverviewScreen() {
         {ready.isError ? "not ready" : ready.data?.database ?? "checking"}.
       </p>
     </div>
+  );
+}
+
+function isOperationalEmpty(data: AnalyticsSnapshot): boolean {
+  return data.lead_origins.operational === 0 && data.inquiries_total === 0 && data.approvals.pending === 0 && data.failed_runs === 0;
+}
+
+function OperationalEmptyState() {
+  return (
+    <section className="rounded-[10px] bg-muted px-6 py-8" aria-labelledby="empty-overview-title">
+      <p className="text-xs uppercase tracking-[0.14em] text-primary">Operational workspace</p>
+      <h2 id="empty-overview-title" className="mt-2 text-2xl text-foreground">Your operational workspace is ready for its first record</h2>
+      <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">There is no operational business activity yet, so ATLAS is not showing invented totals or empty scorecards. Start with a company, a knowledge document, or the guided setup path.</p>
+      <div className="mt-6 grid gap-3 sm:grid-cols-3">
+        <Link href="/crm?tab=companies" className="rounded-[10px] bg-secondary px-4 py-4 text-sm text-foreground hover:bg-accent"><span className="block font-medium">Create a company</span><span className="mt-2 block text-xs text-muted-foreground">Add the first operational organization record.</span></Link>
+        <Link href="/knowledge" className="rounded-[10px] bg-secondary px-4 py-4 text-sm text-foreground hover:bg-accent"><span className="block font-medium">Upload knowledge</span><span className="mt-2 block text-xs text-muted-foreground">Add a document and choose its origin explicitly.</span></Link>
+        <Link href="/setup" className="rounded-[10px] bg-secondary px-4 py-4 text-sm text-foreground hover:bg-accent"><span className="block font-medium">Open guided setup</span><span className="mt-2 block text-xs text-muted-foreground">Review what is configured and what still needs an operator.</span></Link>
+      </div>
+    </section>
   );
 }
 
