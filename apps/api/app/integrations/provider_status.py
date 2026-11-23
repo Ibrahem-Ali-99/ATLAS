@@ -6,7 +6,7 @@ import httpx
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.domains.knowledge.vectors import incompatible_document_count
 from app.integrations.resolver import resolve_settings
 
@@ -25,8 +25,11 @@ class ProviderStatus(BaseModel):
 
 
 def provider_status(db: Session, organization_id: uuid.UUID) -> ProviderStatus:
-    settings = resolve_settings(db, organization_id, "chat")
-    embedding_settings = resolve_settings(db, organization_id, "embedding")
+    base_settings = get_settings()
+    settings = resolve_settings(db, organization_id, "chat", base_settings=base_settings)
+    embedding_settings = resolve_settings(
+        db, organization_id, "embedding", base_settings=base_settings
+    )
     llm_ready, llm_detail = _llm_status(settings)
     embedding_ready, embedding_detail = _embedding_status(embedding_settings)
     return ProviderStatus(

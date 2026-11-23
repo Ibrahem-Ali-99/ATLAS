@@ -16,9 +16,13 @@ from app.domains.integrations.models import IntegrationConfig, IntegrationStatus
 
 
 def resolve_settings(
-    db: Session, organization_id: uuid.UUID, kind: Literal["chat", "embedding"]
+    db: Session,
+    organization_id: uuid.UUID,
+    kind: Literal["chat", "embedding"],
+    *,
+    base_settings: Settings | None = None,
 ) -> Settings:
-    settings = get_settings()
+    settings = base_settings or get_settings()
     record = db.query(IntegrationConfig).filter(
         IntegrationConfig.organization_id == organization_id,
         IntegrationConfig.integration_type == IntegrationType(kind),
