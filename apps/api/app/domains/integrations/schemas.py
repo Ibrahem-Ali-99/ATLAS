@@ -94,3 +94,4 @@ class EmailDomainOut(BaseModel):
     dns_records: list[dict[str, Any]]
     verified_at: Any | None = None
     checked_at: Any | None = None
+    credential_version: int

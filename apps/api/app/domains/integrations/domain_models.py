@@ -35,6 +35,7 @@ class EmailDomainVerification(Base):
         Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    credential_version: Mapped[int] = mapped_column(nullable=False, default=1)
     domain: Mapped[str] = mapped_column(String(253), nullable=False)
     status: Mapped[DomainVerificationStatus] = mapped_column(
         DOMAIN_VERIFICATION_STATUS, nullable=False, default=DomainVerificationStatus.pending

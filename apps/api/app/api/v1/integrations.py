@@ -12,7 +12,7 @@ from app.domains.audit.service import record_event
 from app.domains.automation.signatures import open_integration_secret
 from app.domains.identity.dependencies import Admin, CsrfAdmin, DbSession
 from app.domains.integrations.domain_models import EmailDomainVerification
-from app.domains.integrations.domain_service import check_domain, register_domain
+from app.domains.integrations.domain_service import check_domain, register_domain, revoke_domain
 from app.domains.integrations.models import IntegrationConfig, IntegrationStatus, IntegrationType
 from app.domains.integrations.schemas import (
     CredentialUpdate,
@@ -47,7 +47,36 @@ def create_email_domain(
     body: EmailDomainInput, admin: CsrfAdmin, db: DbSession
 ) -> EmailDomainVerification:
     record = register_domain(db, admin.organization.id, body.domain)
+    record_event(
+        db,
+        admin.organization.id,
+        "email_domain_registered",
+        {"domain": record.domain},
+        actor_id=admin.user.id,
+    )
     db.commit()
+    return record
+
+
+@router.get("/email-domains", response_model=list[EmailDomainOut])
+def list_email_domains(admin: Admin, db: DbSession) -> list[EmailDomainVerification]:
+    return list(db.scalars(
+        select(EmailDomainVerification)
+        .where(EmailDomainVerification.organization_id == admin.organization.id)
+        .order_by(EmailDomainVerification.domain)
+    ).all())
+
+
+@router.get("/email-domains/{domain_id}", response_model=EmailDomainOut)
+def get_email_domain(domain_id: uuid.UUID, admin: Admin, db: DbSession) -> EmailDomainVerification:
+    record = db.scalar(
+        select(EmailDomainVerification).where(
+            EmailDomainVerification.id == domain_id,
+            EmailDomainVerification.organization_id == admin.organization.id,
+        )
+    )
+    if record is None:
+        raise AppError(404, "domain_not_found", "Sending domain not found")
     return record
 
 
@@ -64,6 +93,45 @@ def verify_email_domain(
     if record is None:
         raise AppError(404, "domain_not_found", "Sending domain not found")
     check_domain(db, record)
+    record_event(
+        db,
+        admin.organization.id,
+        "email_domain_verification_checked",
+        {"domain": record.domain},
+        actor_id=admin.user.id,
+    )
+    if record.status == "verified":
+        record_event(
+            db,
+            admin.organization.id,
+            "email_domain_verified",
+            {"domain": record.domain},
+            actor_id=admin.user.id,
+        )
+    db.commit()
+    return record
+
+
+@router.post("/email-domains/{domain_id}/revoke", response_model=EmailDomainOut)
+def revoke_email_domain(
+    domain_id: uuid.UUID, admin: CsrfAdmin, db: DbSession
+) -> EmailDomainVerification:
+    record = db.scalar(
+        select(EmailDomainVerification).where(
+            EmailDomainVerification.id == domain_id,
+            EmailDomainVerification.organization_id == admin.organization.id,
+        )
+    )
+    if record is None:
+        raise AppError(404, "domain_not_found", "Sending domain not found")
+    revoke_domain(db, record)
+    record_event(
+        db,
+        admin.organization.id,
+        "email_domain_revoked",
+        {"domain": record.domain},
+        actor_id=admin.user.id,
+    )
     db.commit()
     return record
 
