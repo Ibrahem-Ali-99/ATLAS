@@ -25,3 +25,4 @@ Thumbs.db
 .vscode/
 var/
 infrastructure/staging/local-ca.crt
+infrastructure/staging/accept-ca.crt

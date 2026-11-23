@@ -107,7 +107,10 @@ class StagingClient:
 
 
 def compose(
-    *args: str, check: bool = True, stream: bool = False
+    *args: str,
+    check: bool = True,
+    stream: bool = False,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     command = [
         "docker",
@@ -122,12 +125,16 @@ def compose(
         str(COMPOSE_FILE),
         *args,
     ]
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
     result = subprocess.run(
         command,
         cwd=ROOT,
         text=True,
         capture_output=not stream,
         check=False,
+        env=env,
     )
     if check and result.returncode != 0:
         raise SmokeFailure(f"{' '.join(args)} failed\n{result.stdout}\n{result.stderr}".strip())
@@ -562,7 +569,47 @@ def main() -> int:
         if _login_status(client, values) != 200:
             assert_staging_database()
             seeded = compose(
-                "exec", "-T", "-u", "atlas", "api", "python", "-m", "app.scripts.seed", check=False
+                "exec",
+                "-T",
+                "-u",
+                "atlas",
+                "-e",
+                "SEED_ADMIN_EMAIL",
+                "-e",
+                "SEED_ADMIN_PASSWORD",
+                "-e",
+                "SEED_ADMIN_NAME",
+                "-e",
+                "SEED_STAFF_EMAIL",
+                "-e",
+                "SEED_STAFF_PASSWORD",
+                "-e",
+                "SEED_STAFF_NAME",
+                "-e",
+                "SEED_OUTSIDER_EMAIL",
+                "-e",
+                "SEED_OUTSIDER_PASSWORD",
+                "-e",
+                "SEED_OUTSIDER_NAME",
+                "api",
+                "python",
+                "-m",
+                "app.scripts.seed",
+                check=False,
+                extra_env={
+                    key: values[key]
+                    for key in (
+                        "SEED_ADMIN_EMAIL",
+                        "SEED_ADMIN_PASSWORD",
+                        "SEED_ADMIN_NAME",
+                        "SEED_STAFF_EMAIL",
+                        "SEED_STAFF_PASSWORD",
+                        "SEED_STAFF_NAME",
+                        "SEED_OUTSIDER_EMAIL",
+                        "SEED_OUTSIDER_PASSWORD",
+                        "SEED_OUTSIDER_NAME",
+                    )
+                },
             )
             if seeded.returncode != 0:
                 raise SmokeFailure(f"seed failed\n{seeded.stdout}\n{seeded.stderr}")
