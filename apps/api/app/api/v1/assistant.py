@@ -1,9 +1,9 @@
 import json
 import uuid
 from collections.abc import Iterator
-from typing import Annotated
+from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from starlette.responses import StreamingResponse
 
 from app.core.errors import AppError
@@ -24,6 +24,20 @@ from app.integrations.language import (
 )
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["assistant"])
+
+
+def organization_embedder(request: Request, member: Member, db: DbSession) -> EmbeddingClient:
+    override = request.app.dependency_overrides.get(get_embedding_client)
+    if override is not None:
+        return cast(EmbeddingClient, override())
+    return get_embedding_client(db, member.organization.id)
+
+
+def organization_chat(request: Request, member: Member, db: DbSession) -> ChatClient:
+    override = request.app.dependency_overrides.get(get_chat_client)
+    if override is not None:
+        return cast(ChatClient, override())
+    return get_chat_client(db, member.organization.id)
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
@@ -62,8 +76,8 @@ def create_message(
     body: MessageCreate,
     member: CsrfMember,
     db: DbSession,
-    embedder: Annotated[EmbeddingClient, Depends(get_embedding_client)],
-    chat: Annotated[ChatClient, Depends(get_chat_client)],
+    embedder: Annotated[EmbeddingClient, Depends(organization_embedder)],
+    chat: Annotated[ChatClient, Depends(organization_chat)],
 ) -> ReplyOut:
     turn = service.prepare_turn(
         db,
@@ -88,8 +102,8 @@ def stream_message(
     body: MessageCreate,
     member: CsrfMember,
     db: DbSession,
-    embedder: Annotated[EmbeddingClient, Depends(get_embedding_client)],
-    chat: Annotated[ChatClient, Depends(get_chat_client)],
+    embedder: Annotated[EmbeddingClient, Depends(organization_embedder)],
+    chat: Annotated[ChatClient, Depends(organization_chat)],
 ) -> StreamingResponse:
     turn = service.prepare_turn(
         db,

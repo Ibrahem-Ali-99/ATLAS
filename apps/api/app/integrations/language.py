@@ -286,8 +286,12 @@ def _post_with_retry(
     return response
 
 
-def get_embedding_client() -> EmbeddingClient:
+def get_embedding_client(db: Any = None, organization_id: Any = None) -> EmbeddingClient:
     settings = get_settings()
+    if db is not None and organization_id is not None:
+        from app.integrations.resolver import resolve_settings
+
+        settings = resolve_settings(db, organization_id, "embedding")
     if settings.public_demo and settings.embedding_provider != "double":
         raise AppError(
             503,
@@ -301,8 +305,12 @@ def get_embedding_client() -> EmbeddingClient:
     return OpenAICompatibleEmbeddingClient(settings)
 
 
-def get_chat_client() -> ChatClient:
+def get_chat_client(db: Any = None, organization_id: Any = None) -> ChatClient:
     settings = get_settings()
+    if db is not None and organization_id is not None:
+        from app.integrations.resolver import resolve_settings
+
+        settings = resolve_settings(db, organization_id, "chat")
     if settings.public_demo and settings.llm_provider != "double":
         raise AppError(
             503,

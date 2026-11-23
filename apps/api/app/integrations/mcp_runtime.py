@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -17,6 +18,8 @@ from typing import Literal
 import structlog
 
 from app.core.config import get_settings
+from app.core.database import SessionLocal
+from app.integrations.resolver import resolve_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -109,6 +112,12 @@ def mcp_process_env(*, organization_id: str | None = None) -> dict[str, str]:
     """Environment for an MCP child. The chat key is not included."""
 
     settings = get_settings()
+    if organization_id is not None:
+        db = SessionLocal()
+        try:
+            settings = resolve_settings(db, uuid.UUID(organization_id), "embedding")
+        finally:
+            db.close()
     env = _process_env()
     env.update(
         {

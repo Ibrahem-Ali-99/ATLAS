@@ -14,6 +14,7 @@ from app.domains.knowledge.models import Chunk, Document, DocumentStatus
 from app.domains.knowledge.vectors import store_chunk_embedding
 from app.domains.provenance.origin import Origin
 from app.integrations.language import EmbeddingClient, get_embedding_client
+from app.integrations.resolver import resolve_settings
 
 logger = structlog.get_logger(__name__)
 ALLOWED_TYPES = {"application/pdf", "text/plain", "application/octet-stream"}
@@ -169,15 +170,15 @@ def ingest_document(document_id: uuid.UUID, embedder: EmbeddingClient | None = N
         if not pieces:
             _record_failure(db, document, "No text could be extracted from the document")
             return
-        client = embedder or get_embedding_client()
+        resolved = resolve_settings(db, document.organization_id, "embedding")
+        client = embedder or get_embedding_client(db, document.organization_id)
         vectors = client.embed([piece.content for piece in pieces])
         if len(vectors) != len(pieces) or any(
-            len(vector) != get_settings().embedding_dimensions for vector in vectors
+            len(vector) != resolved.embedding_dimensions for vector in vectors
         ):
             _record_failure(db, document, "The embedding provider returned an unexpected response")
             return
         db.execute(delete(Chunk).where(Chunk.document_id == document.id))
-        settings = get_settings()
         for piece, vector in zip(pieces, vectors, strict=True):
             chunk = Chunk(
                 organization_id=document.organization_id,
@@ -186,7 +187,7 @@ def ingest_document(document_id: uuid.UUID, embedder: EmbeddingClient | None = N
                 page_number=piece.page_number,
                 content=piece.content,
             )
-            store_chunk_embedding(chunk, vector, settings)
+            store_chunk_embedding(chunk, vector, resolved)
             db.add(chunk)
         db.flush()
         db.execute(

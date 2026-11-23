@@ -1,7 +1,7 @@
 import uuid
-from typing import Annotated
+from typing import Annotated, cast
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request, Response, UploadFile
 
 from app.domains.crm.service import page_bounds
 from app.domains.identity.dependencies import CsrfMember, DbSession, Member
@@ -12,6 +12,13 @@ from app.domains.provenance.origin import Origin
 from app.integrations.language import EmbeddingClient, get_embedding_client
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["knowledge"])
+
+
+def organization_embedder(request: Request, member: Member, db: DbSession) -> EmbeddingClient:
+    override = request.app.dependency_overrides.get(get_embedding_client)
+    if override is not None:
+        return cast(EmbeddingClient, override())
+    return get_embedding_client(db, member.organization.id)
 
 
 @router.get("/documents", response_model=DocumentPage)
@@ -40,7 +47,7 @@ def upload_document(
     db: DbSession,
     background: BackgroundTasks,
     file: UploadFile,
-    embedder: Annotated[EmbeddingClient, Depends(get_embedding_client)],
+    embedder: Annotated[EmbeddingClient, Depends(organization_embedder)],
     origin: Annotated[Origin, Form()] = Origin.operational,
 ) -> DocumentOut:
     payload = file.file.read()
@@ -61,7 +68,7 @@ def upload_document(
 def search_documents(
     member: Member,
     db: DbSession,
-    embedder: Annotated[EmbeddingClient, Depends(get_embedding_client)],
+    embedder: Annotated[EmbeddingClient, Depends(organization_embedder)],
     q: str = Query(min_length=2, max_length=500),
 ) -> ChunkPage:
     rows = search_chunks(db, member.organization.id, q, embedder)
@@ -112,7 +119,7 @@ def reindex_document(
     member: CsrfMember,
     db: DbSession,
     background: BackgroundTasks,
-    embedder: Annotated[EmbeddingClient, Depends(get_embedding_client)],
+    embedder: Annotated[EmbeddingClient, Depends(organization_embedder)],
 ) -> DocumentOut:
     document = service.mark_reindex(db, member.organization.id, document_id)
     background.add_task(service.ingest_document, document.id, embedder)
