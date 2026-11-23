@@ -8,6 +8,7 @@ volumes. The caller starts the application after this command exits.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -24,6 +25,7 @@ from backup_contract import (
     read_manifest,
     redact,
     restore_command,
+    sha256_file,
     verify_tree,
 )
 from backup_secrets import SecretStoreError
@@ -328,6 +330,81 @@ def verify_archive(*, archive: Path, passphrase: str) -> str:
     return f"verify_ok archive={archive.name} members={member_count} bytes={decrypted_bytes}"
 
 
+def compare_upload_trees(expected: Path, actual: dict[str, str]) -> str:
+    expected_files = {
+        path.relative_to(expected).as_posix(): sha256_file(path)
+        for path in expected.rglob("*")
+        if path.is_file()
+    }
+    missing = sum(name not in actual for name in expected_files)
+    mismatched = sum(
+        name in actual and actual[name] != digest
+        for name, digest in expected_files.items()
+    )
+    unexpected = sum(name not in expected_files for name in actual)
+    matched = len(expected_files) - missing - mismatched
+    return (
+        f"upload_check matched={matched} missing={missing} "
+        f"unexpected={unexpected} mismatched={mismatched}"
+    )
+
+
+def verify_restored_uploads(
+    *, project: str, env_file: Path, archive: Path, passphrase: str
+) -> str:
+    """Compare restored storage with the uploaded-files archive, read-only."""
+    assert_project(project, restore=True)
+    env = read_env_file(env_file)
+    docker = DockerRestore(project, env_file, env)
+    with tempfile.TemporaryDirectory(prefix="atlas-upload-verify-") as temporary:
+        root = Path(temporary)
+        tar_path = root / "archive.tar.gz"
+        decrypt_local(archive, tar_path, passphrase)
+        tree = root / "tree"
+        tree.mkdir()
+        with open_validated_archive(tar_path) as packed:
+            packed.extractall(tree, filter="data")
+        manifest = read_manifest(tree / "manifest.json")
+        verify_tree(tree, manifest)
+        uploads = tree / "uploads.tar"
+        expected = root / "expected"
+        expected.mkdir()
+        with tarfile.open(uploads, "r:") as packed:
+            packed.extractall(expected, filter="data")
+        result = docker.compose(
+            [
+                "exec",
+                "-T",
+                "api",
+                "python",
+                "-c",
+                (
+                    "import hashlib,json,pathlib; "
+                "root=pathlib.Path('/var/lib/atlas/storage'); "
+                "actual={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() "
+                "for p in root.rglob('*') if p.is_file()}; "
+                    "print(json.dumps(actual))"
+                ),
+            ],
+            stdin=None,
+        )
+        if result.returncode != 0:
+            raise RestoreFailed("restore_failed uploads_inspect")
+        try:
+            actual = json.loads(result.stdout.strip() or "{}")
+        except ValueError as exc:
+            raise RestoreFailed("restore_failed uploads_inspect") from exc
+        if not isinstance(actual, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in actual.items()
+        ):
+            raise RestoreFailed("restore_failed uploads_inspect")
+        summary = compare_upload_trees(expected, actual)
+        if any(f"{field}=0" not in summary for field in ("missing", "unexpected", "mismatched")):
+            raise RestoreFailed(f"restore_failed {summary}")
+    return summary
+
+
 def database_name(record_file: str) -> str:
     prefix = "postgres-"
     suffix = ".dump"
@@ -395,11 +472,21 @@ def main() -> int:
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument("--verify-uploads", action="store_true")
     args = parser.parse_args()
     try:
         passphrase = resolve_passphrase()
+        if args.verify_only and args.verify_uploads:
+            raise BackupContractError("backup_refused verification_mode")
         if args.verify_only:
             line = verify_archive(archive=args.archive, passphrase=passphrase)
+        elif args.verify_uploads:
+            line = verify_restored_uploads(
+                project=args.project,
+                env_file=args.env_file,
+                archive=args.archive,
+                passphrase=passphrase,
+            )
         else:
             line = restore_backup(
                 project=args.project,

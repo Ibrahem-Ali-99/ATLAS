@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 from backup import CIPHER_PROGRAM, pack
 from backup_contract import build_manifest, file_record, write_manifest
-from restore import RestoreFailed, open_validated_archive, verify_archive
+from restore import (
+    RestoreFailed,
+    compare_upload_trees,
+    open_validated_archive,
+    verify_archive,
+)
 
 
 def make_archive(root: Path) -> Path:
@@ -27,7 +32,7 @@ def make_archive(root: Path) -> Path:
     plain = root / "archive.tar.gz"
     encrypted = root / "archive.tar.gz.enc"
     pack(work, plain)
-    decrypted_result = subprocess.run(
+    result = subprocess.run(
         [sys.executable, "-c", CIPHER_PROGRAM, "enc"],
         input=plain.read_bytes(),
         capture_output=True,
@@ -45,7 +50,7 @@ def test_verify_only_round_trip(tmp_path: Path) -> None:
 
     assert result.startswith("verify_ok archive=archive.tar.gz.enc")
     decrypted = tmp_path / "decrypted.tar.gz"
-    result = subprocess.run(
+    decrypted_result = subprocess.run(
         [sys.executable, "-c", CIPHER_PROGRAM, "dec"],
         input=archive.read_bytes(),
         capture_output=True,
@@ -73,3 +78,19 @@ def test_verify_only_rejects_malformed_archive(tmp_path: Path) -> None:
 
     with pytest.raises(RestoreFailed, match="gzip_header"):
         verify_archive(archive=archive, passphrase="")
+
+
+def test_compare_upload_trees_reports_missing_unexpected_and_mismatched(tmp_path: Path) -> None:
+    expected = tmp_path / "expected"
+    expected.mkdir()
+    (expected / "keep.txt").write_text("same", encoding="utf-8")
+    (expected / "missing.txt").write_text("missing", encoding="utf-8")
+
+    actual = {
+        "keep.txt": file_record(expected / "keep.txt")["sha256"],
+        "changed.txt": "0" * 64,
+    }
+
+    assert compare_upload_trees(expected, actual) == (
+        "upload_check matched=1 missing=1 unexpected=1 mismatched=0"
+    )
