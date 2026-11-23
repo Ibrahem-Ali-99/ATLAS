@@ -10,6 +10,8 @@ from app.domains.automation.models import (
     CalendarBooking,
     EmailMessage,
     ExecutionAttempt,
+    ExecutionIntent,
+    IntentStatus,
     WebhookKey,
     WorkflowRun,
 )
@@ -45,14 +47,7 @@ def snapshot(
                 .order_by(ExecutionAttempt.started_at.asc())
             )
         )
-    emails = list(
-        db.scalars(
-            select(EmailMessage)
-            .where(*_scoped(EmailMessage, organization_id, scope))
-            .order_by(EmailMessage.created_at.desc())
-            .limit(20)
-        )
-    )
+    email_activity = _email_activity(db, organization_id, scope)
     bookings = list(
         db.scalars(
             select(CalendarBooking)
@@ -111,18 +106,7 @@ def snapshot(
             }
             for run in runs
         ],
-        "emails": [
-            {
-                "id": email.id,
-                "lead_id": email.lead_id,
-                "status": email.status.value,
-                "mode": email.mode,
-                "provider_message_id": email.provider_message_id,
-                "error": email.error,
-                "sent_at": email.sent_at,
-            }
-            for email in emails
-        ],
+        "emails": email_activity,
         "bookings": [
             {
                 "id": booking.id,
@@ -136,6 +120,105 @@ def snapshot(
             for booking in bookings
         ],
     }
+
+
+def _email_activity(
+    db: Session, organization_id: uuid.UUID, scope: DataScope
+) -> list[dict[str, Any]]:
+    messages = list(
+        db.scalars(
+            select(EmailMessage)
+            .where(*_scoped(EmailMessage, organization_id, scope))
+            .order_by(EmailMessage.created_at.desc())
+            .limit(50)
+        )
+    )
+    message_by_intent = {message.intent_id: message for message in messages}
+    intents = list(
+        db.scalars(
+            select(ExecutionIntent)
+            .where(
+                ExecutionIntent.organization_id == organization_id,
+                ExecutionIntent.action_type == ActionType.prepare_customer_response,
+            )
+            .order_by(ExecutionIntent.created_at.desc())
+            .limit(50)
+        )
+    )
+    result: list[dict[str, Any]] = []
+    for intent in intents:
+        payload = intent.payload if isinstance(intent.payload, dict) else {}
+        message = message_by_intent.get(intent.id)
+        approval = db.get(Approval, intent.approval_id)
+        approval_status = approval.status.value if approval else None
+        status_value = message.status.value if message else intent.status.value
+        state = _email_state(status_value, approval_status)
+        attempts = list(
+            db.scalars(
+                select(ExecutionAttempt)
+                .where(ExecutionAttempt.intent_id == intent.id)
+                .order_by(ExecutionAttempt.started_at.asc())
+            )
+        )
+        result.append(
+            {
+                "id": message.id if message else intent.id,
+                "lead_id": _uuid_or_none(payload.get("lead_id")),
+                "status": message.status.value if message else intent.status.value,
+                "state": state,
+                "mode": message.mode if message else "sandbox",
+                "provider_message_id": message.provider_message_id if message else None,
+                "error": message.error if message else intent.last_error,
+                "sent_at": message.sent_at if message else None,
+                "subject": message.subject if message else _text(payload.get("subject")),
+                "recipient": message.recipient if message else _text(payload.get("to")),
+                "approval_id": intent.approval_id,
+                "intent_id": intent.id,
+                "attempt_count": intent.attempt_count,
+                "queued_at": intent.created_at,
+                "attempted_at": attempts[0].started_at if attempts else None,
+                "completed_at": message.sent_at if message else None,
+                "lead_title": None,
+                "company_name": None,
+                "attempts": [
+                    {
+                        "outcome": attempt.outcome.value,
+                        "error": attempt.error,
+                        "external_id": attempt.external_id,
+                        "started_at": attempt.started_at,
+                    }
+                    for attempt in attempts
+                ],
+            }
+        )
+    return result
+
+
+def _email_state(status: str, approval_status: str | None) -> str:
+    if approval_status in {ApprovalStatus.pending.value, ApprovalStatus.approved.value}:
+        return (
+            "awaiting_approval"
+            if approval_status == ApprovalStatus.pending.value
+            else "approved"
+        )
+    return {
+        IntentStatus.pending.value: "queued",
+        IntentStatus.dispatching.value: "sending",
+        IntentStatus.succeeded.value: "accepted",
+        IntentStatus.failed.value: "failed",
+        IntentStatus.needs_attention.value: "needs_attention",
+    }.get(status, status)
+
+
+def _text(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _uuid_or_none(value: object) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value)) if value else None
+    except ValueError:
+        return None
 
 
 def _card(

@@ -6,7 +6,12 @@ from app.domains.approvals import service as approvals
 from app.domains.approvals.schemas import ApprovalOut
 from app.domains.automation import status
 from app.domains.automation.hooks import create_webhook_key
-from app.domains.automation.schemas import AutomationSnapshot, BookingOut, WebhookKeyOut
+from app.domains.automation.schemas import (
+    AutomationSnapshot,
+    BookingOut,
+    EmailActivityOut,
+    WebhookKeyOut,
+)
 from app.domains.identity.dependencies import CsrfAdmin, DbSession, Member
 from app.domains.provenance.origin import DataScope
 from app.integrations.calendar import calendar_adapter
@@ -19,6 +24,16 @@ def get_automations(
     member: Member, db: DbSession, scope: DataScope = DataScope.operational
 ) -> AutomationSnapshot:
     return AutomationSnapshot.model_validate(status.snapshot(db, member.organization.id, scope))
+
+
+@router.get("/email-activity", response_model=list[EmailActivityOut])
+def get_email_activity(
+    member: Member, db: DbSession, scope: DataScope = DataScope.operational
+) -> list[EmailActivityOut]:
+    return [
+        EmailActivityOut.model_validate(item)
+        for item in status._email_activity(db, member.organization.id, scope)
+    ]
 
 
 @router.post("/integrations/webhook-keys", response_model=WebhookKeyOut, status_code=201)

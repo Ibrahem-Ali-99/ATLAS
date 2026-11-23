@@ -150,6 +150,7 @@ function WorkflowsBody({
           </div>
         )}
       </section>
+      <EmailActivitySection emails={data.emails} />
       {data.bookings.length > 0 ? (
         <section className="rounded-[10px] bg-muted px-5 py-6">
           <h2 className="text-lg text-foreground">Calendar bookings</h2>
@@ -180,6 +181,79 @@ function WorkflowsBody({
       ) : null}
     </div>
   );
+}
+
+function EmailActivitySection({ emails }: { emails: AutomationSnapshot["emails"] }) {
+  if (emails.length === 0) {
+    return (
+      <section className="rounded-[10px] bg-muted px-5 py-6">
+        <h2 className="text-[22px] text-foreground">Email activity</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Approved customer responses will appear here. ATLAS sends only through the local sandbox mailbox.
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section className="rounded-[10px] bg-muted px-5 py-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-[22px] text-foreground">Email activity</h2>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            A durable history of approved sandbox messages. SMTP acceptance is not inbox delivery.
+          </p>
+        </div>
+        <span className="text-xs uppercase tracking-[0.12em] text-subtle">Mailpit sandbox</span>
+      </div>
+      <ul className="mt-5 divide-y divide-border/50">
+        {emails.map((email) => (
+          <li key={email.intent_id ?? email.id} className="py-4 first:pt-0 last:pb-0">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{email.subject ?? "Customer response"}</p>
+                <p className="mt-1 truncate text-xs text-muted-foreground">To {email.recipient ?? "recipient unavailable"}</p>
+              </div>
+              <span className={`text-xs uppercase tracking-[0.1em] ${emailStateClass(email.state)}`}>
+                {emailStateLabel(email.state)}
+              </span>
+            </div>
+            <div className="mt-3 grid gap-2 text-xs text-subtle sm:grid-cols-3">
+              <span>{email.attempt_count ?? 0} attempt{email.attempt_count === 1 ? "" : "s"}</span>
+              <span>Queued {email.queued_at ? new Date(email.queued_at).toLocaleString() : "—"}</span>
+              <span>{email.provider_message_id ? "Accepted by SMTP server" : "No provider receipt yet"}</span>
+            </div>
+            {email.error ? <p className="mt-2 text-xs leading-5 text-destructive">{email.error}</p> : null}
+            {email.attempts && email.attempts.length > 0 ? (
+              <details className="mt-3 text-xs text-subtle">
+                <summary className="cursor-pointer text-primary">View attempt history</summary>
+                <ul className="mt-2 space-y-1 pl-4">
+                  {email.attempts.map((attempt) => <li key={`${email.id}-${attempt.started_at}`}>{attempt.outcome}{attempt.error ? `: ${attempt.error}` : ""}</li>)}
+                </ul>
+              </details>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function emailStateLabel(state?: string | null): string {
+  return ({
+    awaiting_approval: "Awaiting approval",
+    approved: "Approved",
+    queued: "Queued",
+    sending: "Sending",
+    accepted: "Accepted by SMTP",
+    failed: "Failed",
+    needs_attention: "Needs attention",
+  } as Record<string, string>)[state ?? ""] ?? "Recorded";
+}
+
+function emailStateClass(state?: string | null): string {
+  if (state === "accepted") return "text-success";
+  if (state === "failed" || state === "needs_attention") return "text-destructive";
+  return "text-warning";
 }
 
 function HistoryRow({ run }: { run: WorkflowRun }) {

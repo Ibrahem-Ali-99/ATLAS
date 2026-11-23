@@ -39,6 +39,22 @@ class EmailDeliveryOut(BaseModel):
     provider_message_id: str | None
     error: str | None
     sent_at: datetime | None
+    subject: str | None = None
+    recipient: str | None = None
+    approval_id: uuid.UUID | None = None
+    intent_id: uuid.UUID | None = None
+    attempt_count: int = 0
+    queued_at: datetime | None = None
+    attempted_at: datetime | None = None
+    completed_at: datetime | None = None
+    lead_title: str | None = None
+    company_name: str | None = None
+    state: str | None = None
+
+
+class EmailActivityOut(EmailDeliveryOut):
+    body: str | None = None
+    attempts: list[AttemptOut] = []
 
 
 class BookingOut(BaseModel):

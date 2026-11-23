@@ -30,7 +30,19 @@ export type EmailDelivery = {
   provider_message_id: string | null;
   error: string | null;
   sent_at: string | null;
+  subject?: string | null;
+  recipient?: string | null;
+  approval_id?: string | null;
+  intent_id?: string | null;
+  attempt_count?: number;
+  queued_at?: string | null;
+  attempted_at?: string | null;
+  completed_at?: string | null;
+  state?: string | null;
+  attempts?: WorkflowAttempt[];
 };
+
+export type EmailActivity = EmailDelivery & { body?: string | null };
 
 export type CalendarBooking = {
   id: string;
@@ -78,4 +90,11 @@ export function cancelBooking(organizationId: string, bookingId: string): Promis
   return apiFetch(organizationPath(organizationId, `/calendar/bookings/${bookingId}/cancel`), {
     method: "POST",
   });
+}
+
+export function getEmailActivity(
+  organizationId: string,
+  scope: DataScope = "operational",
+): Promise<EmailActivity[]> {
+  return apiFetch(organizationPath(organizationId, `/email-activity?scope=${scope}`));
 }
