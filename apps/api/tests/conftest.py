@@ -40,7 +40,7 @@ def clean_tables() -> None:
                 "TRUNCATE TABLE message_sources, messages, conversations, chunks, documents, "
                 "lead_predictions, evaluation_runs, operation_traces, model_versions, "
                 "email_messages, calendar_bookings, execution_attempts, execution_intents, "
-                "workflow_runs, webhook_events, webhook_keys, "
+                "workflow_runs, webhook_events, webhook_keys, integration_configs, "
                 "agent_events, approvals, agent_runs, "
                 "interactions, inquiries, leads, contacts, companies, "
                 "sessions, memberships, users, organizations "
