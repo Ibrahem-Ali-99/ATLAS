@@ -67,11 +67,11 @@ services:
       ATLAS_LLM_BASE_URL: ${STAGING_LLM_BASE_URL:-https://api.openai.com/v1}
       ATLAS_LLM_API_KEY: ${STAGING_LLM_API_KEY:-}
       ATLAS_LLM_MODEL: ${STAGING_LLM_MODEL:-gpt-4o-mini}
-      ATLAS_EMBEDDING_PROVIDER: ollama
-      ATLAS_EMBEDDING_BASE_URL: http://ollama:11434/v1
-      ATLAS_EMBEDDING_API_KEY: ""
-      ATLAS_EMBEDDING_MODEL: nomic-embed-text
-      ATLAS_EMBEDDING_DIMENSIONS: "768"
+      ATLAS_EMBEDDING_PROVIDER: ${STAGING_EMBEDDING_PROVIDER:-ollama}
+      ATLAS_EMBEDDING_BASE_URL: ${STAGING_EMBEDDING_BASE_URL:-http://ollama:11434/v1}
+      ATLAS_EMBEDDING_API_KEY: ${STAGING_EMBEDDING_API_KEY:-}
+      ATLAS_EMBEDDING_MODEL: ${STAGING_EMBEDDING_MODEL:-nomic-embed-text:v1.5}
+      ATLAS_EMBEDDING_DIMENSIONS: ${STAGING_EMBEDDING_DIMENSIONS:-768}
       ATLAS_STORAGE_DIR: /var/lib/atlas/storage
       ATLAS_MODEL_DIR: /var/lib/atlas/models
       ATLAS_PUBLIC_API_URL: http://api:8000
@@ -94,6 +94,8 @@ services:
         condition: service_started
       ollama:
         condition: service_started
+      embedding-model:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -167,6 +169,24 @@ services:
     networks:
       - private
     restart: unless-stopped
+
+  embedding-model:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    entrypoint: ["python", "-m", "app.scripts.provision_embedding"]
+    user: "10001"
+    environment:
+      ATLAS_EMBEDDING_PROVIDER: ${STAGING_EMBEDDING_PROVIDER:-ollama}
+      ATLAS_EMBEDDING_BASE_URL: ${STAGING_EMBEDDING_BASE_URL:-http://ollama:11434/v1}
+      ATLAS_EMBEDDING_MODEL: ${STAGING_EMBEDDING_MODEL:-nomic-embed-text:v1.5}
+      ATLAS_EMBEDDING_DIMENSIONS: ${STAGING_EMBEDDING_DIMENSIONS:-768}
+    networks:
+      - private
+    depends_on:
+      ollama:
+        condition: service_started
+    restart: "no"
 
 networks:
   private:

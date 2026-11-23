@@ -63,6 +63,11 @@ def test_staging_compose_keeps_internal_services_private() -> None:
     assert "SEED_" not in compose
     assert 'ATLAS_COOKIE_SECURE: "true"' in compose
     assert 'ATLAS_PUBLIC_DEMO: "false"' in compose
+    assert "nomic-embed-text:v1.5" in compose
+    assert "driver: nvidia" not in compose
+    gpu = (REPO_ROOT / "infrastructure" / "compose.gpu.yaml").read_text(encoding="utf-8")
+    assert "driver: nvidia" in gpu
+    assert "capabilities: [gpu]" in gpu
     assert "reverse_proxy api:8000" in caddy
     assert "reverse_proxy web:3000" in caddy
     for private in ("n8n", "mailpit", "postgres", "ollama", "5678"):
