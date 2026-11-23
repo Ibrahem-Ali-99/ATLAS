@@ -64,6 +64,35 @@ py -3 infrastructure\staging\accept_bootstrap.py
 
 Verified on 2026-11-23. The proof project `atlas-bootstrap-proof` booted in production on empty volumes. Migrations were at head. The database had no users and no companies. Bootstrap created one organization and one administrator. The repeat was refused. Sign-in through `https://atlas.localhost:18443` returned a HttpOnly, Secure, `SameSite=Lax` session cookie. n8n imported both workflows (`imported=2`, `active=0`) and the second run reported `imported=0 existing=2`. Postgres, the API, Mailpit, n8n, and Ollama published no host ports. The proof volumes were deleted afterward. The existing `atlas-postgres-1` and `atlas-staging-postgres-1` containers were still running.
 
+## Phase 3 — embedding model
+
+Staging pins `nomic-embed-text:v1.5`. On this machine that tag and `nomic-embed-text:latest` share digest `0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f`. New chunks store that model name, and search reads `chunks.embedding_768`. The staging database had no chunk rows when the name was pinned. The 1536 column and the OpenAI provider stay available: set `STAGING_EMBEDDING_PROVIDER=openai` and `STAGING_EMBEDDING_DIMENSIONS=1536`. The provision container then prints `embedding_skipped` and does not pull a model.
+
+The `embedding-model` service runs `python -m app.scripts.provision_embedding` and exits. It reads the installed tags, pulls `nomic-embed-text:v1.5` only when that tag is missing, and embeds a probe plus a synthetic document through the same `POST /v1/embeddings` path the API uses. It fails if Ollama cannot be reached, the pull fails, a vector is not 768 wide, or the matching sentence does not outrank an unrelated sentence. The next start prints `pulled=false`. The API container waits until that command exits 0. `/api/v1/ready` is still only a database check. FastAPI, Next.js, Postgres, and n8n do not request a GPU.
+
+`infrastructure/compose.gpu.yaml` is an optional merge for a Docker host that already has the NVIDIA runtime. It reserves a GPU for Ollama only. The default file does not. A required GPU device would stop a CPU VPS from booting, and the measurements below do not justify that.
+
+Verified on 2026-11-23 on the existing `atlas-staging` Ollama volume, which had no models and was not given a GPU. The first run printed `embedding_ok model=nomic-embed-text:v1.5 width=768 chunks=5 pulled=true`. The second printed `pulled=false`. `ollama list` showed digest `0a109f422b47` and size 274 MB. After the API was recreated it called that model and received 768 values. `documents` and `chunks` stayed at 0. The staging Ollama log recorded `library=cpu` and `layers.offload=0`. Weights were 260.9 MiB and the CPU load asked for 297.4 MiB.
+
+No drivers were installed. The development machine has an NVIDIA GeForce RTX 5070 with 12227 MiB, driver 616.92, compute capability 12.0, and an AMD Radeon Graphics adapter reporting 512 MB. No Intel GPU was present. Docker's NVIDIA runtime could see the RTX 5070. A short `ollama/ollama:0.12.6` container started with `--gpus all` logged the same GPU as CUDA0, 11.9 GiB, and then selected low-VRAM mode because that is under its 20 GiB threshold. That container was not used for the timed runs.
+
+Host Ollama 0.24.0 placed all 13 layers on CUDA0 when CUDA was visible. `ollama ps` reported 100% GPU. `CUDA_VISIBLE_DEVICES=-1` placed 0 of 13 layers on the GPU. `OLLAMA_NUM_GPU=0` did not select the CPU backend. The timed comparison used the same `nomic-embed-text:v1.5` weights, synthetic 800-character passages, and repeats after unloading the model.
+
+| Workload | GPU | CPU |
+| --- | --- | --- |
+| Cold load | 933.5 ms | 474.7 ms |
+| Single query, median (p95) | 18.2 ms (36.0 ms) | 24.6 ms (41.6 ms) |
+| 16-chunk batch, median | 122.2 ms, 130.9 chunks/s | 692.0 ms, 23.1 chunks/s |
+| 8 documents × 10 chunks, median | 0.61 s, 130.5 chunks/s | 3.55 s, 22.5 chunks/s |
+
+During the GPU batches, `nvidia-smi` sampled 20–36% utilization. Memory in use moved from 1885 MiB before the session to about 2746 MiB with the model resident. The CPU run kept `layers.offload=0`. The shorter CPU load time is CUDA initialization being skipped. Batch and indexing throughput on the GPU was about 5.8 times the CPU rate. A single query was about 6 ms faster. A 10-chunk document on CPU is about 0.45 s, which covers interactive staging. GPU is left opt-in.
+
+Three ways to host the embedding model:
+
+- **CPU VPS and local Ollama.** A Hetzner CX33-class server is 4 vCPU, 8 GB RAM, and 80 GB disk, listed at about €8.50 per month before VAT in November 2026. The model stays on the machine. This is the recommended staging host.
+- **GPU server.** Hetzner's April 2026 price list put a GEX44-class GPU server at €212.30 per month before VAT. A July 2026 review quoted €278, and the order page has also shown that product as unavailable. The batch speedup is real. It is not required for the query and document sizes measured here.
+- **CPU VPS and a remote embedding API.** OpenAI `text-embedding-3-small` is published at $0.02 per million tokens, so a month of staging documents costs cents. Each call leaves the host. Provider latency published for that model is about a quarter of a second before ATLAS does its own work. The usual width is 1536, which uses `chunks.embedding`, and the 0.45 citation cutoff was measured for `nomic-embed-text`, not for that model.
+
 The product constraint that decides the architecture is in `docs/deployment.md`: the session cookie is HttpOnly and `SameSite=Lax`, and the browser must call the API that issued the CSRF token. The web app and the API have to share one HTTPS origin. Splitting them across Vercel and a separate API host breaks login.
 
 ## Proposed architecture
@@ -92,7 +121,7 @@ Caddy (Let's Encrypt, one hostname)
               postgres:5432    pgvector/pgvector:pg17
               n8n:5678         private, workflows imported inactive
               mailpit:1025     sandbox SMTP only
-              ollama:11434     nomic-embed-text, 768 dimensions
+              ollama:11434     nomic-embed-text:v1.5, 768 dimensions
 
 Outbound only: https://api.groq.com  (chat)
 ```
@@ -115,7 +144,7 @@ This is simpler and cheaper than a managed split, and it is the only layout that
 | Langfuse | No | Empty keys keep traces in Postgres. | Leave both keys empty until a project exists. |
 | Redis, queue, object storage | No | Not in the stack. | Do not add them for staging. |
 
-Startup order that Compose already encodes: Postgres healthy, Mailpit started, then the API. The web container waits for API `/api/v1/ready`. n8n has no health check and does not wait for the API.
+Startup order that Compose already encodes: Postgres healthy, Ollama started, the embedding provision command exited 0, then the API. The web container waits for API `/api/v1/ready`. n8n has no health check and does not wait for the API.
 
 `GET /api/v1/health` does not touch the database. `GET /api/v1/ready` runs a database query and nothing else. A green ready check does not mean Groq, Ollama, disk permissions, n8n, or Mailpit are usable.
 
@@ -133,8 +162,8 @@ The local acceptance run used Ollama `nomic-embed-text` at 768. The citation cut
 
 ```text
 ATLAS_EMBEDDING_PROVIDER=ollama
-ATLAS_EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1
-ATLAS_EMBEDDING_MODEL=nomic-embed-text
+ATLAS_EMBEDDING_BASE_URL=http://ollama:11434/v1
+ATLAS_EMBEDDING_MODEL=nomic-embed-text:v1.5
 ATLAS_EMBEDDING_DIMENSIONS=768
 ATLAS_EMBEDDING_API_KEY=
 ```
@@ -197,8 +226,8 @@ The API container interpolates `ATLAS_PUBLIC_API_URL` from `.env` when it is set
 | `ATLAS_LLM_API_KEY` | Server-side only. Never in the web image. |
 | `ATLAS_LLM_MODEL` | A chat model the Groq account can call. |
 | `ATLAS_EMBEDDING_PROVIDER` | `ollama` for the recommended path |
-| `ATLAS_EMBEDDING_BASE_URL` | `http://host.docker.internal:11434/v1` or `http://ollama:11434/v1` |
-| `ATLAS_EMBEDDING_MODEL` | `nomic-embed-text` |
+| `ATLAS_EMBEDDING_BASE_URL` | `http://ollama:11434/v1` |
+| `ATLAS_EMBEDDING_MODEL` | `nomic-embed-text:v1.5` |
 | `ATLAS_EMBEDDING_DIMENSIONS` | `768` |
 | `ATLAS_EMBEDDING_API_KEY` | Empty for Ollama |
 | `ATLAS_PUBLIC_API_URL` | `http://api:8000` |
@@ -304,17 +333,23 @@ Phase 1 closes the browser-login, volume-ownership, and published-port gaps for 
 - The staging API service does not receive the development seed passwords.
 - `provision_n8n.py` imports the two workflow files once and leaves them inactive. Repeating it does not create duplicates.
 
+### Closed in Phase 3
+
+- Staging pulls `nomic-embed-text:v1.5` only when that tag is missing, then requires a 768-wide vector before the API starts.
+- A second provision does not download the model again. The OpenAI 1536 path skips the pull.
+- GPU access for Ollama is a separate Compose file. The default stack starts on CPU.
+
 ### Still open
 
 1. **No public host.** The local proof is `https://atlas.localhost:8443` with Caddy's CA. Let's Encrypt is what Caddy will use when `STAGING_HOST` is a real DNS name and ports 80 and 443 are published. No VPS, DNS record, or firewall has been created.
 2. **Workflows are imported inactive, and the follow-up signer is not configured.** The operator still creates the n8n owner through an SSH tunnel, creates the ATLAS webhook key, and puts the one-time secret in `STAGING_HOOK_KEY_ID` and `STAGING_HOOK_SECRET` before activating either workflow. The secret is shown once and is not written by the provisioner.
-3. **Embeddings and chat are not live.** Ollama is on the private network, and the model `nomic-embed-text` is not pulled. No Groq key is stored. Upload and grounded answers still return unconfigured or unavailable until those are set. There is no backup job and no image registry. Login limits still see Caddy's address, not the browser's.
+3. **Chat is not live.** The embedding model is provisioned on the local staging volume. A new volume pulls it on first start. No Groq key is stored, so grounded answers still have no chat model. There is no backup job and no image registry. Login limits still see Caddy's address, not the browser's.
 
 ### Further gaps, after the three above
 
 - Compose does not give the API service `host.docker.internal`. An Ollama process on the host is unreachable with the file as written.
 - `.env.example` sets `ATLAS_PUBLIC_API_URL` to `http://host.docker.internal:8000`. If that file is copied as-is, n8n callbacks use the published host port instead of `http://api:8000`.
-- Health checks ignore Groq, embeddings, disk, n8n, and Mailpit.
+- `/api/v1/ready` still ignores Groq, disk, n8n, and Mailpit. The embedding model is gated by the provision container, not by that route.
 - There is no backup job, no deploy workflow, and no image registry.
 - Login rate limits treat the proxy as the client.
 - The 0.45 citation distance was measured for `nomic-embed-text`. An OpenAI 1536 index needs that threshold remeasured before citation quality is trusted.
@@ -348,7 +383,7 @@ Phase 1 added the staging Compose file, Caddy, the same-origin web build, and th
 5. **Confirm the volumes.** The API entrypoint gives `/var/lib/atlas/storage` and `/var/lib/atlas/models` to uid 10001. Confirm with a file create, not only with `/ready`.
 6. **Point Caddy at the public name.** The Caddyfile already routes `/api` unchanged to `api:8000` and every other path to `web:3000`, with no response buffering and 180 second proxy timeouts. Set `STAGING_HOST` to the public name so Caddy requests a Let's Encrypt certificate.
 7. **Use the staging web image as built.** `NEXT_PUBLIC_API_URL=same-origin` is already the staging build argument. Do not bake the public hostname into the image.
-8. **Install the embedding model.** Install Ollama on the host or as a private Compose service. Run `ollama pull nomic-embed-text`. Point the API at it with dimensions 768. Skip this step only if the OpenAI 1536 alternative was chosen on purpose.
+8. **Let the embedding service install the model.** `docker compose up` runs `embedding-model` before the API. The first start pulls `nomic-embed-text:v1.5` into the Ollama volume. Confirm the log contains `embedding_ok` and `width=768`. A later start must say `pulled=false`. Set `STAGING_EMBEDDING_PROVIDER=openai` and `STAGING_EMBEDDING_DIMENSIONS=1536` only when the remote 1536 path was chosen on purpose. Add `-f infrastructure/compose.gpu.yaml` only on a host whose Docker daemon already exposes an NVIDIA GPU.
 9. **Bootstrap the first administrator.** Keep `STAGING_ENVIRONMENT=production`. Run `python -m app.scripts.bootstrap` inside the API container with the JSON on stdin. Confirm `--status` shows one user, one organization, one administrator, and zero companies. Run it again and confirm `administrator_exists`. Do not run the development seed.
 10. **Set the Groq key** in `.env` and recreate the API. Confirm provider status from a logged-in session. The status payload must not contain the key.
 11. **Import n8n, then activate only after the webhook key exists.** Run `py -3 infrastructure/staging/provision_n8n.py`. Confirm both workflows exist once and are inactive. Create the n8n owner through an SSH tunnel to port 5678. In ATLAS, create the organization webhook key. Put the id and the one-time secret into `STAGING_HOOK_KEY_ID` and `STAGING_HOOK_SECRET`, recreate n8n, and activate the two workflows. Store the secret in the password manager. It is not shown again.
