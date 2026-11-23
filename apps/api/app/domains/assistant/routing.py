@@ -36,7 +36,7 @@ _INVENTORY = re.compile(
     r"summarize the company information|company information you can access)\b"
 )
 _CAPABILITY = re.compile(
-    r"\b(what can you help|what can you do|how can you help|what can i do|"
+    r"\b(what can you help|what can atlas help|what can you do|how can you help|what can i do|"
     r"what do you do|how do approvals work|how does approval|who are you|what are you)\b"
 )
 _RECALL = re.compile(

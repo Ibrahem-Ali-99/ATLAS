@@ -17,6 +17,7 @@ from tests.test_crm import _csrf, _org
 
 def test_clear_questions_route_without_a_model() -> None:
     assert route_question("What can you help me with?", has_history=False) is Intent.capability
+    assert route_question("What can ATLAS help me with?", has_history=False) is Intent.capability
     assert route_question("What can I do in ATLAS?", has_history=False) is Intent.capability
     assert route_question("How do approvals work?", has_history=False) is Intent.capability
     assert route_question("What information do you have?", has_history=False) is Intent.inventory

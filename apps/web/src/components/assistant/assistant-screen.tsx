@@ -164,10 +164,13 @@ function AssistantWorkspace({
 
   return (
     <div className="flex h-full min-h-0 gap-2 bg-background p-2">
-      <aside className="hidden w-[264px] shrink-0 flex-col rounded-[10px] bg-card lg:flex">{history}</aside>
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col px-4">
+      <aside className="hidden w-[300px] shrink-0 flex-col rounded-[14px] border border-border bg-card lg:flex">{history}</aside>
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col px-2 sm:px-6">
         <div className="flex items-start justify-between gap-4 py-4">
-          <h1 className="min-w-0 truncate text-[23px] leading-tight text-foreground">{current?.title ?? "Assistant"}</h1>
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-semibold leading-tight text-foreground">{current?.title ?? "Assistant"}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Ask ATLAS about your workspace, then follow the evidence.</p>
+          </div>
           <div className="flex shrink-0 items-center gap-3">
             <ProviderNotice organizationId={organizationId} compact />
             <Button type="button" size="sm" variant="outline" className="lg:hidden" onClick={() => setHistoryOpen(true)}>
@@ -181,7 +184,7 @@ function AssistantWorkspace({
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="flex w-full max-w-4xl flex-col gap-6 py-2">
+          <div className="flex w-full max-w-3xl flex-col gap-5 py-2">
             {!conversationId ? <EmptyThread organizationName={organizationName} onPrompt={setDraft} /> : null}
             {conversationId && detail.data && detail.data.messages.length === 0 && !send.isPending ? (
               <EmptyThread organizationName={organizationName} onPrompt={setDraft} />
@@ -212,11 +215,11 @@ function AssistantWorkspace({
           </div>
         </div>
         <div className="py-4">
-          <div className="w-full max-w-4xl space-y-3">
+          <div className="w-full max-w-3xl space-y-3">
             {notice ? <StatusNote>{notice}</StatusNote> : null}
             {send.isError ? <FailureNotice error={send.error} onRetry={() => submit()} canRetry={draft.trim().length > 0} /> : null}
             <form
-              className="rounded-[10px] bg-muted px-4 py-3"
+              className="rounded-2xl border border-border bg-card px-4 py-3 shadow-sm"
               onSubmit={(event) => {
                 event.preventDefault();
                 submit();
@@ -398,17 +401,17 @@ function EmptyThread({
     "What documents are available?",
   ];
   return (
-    <div className="py-8">
-      <p className="text-lg font-medium">Ask about {organizationName}</p>
+    <div className="rounded-2xl border border-border bg-card px-5 py-6 shadow-sm sm:px-7 sm:py-8">
+      <p className="text-xl font-semibold tracking-tight">Ask ATLAS about {organizationName}</p>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
         Ask what ATLAS can do, what this organization has stored, or a fact from a document or CRM record. A company fact is answered only when a retrieved row supports it. Selecting a prompt fills the composer and does not send it.
       </p>
-      <div className="mt-5 flex flex-col gap-2">
+      <div className="mt-6 grid gap-2 sm:grid-cols-2">
         {prompts.map((prompt) => (
           <button
             key={prompt}
             type="button"
-            className="rounded-md border border-border px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="rounded-xl border border-border bg-background px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:bg-accent hover:text-foreground"
             onClick={() => onPrompt(prompt)}
           >
             {prompt}
