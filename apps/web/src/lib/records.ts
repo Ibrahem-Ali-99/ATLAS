@@ -112,6 +112,13 @@ export const documentStatuses = ["pending", "processing", "ready", "failed"] as 
 
 export type DocumentStatus = (typeof documentStatuses)[number];
 
+export const documentOrigins = ["operational", "demo"] as const;
+export type DocumentOrigin = (typeof documentOrigins)[number];
+
+export function documentOriginLabel(origin: DocumentOrigin): string {
+  return origin === "demo" ? "Demo" : "Operational";
+}
+
 export type KnowledgeDocument = {
   id: string;
   organization_id: string;
@@ -122,6 +129,7 @@ export type KnowledgeDocument = {
   byte_size: number;
   status: DocumentStatus;
   error_message: string | null;
+  origin: DocumentOrigin;
   created_at: string;
   updated_at: string;
 };

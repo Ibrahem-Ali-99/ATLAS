@@ -18,7 +18,7 @@ import {
   searchDocuments,
   uploadDocument,
 } from "@/lib/records-api";
-import type { DocumentStatus, KnowledgeDocument } from "@/lib/records";
+import { documentOriginLabel, documentOrigins, type DocumentOrigin, type DocumentStatus, type KnowledgeDocument } from "@/lib/records";
 import { useWorkspace } from "@/lib/use-workspace";
 
 function statusClass(status: DocumentStatus): string {
@@ -63,6 +63,7 @@ function KnowledgeWorkspace({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [submitted, setSubmitted] = useState("");
+  const [origin, setOrigin] = useState<DocumentOrigin>("operational");
   const documents = useQuery({
     queryKey: ["documents", organizationId],
     queryFn: () => listDocuments(organizationId, { pageSize: 50 }),
@@ -73,7 +74,7 @@ function KnowledgeWorkspace({
     },
   });
   const upload = useMutation({
-    mutationFn: (file: File) => uploadDocument(organizationId, file),
+    mutationFn: (file: File) => uploadDocument(organizationId, file, origin),
     onSuccess: (document) => {
       setSelectedId(document.id);
       void queryClient.invalidateQueries({ queryKey: ["documents", organizationId] });
@@ -116,7 +117,14 @@ function KnowledgeWorkspace({
           />
         </label>
         {upload.isPending ? <p className="mt-3 text-sm text-muted-foreground">Uploading…</p> : null}
-        {upload.isSuccess ? <p className="mt-3 text-sm text-muted-foreground">Uploaded. Indexing continues until the status is ready.</p> : null}
+        <label className="mt-3 grid max-w-xs gap-2 text-sm">
+          <span className="text-muted-foreground">Record origin</span>
+          <select aria-label="Document origin" value={origin} onChange={(event) => setOrigin(event.target.value as DocumentOrigin)} className="h-10 rounded-[10px] border-0 bg-secondary px-3 text-sm text-foreground">
+            {documentOrigins.map((value) => <option key={value} value={value}>{value === "operational" ? "Operational" : "Demo"}</option>)}
+          </select>
+          <span className="text-xs text-muted-foreground">Stored with the upload; it cannot be changed here.</span>
+        </label>
+        {upload.isSuccess ? <p className="mt-3 text-sm text-success">Uploaded as {upload.data.origin}. Indexing continues until the status is ready.</p> : null}
         {upload.isError ? <div className="mt-3"><RequestError error={upload.error} /></div> : null}
       </section>
       <section className="min-w-0 overflow-x-auto rounded-[10px] bg-muted">
@@ -131,6 +139,7 @@ function KnowledgeWorkspace({
               <TableRow>
                 <TableHead>Title</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Origin</TableHead>
                 <TableHead>Size</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -242,6 +251,9 @@ function DocumentRow({
         <p className={`text-xs uppercase tracking-[0.12em] ${statusClass(document.status)}`}>{document.status}</p>
         <p className="mt-1 max-w-48 text-xs leading-5 text-muted-foreground">{statusCopy(document.status)}</p>
       </TableCell>
+      <TableCell className={document.origin === "demo" ? "text-primary" : "text-muted-foreground"}>
+        {documentOriginLabel(document.origin)}
+      </TableCell>
       <TableCell>{Math.ceil(document.byte_size / 1024)} KB</TableCell>
       <TableCell>
         <div className="flex flex-wrap gap-2">
@@ -283,6 +295,7 @@ function ChunkList({
         <div><dt className="text-subtle">File</dt><dd>{document.filename}</dd></div>
         <div><dt className="text-subtle">Type</dt><dd>{document.media_type}</dd></div>
         <div><dt className="text-subtle">Size</dt><dd>{Math.ceil(document.byte_size / 1024)} KB</dd></div>
+        <div><dt className="text-subtle">Origin</dt><dd>{documentOriginLabel(document.origin)}</dd></div>
         <div><dt className="text-subtle">Updated</dt><dd>{new Date(document.updated_at).toLocaleString()}</dd></div>
       </dl>
       {document.error_message ? <p className="mt-4 text-sm leading-6 text-destructive">{document.error_message}</p> : null}

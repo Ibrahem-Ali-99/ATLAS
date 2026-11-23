@@ -1,4 +1,5 @@
 import { apiFetch, apiStream } from "@/lib/api";
+import { documentUploadForm } from "@/lib/document-upload";
 import type {
   AssistantReply,
   ChunkHit,
@@ -8,6 +9,7 @@ import type {
   ContactInput,
   Conversation,
   ConversationDetail,
+  DocumentOrigin,
   Inquiry,
   InquiryInput,
   Interaction,
@@ -179,9 +181,8 @@ export function listDocuments(
   return apiFetch(organizationPath(organizationId, `/documents${listQuery(params)}`));
 }
 
-export function uploadDocument(organizationId: string, file: File): Promise<KnowledgeDocument> {
-  const body = new FormData();
-  body.append("file", file);
+export function uploadDocument(organizationId: string, file: File, origin: DocumentOrigin = "operational"): Promise<KnowledgeDocument> {
+  const body = documentUploadForm(file, origin);
   return apiFetch(organizationPath(organizationId, "/documents"), { method: "POST", body });
 }
 
