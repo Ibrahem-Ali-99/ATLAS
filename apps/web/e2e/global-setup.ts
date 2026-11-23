@@ -53,10 +53,16 @@ function spawnApi(): Promise<ChildProcess> {
   });
 }
 
+function projectPython(): string {
+  return process.platform === "win32"
+    ? path.join(apiRoot, ".venv", "Scripts", "python.exe")
+    : "python";
+}
+
 export default async function globalSetup(): Promise<void> {
   mkdirSync(path.dirname(logFile), { recursive: true });
   writeFileSync(logFile, "e2e API startup\n", "utf8");
-  const prepare = spawn("uv", ["run", "python", "-m", "app.scripts.e2e_database"], {
+  const prepare = spawn(projectPython(), ["-m", "app.scripts.e2e_database"], {
     cwd: apiRoot,
     stdio: "inherit",
     env: process.env,
