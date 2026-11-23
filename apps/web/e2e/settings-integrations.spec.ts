@@ -89,3 +89,17 @@ test("admin disable confirmation persists and staff cannot mutate", async ({ pag
   await expect(page.getByRole("button", { name: "Disable" })).toHaveCount(0);
   await page.screenshot({ path: `${screenshots}/settings-disabled-staff.png`, fullPage: true });
 });
+
+test("indexed knowledge blocks incompatible embedding changes", async ({ page }) => {
+  await signIn(page, "admin@example.com", "change-me-admin");
+  await page.getByLabel("Organization").selectOption({ label: "Northwind" });
+  await page.goto("/settings");
+  await expect(page.getByLabel("Vector dimensions")).toHaveValue("768");
+  await page.getByLabel("Vector dimensions").selectOption("1536");
+  await expect(page.getByText(/require a full reindex/i)).toBeVisible();
+  await page.getByRole("button", { name: "Save" }).nth(1).click();
+  await expect(page.getByRole("status")).toContainText(/requires an explicit reindex/i, { timeout: 10_000 });
+  await page.reload();
+  await expect(page.getByLabel("Vector dimensions")).toHaveValue("768");
+  await page.screenshot({ path: `${screenshots}/settings-embedding-rejection.png`, fullPage: true });
+});

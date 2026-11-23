@@ -18,11 +18,15 @@ def main() -> None:
     os.environ["ATLAS_ENVIRONMENT"] = "development"
 
     from alembic.config import Config
+    from sqlalchemy import func, select
 
     from alembic import command
     from app.core.config import get_settings
     from app.core.database import SessionLocal
+    from app.domains.identity.models import Organization, User
     from app.domains.integrations.models import IntegrationConfig
+    from app.domains.knowledge.models import Chunk, Document, DocumentStatus
+    from app.domains.provenance.origin import Origin
     from app.scripts.seed import SeedSettings, seed_identity
 
     get_settings.cache_clear()
@@ -32,6 +36,54 @@ def main() -> None:
     try:
         seed_identity(db, SeedSettings())
         db.query(IntegrationConfig).delete()
+        db.commit()
+        atlas = db.scalar(select(Organization).where(Organization.slug == "northwind"))
+        admin = db.scalar(select(User).where(User.email == "admin@example.com"))
+        assert atlas is not None and admin is not None
+        fixture = db.scalar(
+            select(Document).where(
+                Document.organization_id == atlas.id,
+                Document.title == "E2E Embedding Compatibility Fixture",
+            )
+        )
+        if fixture is None:
+            fixture = Document(
+                organization_id=atlas.id,
+                uploaded_by=admin.id,
+                title="E2E Embedding Compatibility Fixture",
+                filename="e2e-embedding-fixture.txt",
+                media_type="text/plain",
+                byte_size=77,
+                storage_path="",
+                status=DocumentStatus.ready,
+                origin=Origin.demo,
+            )
+            db.add(fixture)
+            db.flush()
+            chunk = Chunk(
+                organization_id=atlas.id,
+                document_id=fixture.id,
+                chunk_index=0,
+                content="Disposable fixture for embedding compatibility acceptance.",
+                search_vector=func.to_tsvector(
+                    "english", "Disposable fixture for embedding compatibility acceptance."
+                ),
+                embedding_768=[0.0] * 768,
+                embedding_model="nomic-embed-text:v1.5",
+            )
+            db.add(chunk)
+        db.add(
+            IntegrationConfig(
+                organization_id=atlas.id,
+                integration_type="embedding",
+                provider="ollama",
+                config={
+                    "base_url": "http://ollama:11434/v1",
+                    "model": "nomic-embed-text:v1.5",
+                    "dimensions": 768,
+                },
+            )
+        )
         db.commit()
     finally:
         db.close()
