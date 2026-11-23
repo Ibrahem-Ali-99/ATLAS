@@ -24,3 +24,4 @@ Thumbs.db
 .idea/
 .vscode/
 var/
+infrastructure/staging/local-ca.crt
