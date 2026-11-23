@@ -8,7 +8,7 @@ type Block =
 export function RichText({ text, id, lead = false }: { text: string; id: string; lead?: boolean }) {
   const blocks = parseMarkdown(text);
   return (
-    <div className="space-y-3 leading-7">
+    <div className="space-y-3 text-[15px] leading-6 text-muted-foreground">
       {blocks.map((block, index) => (
         <BlockView key={`${id}-${index}`} block={block} lead={lead && index === 0} />
       ))}
@@ -19,10 +19,10 @@ export function RichText({ text, id, lead = false }: { text: string; id: string;
 function BlockView({ block, lead = false }: { block: Block; lead?: boolean }) {
   if (block.type === "heading") {
     const className = lead
-      ? "text-[22px] font-normal leading-snug text-foreground"
+      ? "text-[18px] font-semibold leading-7 text-foreground"
       : block.level === 1
-        ? "text-lg font-semibold"
-        : "text-base font-semibold";
+        ? "text-[17px] font-semibold leading-6 text-foreground"
+        : "text-[15px] font-semibold leading-6 text-foreground";
     if (block.level === 1) {
       return <h2 className={className}><Inline text={block.text} /></h2>;
     }
@@ -77,7 +77,7 @@ function BlockView({ block, lead = false }: { block: Block; lead?: boolean }) {
     );
   }
   return (
-    <p className={lead ? "whitespace-pre-wrap text-[22px] leading-snug text-foreground" : "whitespace-pre-wrap"}>
+    <p className={lead ? "whitespace-pre-wrap text-[16px] leading-7 text-foreground" : "whitespace-pre-wrap"}>
       <Inline text={block.text} />
     </p>
   );

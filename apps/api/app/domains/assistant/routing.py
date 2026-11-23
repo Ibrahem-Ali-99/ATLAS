@@ -94,19 +94,15 @@ CAPABILITY_ANSWER = "\n".join(
     [
         "## What I can help with",
         "",
-        "I am the ATLAS assistant for the organization you are signed into. I can:",
+        "I can help you understand ATLAS and find supported information in this workspace.",
         "",
-        "- Explain how ATLAS works, including approvals, agent runs, documents, and CRM.",
-        "- List the companies, contacts, leads, inquiries, and documents stored here.",
-        "- Answer from a CRM record or an uploaded document, and show the row I used.",
-        "- Use earlier turns in this chat so a follow-up can refer to them.",
+        "- Explain the CRM, Knowledge, Agent Runs, approvals, and workflows.",
+        "- List records and documents stored in this organization.",
+        "- Answer questions from retrieved records or documents with supporting sources.",
         "",
-        "This is different from a company fact. I will not describe a customer, a price, "
-        "or a document passage unless that fact was retrieved for the question.",
+        "For company facts, I check the organization’s records and say when evidence is missing.",
         "",
-        "I cannot update, delete, or create CRM records from this chat. I cannot send "
-        "email or book a calendar event from this chat. Those actions start in Agent Runs. "
-        "An admin approves the proposal, then executes it. Rejecting a proposal writes nothing.",
+        "I do not change records, send email, or book meetings from chat. Those actions require an Agent Run; an admin must approve and execute them.",
     ]
 )
 
