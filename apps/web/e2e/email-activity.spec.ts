@@ -61,20 +61,29 @@ test("approved email is delivered once and visible in Email Activity", async ({ 
 
   await page.getByRole("link", { name: "Workflows" }).click();
   await expect(page.getByRole("heading", { name: "Email activity" })).toBeVisible();
-  const activityText = await page.locator("body").innerText();
-  if (!activityText.includes("Accepted by SMTP")) {
-    throw new Error(`Email activity did not reach SMTP acceptance: ${activityText.slice(-1200)}`);
-  }
-  await expect(page.getByText("Accepted by SMTP")).toBeVisible({ timeout: 30_000 });
+  await expect.poll(
+    async () => {
+      if (await page.getByText("Accepted by SMTP").count() > 0) return true;
+      await page.reload();
+      return (await page.getByText("Accepted by SMTP").count()) > 0;
+    },
+    { timeout: 30_000, intervals: [250, 500, 1_000, 2_000] },
+  ).toBe(true);
   await expect(page.getByText("Mailpit sandbox")).toBeVisible();
   await page.screenshot({ path: path.resolve(process.cwd(), "../../var/email-activity-desktop.png"), fullPage: true });
 
   const httpPort = readFileSync(path.resolve(process.cwd(), "../../var/e2e-mailpit.http-port"), "utf8").trim();
-  const messages = await request.get(`http://127.0.0.1:${httpPort}/api/v1/messages`);
-  expect(messages.ok()).toBeTruthy();
-  const body = await messages.json() as { messages: { To: { Address: string }[]; Subject: string }[] };
-  expect(body.messages).toHaveLength(1);
-  expect(body.messages[0]?.Subject).toContain(subject);
+  let messageBody: { messages: { To: { Address: string }[]; Subject: string }[] } = { messages: [] };
+  await expect.poll(
+    async () => {
+      const messages = await request.get(`http://127.0.0.1:${httpPort}/api/v1/messages`);
+      expect(messages.ok()).toBeTruthy();
+      messageBody = await messages.json() as typeof messageBody;
+      return messageBody.messages.length;
+    },
+    { timeout: 10_000, intervals: [250, 500, 1_000] },
+  ).toBe(1);
+  expect(messageBody.messages[0]?.Subject).toContain(subject);
 
   await page.reload();
   await expect(page.getByText("Accepted by SMTP")).toBeVisible();

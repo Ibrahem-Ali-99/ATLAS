@@ -58,15 +58,17 @@ def main() -> None:
     os.environ["ATLAS_CORS_ORIGINS"] = f"http://127.0.0.1:{web_port},http://localhost:{web_port}"
     os.environ["ATLAS_EMAIL_MODE"] = "sandbox"
     os.environ["ATLAS_SMTP_HOST"] = "127.0.0.1"
+    os.environ["ATLAS_LOG_LEVEL"] = "INFO"
 
     from app.core.config import get_settings
 
     get_settings.cache_clear()
     install_provider_transport()
     import uvicorn
+    from app.main import create_app
 
     uvicorn.run(
-        "app.main:app",
+        create_app(),
         host="127.0.0.1",
         port=int(os.environ.get("ATLAS_E2E_API_PORT", "8010")),
     )

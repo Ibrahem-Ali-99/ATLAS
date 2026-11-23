@@ -12,6 +12,15 @@ const apiPort = Number(process.env.ATLAS_E2E_API_PORT ?? "8011");
 const mailpitName = `atlas-e2e-mailpit-${process.pid}`;
 let mailpitPort = 0;
 
+function mappedPort(container: string, target: string): number {
+  const output = execFileSync(
+    "docker",
+    ["inspect", "--format", `{{(index (index .NetworkSettings.Ports \"${target}\") 0).HostPort}}`, container],
+    { encoding: "utf8" },
+  );
+  return Number(output.trim());
+}
+
 function redacted(value: string): string {
   return value.replace(/(password|secret|api[_-]?key|token)=\S+/gi, "$1=[REDACTED]");
 }
@@ -70,14 +79,10 @@ async function startMailpit(): Promise<void> {
     "run", "-d", "--rm", "--name", mailpitName,
     "-p", "127.0.0.1::1025", "-p", "127.0.0.1::8025", "axllent/mailpit:v1.21",
   ], { stdio: "ignore" });
-  const port = execFileSync("docker", ["port", mailpitName, "1025/tcp"], { encoding: "utf8" })
-    .match(/:(\d+)\s*$/m)?.[1];
-  mailpitPort = Number(port);
+  mailpitPort = mappedPort(mailpitName, "1025/tcp");
   if (!mailpitPort) throw new Error("The disposable Mailpit port was not allocated");
   writeFileSync(mailpitFile, mailpitName, "utf8");
-  const httpPort = execFileSync("docker", ["port", mailpitName, "8025/tcp"], { encoding: "utf8" })
-    .match(/:(\d+)\s*$/m)?.[1];
-  const httpPortNumber = Number(httpPort);
+  const httpPortNumber = mappedPort(mailpitName, "8025/tcp");
   if (!httpPortNumber) throw new Error("The disposable Mailpit HTTP port was not allocated");
   writeFileSync(mailpitHttpFile, String(httpPortNumber), "utf8");
   const deadline = Date.now() + 30_000;

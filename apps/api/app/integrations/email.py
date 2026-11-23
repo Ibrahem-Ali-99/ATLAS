@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 from email.utils import parseaddr
 
+import structlog
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -13,6 +14,7 @@ from app.domains.integrations.service import read_metadata
 from app.integrations.outcomes import DeliveryFailed, OutcomeUncertain
 
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "mailpit", "::1"})
+logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -94,12 +96,14 @@ def send_email(
     payload["Message-ID"] = message_id
     payload.set_content(message.body)
     try:
+        logger.info("email_smtp_dispatch_started", host=settings.smtp_host, port=settings.smtp_port)
         with smtplib.SMTP(
             settings.smtp_host,
             settings.smtp_port,
             timeout=settings.smtp_timeout_seconds,
         ) as client:
             client.send_message(payload)
+        logger.info("email_smtp_accepted", host=settings.smtp_host, port=settings.smtp_port)
     except TimeoutError as exc:
         raise OutcomeUncertain("smtp_timeout") from exc
     except (smtplib.SMTPException, OSError) as exc:
