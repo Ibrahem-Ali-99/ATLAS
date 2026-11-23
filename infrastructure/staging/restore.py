@@ -289,6 +289,18 @@ def decrypt_local(source: Path, dest: Path, passphrase: str) -> None:
     dest.write_bytes(result.stdout)
 
 
+def open_validated_archive(path: Path) -> tarfile.TarFile:
+    size = path.stat().st_size
+    gzip_header = path.read_bytes()[:2] == b"\x1f\x8b"
+    print(f"archive_check bytes={size} gzip_header={str(gzip_header).lower()}", file=sys.stderr)
+    if not gzip_header:
+        raise RestoreFailed("restore_failed gzip_header")
+    try:
+        return tarfile.open(path, "r:gz")
+    except (OSError, tarfile.TarError) as exc:
+        raise RestoreFailed("restore_failed archive_read") from exc
+
+
 def verify_archive(*, archive: Path, passphrase: str) -> str:
     """Validate an archive without Docker, Compose, or persistent resources."""
     if archive.name.endswith(".tar.gz.enc") and not passphrase:
@@ -304,12 +316,9 @@ def verify_archive(*, archive: Path, passphrase: str) -> str:
             raise RestoreFailed("restore_failed gzip_header")
         extract_root = root / "tree"
         extract_root.mkdir()
-        try:
-            with tarfile.open(tar_path, "r:gz") as packed:
-                packed.extractall(extract_root, filter="data")
-                member_count = len(packed.getmembers())
-        except (OSError, tarfile.TarError) as exc:
-            raise RestoreFailed("restore_failed archive_read") from exc
+        with open_validated_archive(tar_path) as packed:
+            packed.extractall(extract_root, filter="data")
+            member_count = len(packed.getmembers())
         try:
             manifest = read_manifest(extract_root / "manifest.json")
             verify_tree(extract_root, manifest)
@@ -341,10 +350,10 @@ def restore_backup(*, project: str, env_file: Path, archive: Path, passphrase: s
         tar_path = archive
         if archive.name.endswith(".tar.gz.enc"):
             tar_path = root / "archive.tar.gz"
-            decrypt(project, env_file, archive, tar_path, passphrase, env)
+            decrypt_local(archive, tar_path, passphrase)
         extract_root = root / "tree"
         extract_root.mkdir()
-        with tarfile.open(tar_path, "r:gz") as packed:
+        with open_validated_archive(tar_path) as packed:
             packed.extractall(extract_root, filter="data")
         manifest = read_manifest(extract_root / "manifest.json")
         verify_tree(extract_root, manifest)

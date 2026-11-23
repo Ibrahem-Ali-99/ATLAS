@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from backup import CIPHER_PROGRAM, pack
 from backup_contract import build_manifest, file_record, write_manifest
-from restore import RestoreFailed, verify_archive
+from restore import RestoreFailed, open_validated_archive, verify_archive
 
 
 def make_archive(root: Path) -> Path:
@@ -27,7 +27,7 @@ def make_archive(root: Path) -> Path:
     plain = root / "archive.tar.gz"
     encrypted = root / "archive.tar.gz.enc"
     pack(work, plain)
-    result = subprocess.run(
+    decrypted_result = subprocess.run(
         [sys.executable, "-c", CIPHER_PROGRAM, "enc"],
         input=plain.read_bytes(),
         capture_output=True,
@@ -44,6 +44,17 @@ def test_verify_only_round_trip(tmp_path: Path) -> None:
     result = verify_archive(archive=archive, passphrase="test-passphrase")
 
     assert result.startswith("verify_ok archive=archive.tar.gz.enc")
+    decrypted = tmp_path / "decrypted.tar.gz"
+    result = subprocess.run(
+        [sys.executable, "-c", CIPHER_PROGRAM, "dec"],
+        input=archive.read_bytes(),
+        capture_output=True,
+        env={**os.environ, "ATLAS_BACKUP_PASSPHRASE": "test-passphrase"},
+        check=True,
+    )
+    decrypted.write_bytes(decrypted_result.stdout)
+    with open_validated_archive(decrypted) as packed:
+        assert "manifest.json" in packed.getnames()
 
 
 def test_verify_only_rejects_corrupted_archive(tmp_path: Path) -> None:
