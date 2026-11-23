@@ -115,6 +115,14 @@ def mcp_process_env(*, organization_id: str | None = None) -> dict[str, str]:
             "ATLAS_DATABASE_URL": _configured("ATLAS_DATABASE_URL", settings.database_url),
             "ATLAS_SECRET_KEY": _configured("ATLAS_SECRET_KEY", settings.secret_key),
             "ATLAS_ENVIRONMENT": _configured("ATLAS_ENVIRONMENT", settings.environment),
+            "ATLAS_COOKIE_SECURE": _configured(
+                "ATLAS_COOKIE_SECURE", "true" if settings.cookie_secure else "false"
+            ),
+            "ATLAS_EMAIL_MODE": _configured("ATLAS_EMAIL_MODE", settings.email_mode),
+            "ATLAS_EMAIL_LIVE_ENABLED": _configured(
+                "ATLAS_EMAIL_LIVE_ENABLED", "true" if settings.email_live_enabled else "false"
+            ),
+            "ATLAS_SMTP_HOST": _configured("ATLAS_SMTP_HOST", settings.smtp_host),
             "ATLAS_EMBEDDING_PROVIDER": _configured(
                 "ATLAS_EMBEDDING_PROVIDER", settings.embedding_provider
             ),

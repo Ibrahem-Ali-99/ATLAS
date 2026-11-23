@@ -16,6 +16,7 @@ from app.domains.crm.service import create_company, create_contact, create_lead
 from app.domains.identity.models import MembershipRole
 from app.integrations.business_mcp import server_parameters
 from app.integrations.mcp_runtime import (
+    mcp_process_env,
     probe_mcp_interpreter,
     public_tool_message,
     resolve_mcp_python,
@@ -34,6 +35,31 @@ def test_mcp_child_receives_the_embedding_provider(monkeypatch) -> None:
     assert "ATLAS_LLM_API_KEY" not in env
     assert env["ATLAS_MCP_ORGANIZATION_ID"]
     assert server_parameters(uuid.uuid4()).command == resolve_mcp_python()
+
+
+def test_mcp_child_env_keeps_production_cookie_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ATLAS_ENVIRONMENT", "production")
+    monkeypatch.setenv("ATLAS_COOKIE_SECURE", "true")
+    monkeypatch.setenv("ATLAS_SECRET_KEY", "a-real-production-secret-key-value")
+    monkeypatch.setenv("ATLAS_EMAIL_MODE", "sandbox")
+    monkeypatch.setenv("ATLAS_SMTP_HOST", "mailpit")
+    env = mcp_process_env()
+    settings = Settings(
+        _env_file=None,
+        environment=env["ATLAS_ENVIRONMENT"],
+        secret_key=env["ATLAS_SECRET_KEY"],
+        database_url=env["ATLAS_DATABASE_URL"],
+        cookie_secure=env["ATLAS_COOKIE_SECURE"] == "true",
+        email_mode=env["ATLAS_EMAIL_MODE"],
+        smtp_host=env["ATLAS_SMTP_HOST"],
+        email_live_enabled=env["ATLAS_EMAIL_LIVE_ENABLED"] == "true",
+        llm_provider=env["ATLAS_LLM_PROVIDER"],
+        embedding_provider=env["ATLAS_EMBEDDING_PROVIDER"],
+        public_demo=env["ATLAS_PUBLIC_DEMO"] == "true",
+        embedding_dimensions=int(env["ATLAS_EMBEDDING_DIMENSIONS"]),
+    )
+    assert settings.environment == "production"
+    assert settings.cookie_secure is True
 
 
 def test_mcp_stdio_session_is_read_only_and_organization_scoped(db: Session) -> None:
