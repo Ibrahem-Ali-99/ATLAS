@@ -1,12 +1,15 @@
 """Administrator APIs for organization-scoped integration configuration."""
 
+import json
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from sqlalchemy import select
 
 from app.core.errors import AppError
 from app.domains.audit.service import record_event
+from app.domains.automation.signatures import open_integration_secret
 from app.domains.identity.dependencies import Admin, CsrfAdmin, DbSession
 from app.domains.integrations.models import IntegrationConfig, IntegrationStatus, IntegrationType
 from app.domains.integrations.schemas import (
@@ -28,6 +31,7 @@ from app.domains.integrations.service import (
     update_metadata,
 )
 from app.integrations.language import get_chat_client, get_embedding_client
+from app.integrations.smtp_verification import verify_smtp
 
 router = APIRouter(
     prefix="/organizations/{organization_id}/integration-configs", tags=["integrations"]
@@ -185,12 +189,42 @@ def verify(
             get_embedding_client(db, admin.organization.id).embed(
                 ["ATLAS integration verification"]
             )
+        elif integration_type == IntegrationType.email:
+            if record.status == IntegrationStatus.disabled:
+                raise AppError(409, "integration_disabled", "Email integration is disabled.")
+            credentials = (
+                open_integration_secret(record.encrypted_credentials)
+                if record.encrypted_credentials
+                else ""
+            )
+            try:
+                credential_data = json.loads(credentials)
+            except json.JSONDecodeError:
+                credential_data = {}
+            username = (
+                credential_data.get("username") if isinstance(credential_data, dict) else None
+            )
+            password = (
+                credential_data.get("password") if isinstance(credential_data, dict) else None
+            )
+            result = verify_smtp(
+                host=str(record.config.get("host", "")),
+                port=int(record.config.get("port", 0)),
+                username=username if isinstance(username, str) else None,
+                password=password if isinstance(password, str) else None,
+                starttls=bool(record.config.get("starttls", False)),
+                use_tls=bool(record.config.get("use_tls", False)),
+            )
+            if not result.verified:
+                raise AppError(502, "smtp_verification_failed", result.detail)
         else:
             raise AppError(
                 422, "verification_unsupported", "This integration has no provider test."
             )
     except AppError as exc:
         record.status = IntegrationStatus.verification_failed
+        record.verified_at = datetime.now(UTC)
+        record.verification_detail = exc.message[:500]
         record_event(
             db,
             admin.organization.id,
@@ -199,12 +233,16 @@ def verify(
             actor_id=admin.user.id,
         )
         db.commit()
+        metadata = safe_metadata(db, admin.organization.id, integration_type)
+        assert metadata is not None
         return VerificationResult(
             integration=metadata,
             verified=False,
             detail=exc.message,
         )
     record.status = IntegrationStatus.configured
+    record.verified_at = datetime.now(UTC)
+    record.verification_detail = "Provider verification succeeded."
     record_event(
         db,
         admin.organization.id,
@@ -213,6 +251,8 @@ def verify(
         actor_id=admin.user.id,
     )
     db.commit()
+    metadata = safe_metadata(db, admin.organization.id, integration_type)
+    assert metadata is not None
     return VerificationResult(
         integration=metadata,
         verified=True,

@@ -51,6 +51,8 @@ def safe_metadata(
         has_credentials=bool(record.encrypted_credentials),
         created_at=record.created_at,
         updated_at=record.updated_at,
+        verified_at=record.verified_at,
+        verification_detail=record.verification_detail,
     )
 
 
@@ -141,6 +143,8 @@ def replace_configuration(
     elif provider_changed or config_changed:
         existing.credential_version += 1
     existing.status = IntegrationStatus.configured
+    existing.verified_at = None
+    existing.verification_detail = None
     db.flush()
     record_event(
         db,
@@ -262,6 +266,8 @@ def replace_credentials(
     record.encrypted_credentials = seal_integration_secret(credentials)
     record.credential_version += 1
     record.status = IntegrationStatus.configured
+    record.verified_at = None
+    record.verification_detail = None
     db.flush()
     record_event(
         db,
@@ -294,6 +300,8 @@ def disable_configuration(
             "Integration configuration changed; reload before updating",
         )
     record.status = IntegrationStatus.disabled
+    record.verified_at = None
+    record.verification_detail = None
     db.flush()
     record_event(
         db,
@@ -328,6 +336,8 @@ def revoke_credentials(
     record.encrypted_credentials = None
     record.credential_version += 1
     record.status = IntegrationStatus.disabled
+    record.verified_at = None
+    record.verification_detail = None
     db.flush()
     record_event(
         db,

@@ -8,6 +8,7 @@ SUPPORTED_PROVIDERS: dict[IntegrationType, frozenset[str]] = {
     IntegrationType.chat: frozenset({"groq", "openai"}),
     IntegrationType.embedding: frozenset({"ollama", "openai"}),
     IntegrationType.n8n: frozenset({"n8n"}),
+    IntegrationType.email: frozenset({"smtp"}),
 }
 
 
@@ -27,6 +28,18 @@ class IntegrationInput(BaseModel):
             raise ValueError(
                 f"Provider {self.provider!r} is not supported for {self.integration_type.value}"
             )
+        if self.integration_type == IntegrationType.email:
+            host = self.config.get("host")
+            port = self.config.get("port")
+            from_address = self.config.get("from_address")
+            if not isinstance(host, str) or not host.strip():
+                raise ValueError("Email SMTP host is required")
+            if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+                raise ValueError("Email SMTP port must be between 1 and 65535")
+            if not isinstance(from_address, str) or "@" not in from_address:
+                raise ValueError("Email sender address is invalid")
+            if self.config.get("use_tls") and self.config.get("starttls"):
+                raise ValueError("SMTP SSL and STARTTLS cannot both be enabled")
 
 
 class IntegrationUpdate(BaseModel):
@@ -57,6 +70,8 @@ class IntegrationMetadata(BaseModel):
     has_credentials: bool
     created_at: Any
     updated_at: Any
+    verified_at: Any | None = None
+    verification_detail: str | None = None
 
 
 class VerificationResult(BaseModel):

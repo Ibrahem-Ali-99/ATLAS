@@ -24,6 +24,7 @@ class IntegrationType(enum.StrEnum):
     chat = "chat"
     embedding = "embedding"
     n8n = "n8n"
+    email = "email"
 
 
 class IntegrationStatus(enum.StrEnum):
@@ -68,6 +69,8 @@ class IntegrationConfig(Base):
         INTEGRATION_STATUS, nullable=False, default=IntegrationStatus.configured
     )
     credential_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_detail: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
