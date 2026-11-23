@@ -18,7 +18,7 @@ def main() -> None:
     os.environ["ATLAS_ENVIRONMENT"] = "development"
 
     from alembic.config import Config
-    from sqlalchemy import func, select
+    from sqlalchemy import func, select, text
 
     from alembic import command
     from app.core.config import get_settings
@@ -34,9 +34,19 @@ def main() -> None:
     get_settings.cache_clear()
     db = SessionLocal()
     try:
-        seed_identity(db, SeedSettings())
-        db.query(IntegrationConfig).delete()
+        db.execute(
+            text(
+                "TRUNCATE TABLE message_sources, messages, conversations, chunks, documents, "
+                "lead_predictions, evaluation_runs, operation_traces, model_versions, "
+                "email_messages, calendar_bookings, execution_attempts, execution_intents, "
+                "workflow_runs, webhook_events, webhook_keys, integration_configs, "
+                "agent_events, approvals, agent_runs, audit_events, interactions, inquiries, "
+                "leads, contacts, companies, sessions, memberships, users, organizations "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
         db.commit()
+        seed_identity(db, SeedSettings())
         atlas = db.scalar(select(Organization).where(Organization.slug == "northwind"))
         admin = db.scalar(select(User).where(User.email == "admin@example.com"))
         assert atlas is not None and admin is not None

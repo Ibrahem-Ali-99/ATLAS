@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { readFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 
 function stopRecordedProcess(pid: number): Promise<void> {
@@ -32,5 +32,13 @@ export default async function globalTeardown(): Promise<void> {
     await stopRecordedProcess(pid);
   } catch {
     // The API process was already stopped.
+  }
+  try {
+    const name = readFileSync(path.resolve(process.cwd(), "../../var/e2e-mailpit.name"), "utf8").trim();
+    execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+    unlinkSync(path.resolve(process.cwd(), "../../var/e2e-mailpit.name"));
+    unlinkSync(path.resolve(process.cwd(), "../../var/e2e-mailpit.http-port"));
+  } catch {
+    // The disposable Mailpit was already removed.
   }
 }

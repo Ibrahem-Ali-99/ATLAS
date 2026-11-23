@@ -1,12 +1,16 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { execFileSync, type ChildProcess, spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const apiRoot = path.resolve(process.cwd(), "../api");
 const repoRoot = path.resolve(process.cwd(), "../..");
 const pidFile = path.join(repoRoot, "var", "e2e-api.pid");
+const mailpitFile = path.join(repoRoot, "var", "e2e-mailpit.name");
+const mailpitHttpFile = path.join(repoRoot, "var", "e2e-mailpit.http-port");
 const logFile = path.join(repoRoot, "var", "e2e-api.log");
 const apiPort = Number(process.env.ATLAS_E2E_API_PORT ?? "8011");
+const mailpitName = `atlas-e2e-mailpit-${process.pid}`;
+let mailpitPort = 0;
 
 function redacted(value: string): string {
   return value.replace(/(password|secret|api[_-]?key|token)=\S+/gi, "$1=[REDACTED]");
@@ -37,7 +41,14 @@ function spawnApi(): Promise<ChildProcess> {
       : "python";
     const child = spawn(python, ["-m", "app.scripts.e2e_server"], {
       cwd: apiRoot,
-      env: { ...process.env, ATLAS_E2E_API_PORT: String(apiPort), ATLAS_E2E_WEB_PORT: "3011", ATLAS_E2E_PROVIDER_TRANSPORT: "1" },
+      env: {
+        ...process.env,
+        ATLAS_E2E_API_PORT: String(apiPort),
+        ATLAS_E2E_WEB_PORT: "3011",
+        ATLAS_E2E_PROVIDER_TRANSPORT: "1",
+        ATLAS_SMTP_HOST: "127.0.0.1",
+        ATLAS_SMTP_PORT: String(mailpitPort),
+      },
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
     });
@@ -51,6 +62,21 @@ function spawnApi(): Promise<ChildProcess> {
       resolve(child);
     });
   });
+}
+
+function startMailpit(): void {
+  execFileSync("docker", [
+    "run", "-d", "--rm", "--name", mailpitName,
+    "-p", "127.0.0.1::1025", "-p", "127.0.0.1::8025", "axllent/mailpit:v1.21",
+  ], { stdio: "ignore" });
+  const port = execFileSync("docker", ["port", mailpitName, "1025/tcp"], { encoding: "utf8" })
+    .match(/:(\d+)\s*$/m)?.[1];
+  mailpitPort = Number(port);
+  if (!mailpitPort) throw new Error("The disposable Mailpit port was not allocated");
+  writeFileSync(mailpitFile, mailpitName, "utf8");
+  const httpPort = execFileSync("docker", ["port", mailpitName, "8025/tcp"], { encoding: "utf8" })
+    .match(/:(\d+)\s*$/m)?.[1];
+  writeFileSync(mailpitHttpFile, String(Number(httpPort)), "utf8");
 }
 
 function projectPython(): string {
@@ -74,6 +100,7 @@ export default async function globalSetup(): Promise<void> {
   if (code !== 0) {
     throw new Error("The e2e database was not prepared");
   }
+  startMailpit();
   const api = await spawnApi();
   if (api.pid === undefined) {
     throw new Error("The e2e API did not start");
