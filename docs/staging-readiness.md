@@ -36,6 +36,34 @@ Verified on 2026-11-23 from a clean browser context against `https://atlas.local
 - Edge signed in, opened Overview, CRM, Knowledge, and Assistant, signed out, and was returned to Sign in.
 - The API process was uid 10001 and could write both data volumes. Postgres, the API, Mailpit, n8n, and Ollama published no host ports.
 
+## Phase 2 — production bootstrap
+
+A new staging server starts in `ATLAS_ENVIRONMENT=production`. It does not run the development seed and it does not load demonstration CRM rows. The first organization and administrator are created by an operator command inside the API container:
+
+```powershell
+@'
+{"organization_name":"Harbor","organization_slug":"harbor","email":"admin@harbor.example","full_name":"Ada Admin","password":"<supplied at execution>"}
+'@ | docker compose --project-name atlas-staging --project-directory infrastructure -f infrastructure/compose.staging.yaml --env-file infrastructure/staging/.env exec -T -u atlas api python -m app.scripts.bootstrap
+```
+
+The password is read from that stdin JSON, or from `ATLAS_BOOTSTRAP_*` variables on that process only. It is not baked into the image, the Compose file, or the success line. A second run prints `bootstrap_refused reason=administrator_exists` and leaves the stored password in place. `python -m app.scripts.bootstrap --status` prints user, organization, administrator, and company counts.
+
+n8n workflows are installed from `infrastructure/n8n/lead-processing.json` and `infrastructure/n8n/follow-up.json`:
+
+```powershell
+py -3 infrastructure\staging\provision_n8n.py
+```
+
+The command checks that the lead webhook path is `atlas-lead` and that the follow-up workflow calls `/api/v1/hooks/follow-ups` and `/api/v1/hooks/follow-ups/request` with `$env.ATLAS_HOOK_SECRET`. It imports a missing workflow once, forces it inactive, and does not create a duplicate on the next run. It does not print the webhook secret. Activation stays a separate operator step after the webhook key exists.
+
+The clean-volume proof uses a different Compose project and does not attach to `atlas` or `atlas-staging`:
+
+```powershell
+py -3 infrastructure\staging\accept_bootstrap.py
+```
+
+Verified on 2026-11-23. The proof project `atlas-bootstrap-proof` booted in production on empty volumes. Migrations were at head. The database had no users and no companies. Bootstrap created one organization and one administrator. The repeat was refused. Sign-in through `https://atlas.localhost:18443` returned a HttpOnly, Secure, `SameSite=Lax` session cookie. n8n imported both workflows (`imported=2`, `active=0`) and the second run reported `imported=0 existing=2`. Postgres, the API, Mailpit, n8n, and Ollama published no host ports. The proof volumes were deleted afterward. The existing `atlas-postgres-1` and `atlas-staging-postgres-1` containers were still running.
+
 The product constraint that decides the architecture is in `docs/deployment.md`: the session cookie is HttpOnly and `SameSite=Lax`, and the browser must call the API that issued the CSRF token. The web app and the API have to share one HTTPS origin. Splitting them across Vercel and a separate API host breaks login.
 
 ## Proposed architecture
@@ -62,7 +90,7 @@ Caddy (Let's Encrypt, one hostname)
                      |
                      v
               postgres:5432    pgvector/pgvector:pg17
-              n8n:5678         private, workflows imported by hand
+              n8n:5678         private, workflows imported inactive
               mailpit:1025     sandbox SMTP only
               ollama:11434     nomic-embed-text, 768 dimensions
 
@@ -80,7 +108,7 @@ This is simpler and cheaper than a managed split, and it is the only layout that
 | Next.js 16 | Yes | `apps/web/Dockerfile`. The development service `web` is behind profile `demo`. | The staging service builds with `NEXT_PUBLIC_API_URL=same-origin` and starts on every staging boot. |
 | FastAPI | Yes | `apps/api/Dockerfile`. The entrypoint runs `alembic upgrade head` and then uvicorn on `0.0.0.0:8000` as uid 10001. | One replica. Persistent disk for uploads and model artifacts. |
 | PostgreSQL 17 + pgvector | Yes | `pgvector/pgvector:pg17` in `infrastructure/compose.yaml`. Named volume `atlas_postgres_data`. | Private. Migration `0001` runs `CREATE EXTENSION vector`. A server without that extension crash-loops the API. |
-| n8n 1.70.3 | Yes for lead processing and follow-up | Image is pinned. Workflow JSON is mounted read-only at `/workflows`. n8n does not import that directory. | Private. Create the owner, import both workflow files, and activate them. Set the encryption key before the first start. |
+| n8n 1.70.3 | Yes for lead processing and follow-up | Image is pinned. Workflow JSON is mounted read-only at `/workflows`. `provision_n8n.py` imports both files once and leaves them inactive. | Private. Set the encryption key before the first start. Activate only after the webhook key is in place. |
 | Mailpit 1.21 | Yes while email stays in sandbox | `axllent/mailpit:v1.21`. SMTP 1025, UI 8025. | Private. Sandbox mode refuses every SMTP host except `127.0.0.1`, `localhost`, `mailpit`, and `::1`. An external sandbox such as Mailtrap will not start. |
 | Embedding provider | Yes for upload, search, and grounded answers | OpenAI-compatible `POST /embeddings`. Width must be 768 or 1536. | Ollama `nomic-embed-text` at 768 on the staging host, unless a remote 768 or 1536 endpoint is chosen deliberately. |
 | Groq | Yes for live chat and agent classification | `ATLAS_LLM_PROVIDER=groq` and `https://api.groq.com/openai/v1`. | Outbound HTTPS and an API key stored only on the server. Groq is not the embedding provider. |
@@ -157,7 +185,7 @@ The API container interpolates `ATLAS_PUBLIC_API_URL` from `.env` when it is set
 
 | Variable | Staging value |
 | --- | --- |
-| `ATLAS_ENVIRONMENT` | `production` after the one-time seed. Production refuses a placeholder secret, `double` providers, and `ATLAS_COOKIE_SECURE=false`. |
+| `ATLAS_ENVIRONMENT` | `production` from the first boot. Production refuses a placeholder secret, `double` providers, and `ATLAS_COOKIE_SECURE=false`. |
 | `ATLAS_PUBLIC_DEMO` | `false` |
 | `ATLAS_SECRET_KEY` | Random, at least 32 characters, not the example placeholder. Seals webhook secrets and signs session cookies. Rotation signs everyone out and makes existing webhook secrets unreadable. |
 | `ATLAS_DATABASE_URL` | Leave this to Compose. The API service builds `postgresql+psycopg://...@postgres:5432/atlas`. Use an alphanumeric database password so the URL does not need escaping. |
@@ -191,7 +219,7 @@ The API container interpolates `ATLAS_PUBLIC_API_URL` from `.env` when it is set
 | `N8N_SECURE_COOKIE` | `true` if the editor is served over HTTPS. The file currently sets `false`. |
 | `ATLAS_HOOK_KEY_ID` | The webhook key id returned once by `POST /api/v1/integrations/webhook-keys`. |
 | `ATLAS_HOOK_SECRET` | The matching secret, shown once. The follow-up workflow signs with this pair. The lead workflow forwards the signature ATLAS already created. |
-| `SEED_ADMIN_PASSWORD`, `SEED_STAFF_PASSWORD`, `SEED_OUTSIDER_PASSWORD` | Long unique passwords. The seed refuses `production`, so these are used only for the one-time bootstrap below. |
+| Bootstrap JSON | Supplied on stdin to `python -m app.scripts.bootstrap`. Not stored in the image or the Compose file. The development seed remains a separate local command and still refuses production. |
 
 ### Leave unset or at the code defaults
 
@@ -270,10 +298,16 @@ Phase 1 closes the browser-login, volume-ownership, and published-port gaps for 
 - The API process runs as uid 10001 and can create files on the upload and model volumes.
 - Staging secrets are required from `infrastructure/staging/.env`. There is no `atlas`/`atlas` default and no placeholder n8n key in the staging file.
 
+### Closed in Phase 2
+
+- Production can create the first organization and administrator without development mode or demonstration CRM rows. A second run cannot replace that administrator.
+- The staging API service does not receive the development seed passwords.
+- `provision_n8n.py` imports the two workflow files once and leaves them inactive. Repeating it does not create duplicates.
+
 ### Still open
 
 1. **No public host.** The local proof is `https://atlas.localhost:8443` with Caddy's CA. Let's Encrypt is what Caddy will use when `STAGING_HOST` is a real DNS name and ports 80 and 443 are published. No VPS, DNS record, or firewall has been created.
-2. **Accounts and n8n are still a manual bootstrap.** Production refuses the seed. The smoke script seeds in `development`, then switches the API to `production`. n8n still does not import `infrastructure/n8n/*.json`, and the follow-up signer still needs the one-time webhook secret in `STAGING_HOOK_KEY_ID` and `STAGING_HOOK_SECRET`.
+2. **Workflows are imported inactive, and the follow-up signer is not configured.** The operator still creates the n8n owner through an SSH tunnel, creates the ATLAS webhook key, and puts the one-time secret in `STAGING_HOOK_KEY_ID` and `STAGING_HOOK_SECRET` before activating either workflow. The secret is shown once and is not written by the provisioner.
 3. **Embeddings and chat are not live.** Ollama is on the private network, and the model `nomic-embed-text` is not pulled. No Groq key is stored. Upload and grounded answers still return unconfigured or unavailable until those are set. There is no backup job and no image registry. Login limits still see Caddy's address, not the browser's.
 
 ### Further gaps, after the three above
@@ -305,7 +339,7 @@ The local Windows workflow in the README avoids several of these failures becaus
 
 ## Step-by-step implementation plan
 
-Phase 1 added the staging Compose file, Caddy, the same-origin web build, and the volume entrypoint. The remaining steps are the host, the model, n8n import, and backups. Do not point this at a purchased server until those are done.
+Phase 1 added the staging Compose file, Caddy, the same-origin web build, and the volume entrypoint. Phase 2 adds the production bootstrap and the inactive n8n import. The remaining steps are the host, the model, webhook activation, and backups. Do not point this at a purchased server until those are done.
 
 1. **Reserve the name.** Register a hostname and point an A record at the VPS. Pick an EU Hetzner CX33 or another amd64 plan with 8 GB RAM. Add an SSH key. Enable the firewall for 22, 80, and 443 before Compose starts.
 2. **Prepare the host.** Install Docker Engine and the Compose plugin, turn on NTP and unattended security updates, and create a deploy user that can run Docker. Clone the repository and check out the reviewed commit.
@@ -315,9 +349,9 @@ Phase 1 added the staging Compose file, Caddy, the same-origin web build, and th
 6. **Point Caddy at the public name.** The Caddyfile already routes `/api` unchanged to `api:8000` and every other path to `web:3000`, with no response buffering and 180 second proxy timeouts. Set `STAGING_HOST` to the public name so Caddy requests a Let's Encrypt certificate.
 7. **Use the staging web image as built.** `NEXT_PUBLIC_API_URL=same-origin` is already the staging build argument. Do not bake the public hostname into the image.
 8. **Install the embedding model.** Install Ollama on the host or as a private Compose service. Run `ollama pull nomic-embed-text`. Point the API at it with dimensions 768. Skip this step only if the OpenAI 1536 alternative was chosen on purpose.
-9. **Bootstrap accounts once.** Start Postgres and the API with `ATLAS_ENVIRONMENT=development` and the staging passwords. Run `python -m app.scripts.seed` inside the API container. Confirm the three users exist. Switch `ATLAS_ENVIRONMENT` to `production`, set `ATLAS_COOKIE_SECURE=true`, and recreate the API container. Do not run the seed again. It resets those passwords and it will refuse production.
+9. **Bootstrap the first administrator.** Keep `STAGING_ENVIRONMENT=production`. Run `python -m app.scripts.bootstrap` inside the API container with the JSON on stdin. Confirm `--status` shows one user, one organization, one administrator, and zero companies. Run it again and confirm `administrator_exists`. Do not run the development seed.
 10. **Set the Groq key** in `.env` and recreate the API. Confirm provider status from a logged-in session. The status payload must not contain the key.
-11. **Import n8n.** Create the n8n owner through an SSH tunnel to port 5678. Import `infrastructure/n8n/lead-processing.json` and `infrastructure/n8n/follow-up.json` and activate them. In ATLAS, create the organization webhook key. Put the id and the one-time secret into `ATLAS_HOOK_KEY_ID` and `ATLAS_HOOK_SECRET`. Recreate n8n so the follow-up signer sees them. Store the secret in the password manager. It is not shown again.
+11. **Import n8n, then activate only after the webhook key exists.** Run `py -3 infrastructure/staging/provision_n8n.py`. Confirm both workflows exist once and are inactive. Create the n8n owner through an SSH tunnel to port 5678. In ATLAS, create the organization webhook key. Put the id and the one-time secret into `STAGING_HOOK_KEY_ID` and `STAGING_HOOK_SECRET`, recreate n8n, and activate the two workflows. Store the secret in the password manager. It is not shown again.
 12. **Prove the product path.** From a browser that is not on the VPS: log in as admin, upload a text file and see it reach `ready`, ask a question that cites it, start an agent run, approve a customer response, and read that message in Mailpit through the SSH tunnel. Create a lead and confirm the n8n execution calls `http://api:8000/api/v1/hooks/lead-processed` and the workflow run completes. Repeat one approval to confirm the idempotency key does not send a second email.
 13. **Back up and restore.** Take a `pg_dump`, copy the upload and model volumes, and store the two encryption keys separately. Restore onto a second data directory or a scratch volume and open a document. A backup that has never been restored is not a backup.
 14. **Leave the public demo flag off.** Keep live email off. Keep the calendar in simulation. Keep a single API replica.
