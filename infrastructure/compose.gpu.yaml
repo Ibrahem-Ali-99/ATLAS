@@ -1,0 +1,13 @@
+# Optional NVIDIA access for the Ollama service only.
+# Merge this file on a Docker host that already has the NVIDIA container runtime:
+#   docker compose -f infrastructure/compose.staging.yaml -f infrastructure/compose.gpu.yaml up -d
+# A CPU host starts from compose.staging.yaml alone. GPU hardware is not required.
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

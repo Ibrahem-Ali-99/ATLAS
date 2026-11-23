@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test:unit": "node --experimental-strip-types --test src/lib/api-base.test.ts",
     "e2e": "playwright test"
   },
   "dependencies": {

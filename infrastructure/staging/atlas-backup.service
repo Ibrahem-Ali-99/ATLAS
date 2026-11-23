@@ -1,0 +1,11 @@
+[Unit]
+Description=ATLAS staging backup
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/atlas
+EnvironmentFile=/etc/atlas/backup.env
+ExecStart=/usr/bin/python3 infrastructure/staging/backup.py
+Nice=10

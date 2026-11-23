@@ -25,6 +25,12 @@ ENV_FILE = REPO_ROOT / ".env" if REPO_ROOT is not None else None
 _LOCAL_SMTP_HOSTS = frozenset({"127.0.0.1", "localhost", "mailpit", "::1"})
 
 
+def _placeholder_secret(value: str) -> bool:
+    lowered = value.lower()
+    markers = ("replace-with", "dev-only", "change-me", "changeme")
+    return any(marker in lowered for marker in markers)
+
+
 def _local_smtp_host(host: str) -> bool:
     return host.strip().lower() in _LOCAL_SMTP_HOSTS
 
@@ -140,11 +146,10 @@ class Settings(BaseSettings):
     def validate_production_secrets(self) -> Self:
         if len(self.secret_key) < 32:
             raise ValueError("ATLAS_SECRET_KEY must be at least 32 characters")
-        if self.environment == "production":
-            if "replace-with" in self.secret_key or self.secret_key.startswith("dev-only"):
-                raise ValueError("ATLAS_SECRET_KEY placeholder is not allowed in production")
-            if not self.cookie_secure:
-                raise ValueError("ATLAS_COOKIE_SECURE must be true in production")
+        if self.environment == "production" and _placeholder_secret(self.secret_key):
+            raise ValueError("ATLAS_SECRET_KEY placeholder is not allowed in production")
+        if self.environment == "production" and not self.cookie_secure:
+            raise ValueError("ATLAS_COOKIE_SECURE must be true in production")
         if self.email_mode == "live" and not self.email_live_enabled:
             raise ValueError("ATLAS_EMAIL_LIVE_ENABLED must be true when ATLAS_EMAIL_MODE is live")
         if self.email_mode == "sandbox" and not _local_smtp_host(self.smtp_host):

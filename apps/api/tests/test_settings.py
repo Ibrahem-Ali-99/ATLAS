@@ -25,12 +25,9 @@ def test_secret_key_must_be_at_least_32_characters() -> None:
 
 
 def test_production_rejects_placeholder_secret() -> None:
-    with pytest.raises(ValidationError):
-        _settings(
-            environment="production",
-            secret_key="replace-with-a-long-random-string",
-            cookie_secure=True,
-        )
+    for secret in ("replace-with-a-long-random-string", "change-me-change-me-change-me"):
+        with pytest.raises(ValidationError):
+            _settings(environment="production", secret_key=secret, cookie_secure=True)
 
 
 def test_production_requires_secure_cookies() -> None:

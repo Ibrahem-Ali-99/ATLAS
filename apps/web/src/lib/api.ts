@@ -1,8 +1,9 @@
+import { resolveApiBaseUrl } from "@/lib/api-base";
 import type { AuthSession, HealthStatus, ReadyStatus } from "@/lib/types";
 
 export const sessionQueryKey = ["session"] as const;
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const API_URL = resolveApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
 
 let csrfToken: string | null = null;
 
