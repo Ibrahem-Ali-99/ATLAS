@@ -26,7 +26,7 @@ The session cookie is HttpOnly and SameSite=Lax. A browser will not send it from
 
 Host the web and API behind one origin. A reverse proxy can forward `/api/` to the API and everything else to Next.js. Set `ATLAS_COOKIE_SECURE=true` only for HTTPS. Production refuses a placeholder `ATLAS_SECRET_KEY` and refuses `ATLAS_LLM_PROVIDER=double`.
 
-`NEXT_PUBLIC_API_URL` is fixed when the web image is built. The Compose web service passes it as a build argument. For a single-origin proxy, build the web with that public origin. The image sets `NEXT_STANDALONE=1` so Next emits a standalone server. A host checkout leaves that unset, so `npm run start` keeps working.
+`NEXT_PUBLIC_API_URL=same-origin` builds a web image that calls `/api/v1` on the page's own host, so a new HTTPS hostname does not require a rebuild. The staging Compose file passes that value. An explicit URL is still baked at build time. Local development and the demo profile keep `http://127.0.0.1:8000`. The image sets `NEXT_STANDALONE=1` so Next emits a standalone server. A host checkout leaves that unset, so `npm run start` keeps working. Staging routing is `infrastructure/compose.staging.yaml`.
 
 The agent reads company documents through a short-lived process. That process receives the configured embedding provider, so `double` and a real key are not split between the API and the tool. A public demo should leave provider keys empty and leave the n8n URL empty. Empty keys fail closed. Do not give the seeded admin password to visitors if n8n, live email, or a paid model key is configured.
 
