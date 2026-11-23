@@ -221,6 +221,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
       response.request().method() === "POST" &&
       response.ok(),
   );
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Execute" }).click();
   const executedBody = await jsonBody<ApprovalRow>(await executed);
   expect(executedBody.status).toBe("executed");

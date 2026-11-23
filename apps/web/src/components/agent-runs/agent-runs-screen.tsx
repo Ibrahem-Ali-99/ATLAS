@@ -19,6 +19,7 @@ import { getDiagnosticRun } from "@/lib/intelligence";
 import { listInquiries } from "@/lib/records-api";
 import type { DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
+import { actionLabel, proposalChange, proposalRisk, proposalTarget } from "@/lib/approval-presentation";
 
 const selectClass =
   "flex h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground";
@@ -411,11 +412,13 @@ function RunDetail({
           {detail.approvals.map((approval) => (
             <article key={approval.id} className="rounded-[10px] bg-secondary p-3 text-sm">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="font-medium">{approval.action_type.replaceAll("_", " ")}</span>
+                <span className="font-medium">{actionLabel(approval.action_type)}</span>
                 <span className={`text-xs uppercase tracking-[0.12em] ${statusClass(approval.status)}`}>{approval.status}</span>
               </div>
-              <Link className="text-sm text-primary underline" href={`/approvals?approval=${approval.id}`}>Open the decision</Link>
-              <pre className="mt-2 overflow-x-auto rounded-[10px] bg-background p-2 text-xs">{JSON.stringify(approval.payload, null, 2)}</pre>
+              <p className="text-sm font-medium">{proposalChange(approval.action_type, approval.payload)}</p>
+              <p className="mt-1 text-sm text-muted-foreground">Affected: {proposalTarget(approval.payload)}</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">{proposalRisk(approval.action_type)}</p>
+              <Link className="mt-3 inline-block text-sm text-primary underline" href={`/approvals?approval=${approval.id}`}>Review proposal</Link>
               {executionSummary(approval.execution_result) ? (
                 <p className="mt-2 text-muted-foreground">{executionSummary(approval.execution_result)}</p>
               ) : null}

@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { useRef, useState } from "react";
 
 import { Pager } from "@/components/pager";
@@ -14,6 +15,7 @@ import { executionSummary, type Approval, type ApprovalStatus } from "@/lib/agen
 import { decideApproval, executeApproval, listApprovals, resumeAgentRun } from "@/lib/agent-api";
 import { getAutomations } from "@/lib/automations";
 import { useWorkspace } from "@/lib/use-workspace";
+import { actionLabel, proposalChange, proposalRisk, proposalTarget } from "@/lib/approval-presentation";
 
 const selectClass =
   "flex h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground";
@@ -191,7 +193,7 @@ function ApprovalsBody({
               className={`block w-full px-4 py-3 text-left ${approval.id === selectedId ? "bg-accent/40" : ""}`}
               onClick={() => onSelect(approval.id)}
             >
-              <span className="font-medium">{approval.action_type.replaceAll("_", " ")}</span>
+              <span className="font-medium">{actionLabel(approval.action_type)}</span>
               <span className="mt-1 block text-sm text-muted-foreground">
                 {scopeLabel(approval.action_type, automations.data?.email_mode, automations.data?.calendar_provider)}
                 {" · "}
@@ -206,7 +208,7 @@ function ApprovalsBody({
       </section>
       <section className="rounded-[10px] bg-muted p-4">
         {notice ? <p className="mb-3 text-sm text-muted-foreground">{notice}</p> : null}
-        {!selected ? <p className="text-sm text-muted-foreground">Select a proposal to see its exact payload.</p> : null}
+        {!selected ? <p className="text-sm text-muted-foreground">Select a proposal to review the requested change and its impact.</p> : null}
         {selected ? (
           <ApprovalDetail
             approval={selected}
@@ -263,7 +265,7 @@ function ApprovalDetail({
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg text-foreground">{approval.action_type.replaceAll("_", " ")}</h2>
+          <h2 className="text-lg font-semibold text-foreground">{actionLabel(approval.action_type)}</h2>
           <p className={`mt-1 text-xs uppercase tracking-[0.12em] ${approval.action_type === "prepare_customer_response" || approval.action_type === "request_appointment" ? "text-warning" : "text-success"}`}>
             {scopeLabel(approval.action_type, emailMode, calendarProvider)}
           </p>
@@ -271,14 +273,12 @@ function ApprovalDetail({
         </div>
         <p className={`text-xs uppercase tracking-[0.12em] ${statusClass(approval.status)}`}>{approval.status}</p>
       </div>
-      <dl className="grid gap-3 sm:grid-cols-2">
-        {payloadFields(approval.payload).map((field) => (
-          <div key={field.label}>
-            <dt className="text-xs uppercase tracking-wide text-muted-foreground">{field.label}</dt>
-            <dd className="mt-1 whitespace-pre-wrap text-sm">{field.value}</dd>
-          </div>
-        ))}
-      </dl>
+      <div className="rounded-lg border border-border bg-card p-4">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Proposed action</p>
+        <p className="mt-2 text-sm font-medium">{proposalChange(approval.action_type, approval.payload)}</p>
+        <p className="mt-3 text-sm text-muted-foreground"><span className="font-medium text-foreground">Affected:</span> {proposalTarget(approval.payload)}</p>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground"><span className="font-medium text-foreground">Impact:</span> {proposalRisk(approval.action_type)}</p>
+      </div>
       <dl className="space-y-1 text-sm text-muted-foreground">
         <div>Target {targetLabel(approval.payload)}</div>
         <div>Expires {new Date(approval.expires_at).toLocaleString()}</div>
@@ -288,7 +288,12 @@ function ApprovalDetail({
       </dl>
       <p className="text-xs text-subtle">Previous field values are not stored on this proposal. The fields below are the stored payload.</p>
       <p className="text-sm leading-6 text-muted-foreground">{sideEffect(approval.action_type, approval.status)}</p>
-      <pre className="overflow-x-auto rounded-[10px] bg-background p-3 text-xs">{JSON.stringify(approval.payload, null, 2)}</pre>
+      {isAdmin ? (
+        <details className="rounded-[10px] border border-border bg-background p-3">
+          <summary className="cursor-pointer text-sm font-medium">Technical details</summary>
+          <pre className="mt-3 overflow-x-auto text-xs">{JSON.stringify(approval.payload, null, 2)}</pre>
+        </details>
+      ) : null}
       {executionSummary(approval.execution_result) ? (
         <p className="text-sm text-muted-foreground">{executionSummary(approval.execution_result)}</p>
       ) : null}
@@ -310,10 +315,16 @@ function ApprovalDetail({
         <p className="text-sm text-muted-foreground">An admin has to approve or reject this action.</p>
       ) : null}
       {approval.status === "approved" && isAdmin ? (
-        <Button type="button" disabled={executing} onClick={onExecute}>
+        <div className="space-y-2">
+          <Button type="button" disabled={executing} onClick={() => {
+            if (window.confirm("Execute this approved action? This will apply the stored change.")) onExecute();
+          }}>
           {executing ? "Executing" : "Execute"}
-        </Button>
+          </Button>
+          <p className="text-xs text-muted-foreground">Execution is the step that applies the approved change.</p>
+        </div>
       ) : null}
+      {approval.status === "executed" ? <Link className="inline-block text-sm text-primary underline" href="/crm?tab=leads">View updated leads</Link> : null}
       {approval.status !== "pending" ? (
         <Button type="button" variant="outline" disabled={resuming} onClick={onResume}>
           {resuming ? "Resuming" : "Resume agent run"}
@@ -360,15 +371,6 @@ function scopeLabel(actionType: string, emailMode: string | undefined, calendarP
     return "Calendar on execute";
   }
   return "Stored action";
-}
-
-function payloadFields(payload: Record<string, unknown>): { label: string; value: string }[] {
-  return Object.entries(payload).flatMap(([key, value]) => {
-    if (value === null || value === undefined || value === "") {
-      return [];
-    }
-    return [{ label: key.replaceAll("_", " "), value: typeof value === "string" ? value : JSON.stringify(value) }];
-  });
 }
 
 function sideEffect(actionType: string, status: string): string {
