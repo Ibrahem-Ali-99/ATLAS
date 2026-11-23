@@ -19,7 +19,8 @@ def main() -> None:
     os.environ["ATLAS_EMBEDDING_DIMENSIONS"] = "1536"
     os.environ["ATLAS_PUBLIC_DEMO"] = "false"
     os.environ["ATLAS_N8N_LEAD_WEBHOOK_URL"] = ""
-    os.environ["ATLAS_CORS_ORIGINS"] = "http://127.0.0.1:3010,http://localhost:3010"
+    web_port = os.environ.get("ATLAS_E2E_WEB_PORT", "3010")
+    os.environ["ATLAS_CORS_ORIGINS"] = f"http://127.0.0.1:{web_port},http://localhost:{web_port}"
     os.environ["ATLAS_EMAIL_MODE"] = "sandbox"
     os.environ["ATLAS_SMTP_HOST"] = "127.0.0.1"
 
@@ -28,7 +29,11 @@ def main() -> None:
     get_settings.cache_clear()
     import uvicorn
 
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8010)
+    uvicorn.run(
+        "app.main:app",
+        host="127.0.0.1",
+        port=int(os.environ.get("ATLAS_E2E_API_PORT", "8010")),
+    )
 
 
 if __name__ == "__main__":

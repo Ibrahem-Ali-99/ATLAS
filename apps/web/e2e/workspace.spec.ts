@@ -12,7 +12,7 @@ test("a missing JavaScript chunk is recognized as a stale bundle", () => {
   expect(isStaleChunkError(new Error("Resource not found"))).toBe(false);
 });
 
-const shotDir = path.resolve(process.cwd(), "../../docs/demo/screenshots");
+const shotDir = path.resolve(process.cwd(), "../../.pytest-tmp/phase2d-screenshots");
 
 async function shot(page: Page, name: string): Promise<void> {
   mkdirSync(shotDir, { recursive: true });

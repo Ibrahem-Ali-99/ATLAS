@@ -19,20 +19,22 @@ export default defineConfig({
   reporter: "line",
   use: {
     ...devices["Desktop Chrome"],
-    baseURL: "http://127.0.0.1:3010",
+    baseURL: "http://127.0.0.1:3011",
     trace: "retain-on-failure",
   },
   globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",
   webServer: {
-    command: "npm run dev -- --hostname 127.0.0.1 --port 3010",
-    url: "http://127.0.0.1:3010/login",
-    reuseExistingServer: false,
+    command: "npm run dev -- --hostname 127.0.0.1 --port 3011",
+    url: "http://127.0.0.1:3011/login",
+    reuseExistingServer: true,
     timeout: 120_000,
     env: {
       ...withLocalNode(process.env),
-      NEXT_PUBLIC_API_URL: "http://127.0.0.1:8010",
-      NEXT_DIST_DIR: ".next-e2e",
+      NEXT_PUBLIC_API_URL: "http://127.0.0.1:8011",
+      ATLAS_E2E_API_PORT: "8011",
+      ATLAS_E2E_WEB_PORT: "3011",
+      NEXT_DIST_DIR: ".next-e2e-phase2d",
     },
   },
 });
