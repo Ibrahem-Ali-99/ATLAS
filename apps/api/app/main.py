@@ -1,3 +1,4 @@
+import os
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -54,7 +55,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.error("checkpoint_setup_failed")
     worker_stop: threading.Event | None = None
     worker_thread: threading.Thread | None = None
-    if settings.environment != "test":
+    if settings.environment != "test" or os.environ.get("ATLAS_E2E_PROVIDER_TRANSPORT") == "1":
         from app.domains.automation.worker import start
 
         worker_stop = threading.Event()

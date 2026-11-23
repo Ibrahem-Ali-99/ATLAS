@@ -64,7 +64,7 @@ function spawnApi(): Promise<ChildProcess> {
   });
 }
 
-function startMailpit(): void {
+async function startMailpit(): Promise<void> {
   execFileSync("docker", [
     "run", "-d", "--rm", "--name", mailpitName,
     "-p", "127.0.0.1::1025", "-p", "127.0.0.1::8025", "axllent/mailpit:v1.21",
@@ -76,7 +76,20 @@ function startMailpit(): void {
   writeFileSync(mailpitFile, mailpitName, "utf8");
   const httpPort = execFileSync("docker", ["port", mailpitName, "8025/tcp"], { encoding: "utf8" })
     .match(/:(\d+)\s*$/m)?.[1];
-  writeFileSync(mailpitHttpFile, String(Number(httpPort)), "utf8");
+  const httpPortNumber = Number(httpPort);
+  if (!httpPortNumber) throw new Error("The disposable Mailpit HTTP port was not allocated");
+  writeFileSync(mailpitHttpFile, String(httpPortNumber), "utf8");
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${httpPortNumber}/api/v1/info`);
+      if (response.ok) return;
+    } catch {
+      // Mailpit is still starting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("Disposable Mailpit did not become ready");
 }
 
 function projectPython(): string {
@@ -100,7 +113,7 @@ export default async function globalSetup(): Promise<void> {
   if (code !== 0) {
     throw new Error("The e2e database was not prepared");
   }
-  startMailpit();
+  await startMailpit();
   const api = await spawnApi();
   if (api.pid === undefined) {
     throw new Error("The e2e API did not start");

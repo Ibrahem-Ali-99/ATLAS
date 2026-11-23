@@ -190,6 +190,7 @@ function ApprovalsBody({
             <button
               key={approval.id}
               type="button"
+              data-approval-id={approval.id}
               className={`block w-full px-4 py-3 text-left ${approval.id === selectedId ? "bg-accent/40" : ""}`}
               onClick={() => onSelect(approval.id)}
             >

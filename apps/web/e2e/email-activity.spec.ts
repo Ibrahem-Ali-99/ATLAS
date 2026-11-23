@@ -22,7 +22,17 @@ test("approved email is delivered once and visible in Email Activity", async ({ 
   await page.getByRole("link", { name: "Agent Runs" }).click();
   await page.getByRole("button", { name: "Start from inquiry" }).click();
   await page.getByLabel("Inquiry").selectOption({ label: subject });
+  const started = page.waitForResponse(
+    (response) => response.request().method() === "POST" && response.url().includes("/agent-runs") && response.ok(),
+  );
   await page.getByRole("button", { name: "Start", exact: true }).click();
+  const startedBody = await started.then((response) => response.json() as Promise<{
+    approvals: { id: string; action_type: string }[];
+  }>);
+  const responseApproval = startedBody.approvals.find(
+    (approval) => approval.action_type === "prepare_customer_response",
+  );
+  expect(responseApproval?.id).toBeTruthy();
   await expect(page.getByRole("cell", { name: "awaiting approval" }).first()).toBeVisible();
 
   await page.getByRole("link", { name: "Approvals", exact: true }).click();
@@ -31,7 +41,7 @@ test("approved email is delivered once and visible in Email Activity", async ({ 
   );
   await page.getByLabel("Filter approvals").selectOption("pending");
   await pendingResponse;
-  await page.getByRole("button", { name: "Prepare customer response" }).last().click();
+  await page.locator(`[data-approval-id="${responseApproval?.id}"]`).click();
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText("Approved. Execute writes the stored payload.")).toBeVisible();
   const approvedResponse = page.waitForResponse(
@@ -39,16 +49,22 @@ test("approved email is delivered once and visible in Email Activity", async ({ 
   );
   await page.getByLabel("Filter approvals").selectOption("approved");
   await approvedResponse;
-  await page.getByRole("button", { name: "Prepare customer response" }).last().click();
+  const approvalRow = page.locator(`[data-approval-id="${responseApproval?.id}"]`);
+  await approvalRow.click();
   const execution = page.waitForResponse(
     (response) => response.request().method() === "POST" && response.url().includes("/execute") && response.ok(),
   );
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Execute" }).click();
   const executionBody = await execution.then((response) => response.json() as Promise<{ status: string }>);
   expect(executionBody.status).toBe("executing");
 
   await page.getByRole("link", { name: "Workflows" }).click();
   await expect(page.getByRole("heading", { name: "Email activity" })).toBeVisible();
+  const activityText = await page.locator("body").innerText();
+  if (!activityText.includes("Accepted by SMTP")) {
+    throw new Error(`Email activity did not reach SMTP acceptance: ${activityText.slice(-1200)}`);
+  }
   await expect(page.getByText("Accepted by SMTP")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Mailpit sandbox")).toBeVisible();
   await page.screenshot({ path: path.resolve(process.cwd(), "../../var/email-activity-desktop.png"), fullPage: true });

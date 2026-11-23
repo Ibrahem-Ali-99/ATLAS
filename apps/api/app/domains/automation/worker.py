@@ -35,6 +35,8 @@ def run_once() -> int:
             except Exception:
                 logger.exception("automation_intent_failed", intent_id=str(intent_id))
             processed += 1
+        if processed:
+            logger.info("automation_worker_processed", count=processed)
         return processed
     finally:
         session.close()
@@ -46,6 +48,7 @@ def start(stop_event: threading.Event, interval_seconds: float = 1.0) -> threadi
             run_once()
             stop_event.wait(interval_seconds)
 
+    logger.info("automation_worker_started")
     thread = threading.Thread(target=loop, name="atlas-automation-worker", daemon=True)
     thread.start()
     return thread
