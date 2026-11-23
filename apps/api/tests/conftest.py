@@ -41,7 +41,7 @@ def clean_tables() -> None:
                 "lead_predictions, evaluation_runs, operation_traces, model_versions, "
                 "email_messages, calendar_bookings, execution_attempts, execution_intents, "
                 "workflow_runs, webhook_events, webhook_keys, integration_configs, "
-                "agent_events, approvals, agent_runs, "
+                "agent_events, approvals, agent_runs, audit_events, "
                 "interactions, inquiries, leads, contacts, companies, "
                 "sessions, memberships, users, organizations "
                 "RESTART IDENTITY CASCADE"

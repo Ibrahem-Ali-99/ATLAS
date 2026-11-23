@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.core.config import get_settings
 from app.db.base import Base
 from app.domains.agents import models as agent_models  # noqa: F401
+from app.domains.audit import models as audit_models  # noqa: F401
 from app.domains.automation import models as automation_models  # noqa: F401
 from app.domains.approvals import models as approval_models  # noqa: F401
 from app.domains.assistant import models as assistant_models  # noqa: F401

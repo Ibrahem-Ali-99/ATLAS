@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
+from app.domains.audit.service import record_event
 from app.domains.automation.signatures import open_integration_secret, seal_integration_secret
 from app.domains.integrations.models import IntegrationConfig, IntegrationStatus, IntegrationType
 from app.domains.integrations.schemas import IntegrationInput, IntegrationMetadata
@@ -53,7 +54,12 @@ def safe_metadata(
 
 
 def create_configuration(
-    db: Session, organization_id: uuid.UUID, data: IntegrationInput, credentials: str | None = None
+    db: Session,
+    organization_id: uuid.UUID,
+    data: IntegrationInput,
+    credentials: str | None = None,
+    *,
+    actor_id: uuid.UUID | None = None,
 ) -> IntegrationConfig:
     data.validate_provider()
     if _get(db, organization_id, data.integration_type) is not None:
@@ -71,6 +77,18 @@ def create_configuration(
     )
     db.add(record)
     db.flush()
+    record_event(
+        db,
+        organization_id,
+        "integration_configuration_created",
+        {
+            "integration_type": data.integration_type.value,
+            "provider": data.provider,
+                "credential_version": record.credential_version,
+            "has_credentials": bool(credentials),
+        },
+        actor_id=actor_id,
+    )
     return record
 
 
@@ -82,6 +100,7 @@ def update_metadata(
     provider: str,
     config: dict[str, Any],
     expected_version: int,
+    actor_id: uuid.UUID | None = None,
 ) -> IntegrationConfig:
     record = _get(db, organization_id, integration_type, lock=True)
     if record is None:
@@ -94,12 +113,25 @@ def update_metadata(
             "integration_version_conflict",
             "Integration configuration changed; reload before updating",
         )
+    provider_changed = record.provider != data.provider
     record.provider, record.config, record.status = (
         data.provider,
         data.config,
         IntegrationStatus.configured,
     )
     db.flush()
+    record_event(
+        db,
+        organization_id,
+        "integration_provider_changed",
+        {
+            "integration_type": integration_type.value,
+            "provider": data.provider,
+            "credential_version": record.credential_version,
+            "provider_changed": provider_changed,
+        },
+        actor_id=actor_id,
+    )
     return record
 
 
@@ -110,6 +142,7 @@ def replace_credentials(
     credentials: str,
     *,
     expected_version: int,
+    actor_id: uuid.UUID | None = None,
 ) -> IntegrationConfig:
     if not credentials.strip():
         raise AppError(422, "credentials_empty", "Credentials cannot be empty")
@@ -126,6 +159,16 @@ def replace_credentials(
     record.credential_version += 1
     record.status = IntegrationStatus.configured
     db.flush()
+    record_event(
+        db,
+        organization_id,
+        "integration_credentials_replaced",
+        {
+            "integration_type": integration_type.value,
+            "credential_version": record.credential_version,
+        },
+        actor_id=actor_id,
+    )
     return record
 
 
@@ -135,6 +178,7 @@ def disable_configuration(
     integration_type: IntegrationType,
     *,
     expected_version: int,
+    actor_id: uuid.UUID | None = None,
 ) -> IntegrationConfig:
     record = _get(db, organization_id, integration_type, lock=True)
     if record is None:
@@ -147,6 +191,16 @@ def disable_configuration(
         )
     record.status = IntegrationStatus.disabled
     db.flush()
+    record_event(
+        db,
+        organization_id,
+        "integration_configuration_disabled",
+        {
+            "integration_type": integration_type.value,
+            "credential_version": record.credential_version,
+        },
+        actor_id=actor_id,
+    )
     return record
 
 
@@ -156,6 +210,7 @@ def revoke_credentials(
     integration_type: IntegrationType,
     *,
     expected_version: int,
+    actor_id: uuid.UUID | None = None,
 ) -> IntegrationConfig:
     record = _get(db, organization_id, integration_type, lock=True)
     if record is None:
@@ -170,6 +225,48 @@ def revoke_credentials(
     record.credential_version += 1
     record.status = IntegrationStatus.disabled
     db.flush()
+    record_event(
+        db,
+        organization_id,
+        "integration_credentials_revoked",
+        {
+            "integration_type": integration_type.value,
+            "credential_version": record.credential_version,
+        },
+        actor_id=actor_id,
+    )
+    return record
+
+
+def enable_configuration(
+    db: Session,
+    organization_id: uuid.UUID,
+    integration_type: IntegrationType,
+    *,
+    expected_version: int,
+    actor_id: uuid.UUID | None = None,
+) -> IntegrationConfig:
+    record = _get(db, organization_id, integration_type, lock=True)
+    if record is None:
+        raise AppError(404, "integration_not_found", "Integration configuration not found")
+    if record.credential_version != expected_version:
+        raise AppError(
+            409,
+            "integration_version_conflict",
+            "Integration configuration changed; reload before updating",
+        )
+    record.status = IntegrationStatus.configured
+    db.flush()
+    record_event(
+        db,
+        organization_id,
+        "integration_configuration_enabled",
+        {
+            "integration_type": integration_type.value,
+            "credential_version": record.credential_version,
+        },
+        actor_id=actor_id,
+    )
     return record
 
 
