@@ -3,6 +3,41 @@
 from __future__ import annotations
 
 import os
+import uuid
+
+
+def install_provider_transport() -> None:
+    """Install deterministic provider I/O only for this disposable server."""
+    if os.environ.get("ATLAS_E2E_PROVIDER_TRANSPORT") != "1":
+        return
+    import httpx
+    from sqlalchemy.orm import Session
+
+    from app.api.v1 import integrations as integrations_api
+    from app.integrations.language import OpenAICompatibleChatClient
+    from app.integrations.resolver import resolve_settings
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        authorization = request.headers.get("authorization", "")
+        if "timeout" in authorization:
+            raise httpx.ReadTimeout("e2e timeout", request=request)
+        if "invalid" in authorization:
+            return httpx.Response(401, request=request)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+            request=request,
+        )
+
+    def e2e_chat_client(
+        db: Session | None = None, organization_id: uuid.UUID | None = None
+    ) -> OpenAICompatibleChatClient:
+        assert db is not None and organization_id is not None
+        settings = resolve_settings(db, organization_id, "chat")
+        return OpenAICompatibleChatClient(settings, transport=httpx.MockTransport(handler))
+
+    integrations_api.get_chat_client = e2e_chat_client
 
 
 def main() -> None:
@@ -27,6 +62,7 @@ def main() -> None:
     from app.core.config import get_settings
 
     get_settings.cache_clear()
+    install_provider_transport()
     import uvicorn
 
     uvicorn.run(

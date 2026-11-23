@@ -37,7 +37,7 @@ function spawnApi(): Promise<ChildProcess> {
       : "python";
     const child = spawn(python, ["-m", "app.scripts.e2e_server"], {
       cwd: apiRoot,
-      env: { ...process.env, ATLAS_E2E_API_PORT: String(apiPort), ATLAS_E2E_WEB_PORT: "3011" },
+      env: { ...process.env, ATLAS_E2E_API_PORT: String(apiPort), ATLAS_E2E_WEB_PORT: "3011", ATLAS_E2E_PROVIDER_TRANSPORT: "1" },
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
     });

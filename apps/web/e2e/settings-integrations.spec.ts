@@ -103,3 +103,28 @@ test("indexed knowledge blocks incompatible embedding changes", async ({ page })
   await expect(page.getByLabel("Vector dimensions")).toHaveValue("768");
   await page.screenshot({ path: `${screenshots}/settings-embedding-rejection.png`, fullPage: true });
 });
+
+test("provider connection verification reports success, invalid credentials, and timeout", async ({ page }) => {
+  await signIn(page, "admin@example.com", "change-me-admin");
+  await page.goto("/settings");
+  const key = page.getByLabel("API key").first();
+  const save = page.getByRole("button", { name: "Save" }).first();
+  const verify = page.getByRole("button", { name: "Test connection" }).first();
+  await key.fill("e2e-success");
+  await save.click();
+  await expect(page.getByRole("status")).toContainText("Configuration saved");
+  await verify.click();
+  await expect(page.getByRole("status")).toContainText("Provider verification succeeded.", { timeout: 10_000 });
+  await expect(page.getByText("e2e-success")).toHaveCount(0);
+  await key.fill("e2e-invalid");
+  await save.click();
+  await verify.click();
+  await expect(page.getByRole("status")).toContainText(/Verification failed: The language model rejected the API key/i, { timeout: 10_000 });
+  await key.fill("e2e-timeout");
+  await save.click();
+  const started = Date.now();
+  await verify.click();
+  await expect(page.getByRole("status")).toContainText(/Verification failed: The language model timed out/i, { timeout: 10_000 });
+  expect(Date.now() - started).toBeLessThan(10_000);
+  await page.screenshot({ path: `${screenshots}/settings-connection-verification.png`, fullPage: true });
+});
