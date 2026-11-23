@@ -47,8 +47,10 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
     public_demo: bool = False
-    secret_key: str
-    database_url: str
+    # Empty defaults keep the type checker aligned with BaseSettings while the
+    # validators still fail closed when required environment values are absent.
+    secret_key: str = ""
+    database_url: str = ""
     cors_origins: str = "http://127.0.0.1:3000,http://localhost:3000"
     cookie_secure: bool = False
     session_cookie_name: str = "atlas_session"

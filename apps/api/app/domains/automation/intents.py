@@ -217,7 +217,8 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
         recipient = payload.get("to")
         if not isinstance(recipient, str):
             raise AppError(422, "invalid_recipient", "The approved action has no recipient")
-        contact_id = _uuid(payload.get("contact_id"))
+        raw_contact_id = payload.get("contact_id")
+        contact_id = _uuid(raw_contact_id) if raw_contact_id else None
         snapshot = payload.get("recipient_snapshot")
         if contact_id is not None:
             contact = db.scalar(
