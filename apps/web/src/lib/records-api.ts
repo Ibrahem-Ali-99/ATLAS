@@ -25,6 +25,7 @@ type ListParams = {
   q?: string;
   page?: number;
   pageSize?: number;
+  includeArchived?: boolean;
 };
 
 function organizationPath(organizationId: string, path: string): string {
@@ -43,7 +44,7 @@ function queryString(params: Record<string, string | number | null | undefined>)
 }
 
 function listQuery(params: ListParams): string {
-  return queryString({ q: params.q, page: params.page ?? 1, page_size: params.pageSize ?? 20 });
+  return queryString({ q: params.q, page: params.page ?? 1, page_size: params.pageSize ?? 20, include_archived: params.includeArchived ? "true" : undefined });
 }
 
 export function listCompanies(organizationId: string, params: ListParams = {}): Promise<PageResult<Company>> {
@@ -72,6 +73,10 @@ export function deleteCompany(organizationId: string, companyId: string): Promis
   return apiFetch(organizationPath(organizationId, `/companies/${companyId}`), { method: "DELETE" });
 }
 
+export function restoreCompany(organizationId: string, companyId: string): Promise<Company> {
+  return apiFetch(organizationPath(organizationId, `/companies/${companyId}/restore`), { method: "POST" });
+}
+
 export function listContacts(organizationId: string, params: ListParams = {}): Promise<PageResult<Contact>> {
   return apiFetch(organizationPath(organizationId, `/contacts${listQuery(params)}`));
 }
@@ -96,6 +101,10 @@ export function updateContact(
 
 export function deleteContact(organizationId: string, contactId: string): Promise<void> {
   return apiFetch(organizationPath(organizationId, `/contacts/${contactId}`), { method: "DELETE" });
+}
+
+export function restoreContact(organizationId: string, contactId: string): Promise<Contact> {
+  return apiFetch(organizationPath(organizationId, `/contacts/${contactId}/restore`), { method: "POST" });
 }
 
 export function listLeads(
@@ -131,6 +140,10 @@ export function updateLead(
 
 export function deleteLead(organizationId: string, leadId: string): Promise<void> {
   return apiFetch(organizationPath(organizationId, `/leads/${leadId}`), { method: "DELETE" });
+}
+
+export function restoreLead(organizationId: string, leadId: string): Promise<Lead> {
+  return apiFetch(organizationPath(organizationId, `/leads/${leadId}/restore`), { method: "POST" });
 }
 
 export function listInteractions(organizationId: string, leadId: string): Promise<Interaction[]> {
@@ -172,6 +185,10 @@ export function updateInquiry(
 
 export function deleteInquiry(organizationId: string, inquiryId: string): Promise<void> {
   return apiFetch(organizationPath(organizationId, `/inquiries/${inquiryId}`), { method: "DELETE" });
+}
+
+export function restoreInquiry(organizationId: string, inquiryId: string): Promise<Inquiry> {
+  return apiFetch(organizationPath(organizationId, `/inquiries/${inquiryId}/restore`), { method: "POST" });
 }
 
 export function listDocuments(

@@ -3,6 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.domains.assistant.models import Conversation, Message, MessageRole
 from app.domains.crm.models import (
     Company,
     Contact,
@@ -65,6 +66,71 @@ def seed_sample_crm(
         lead,
         subject="Request for warehousing rates",
         body="Synthetic inquiry. Please send the service sheet for cold storage.",
+    )
+    for title, status, source, notes in (
+        (
+            "Cold storage expansion",
+            LeadStatus.contacted,
+            "Referral",
+            "Evaluating temperature-controlled storage for a Q3 launch.",
+        ),
+        (
+            "Regional fulfillment partnership",
+            LeadStatus.new,
+            "Partner referral",
+            "Needs an initial discovery call about regional fulfillment.",
+        ),
+        (
+            "Warehouse renewal",
+            LeadStatus.won,
+            "Existing customer",
+            "Synthetic won opportunity used to demonstrate reporting.",
+        ),
+        (
+            "Packaging services review",
+            LeadStatus.lost,
+            "Outbound",
+            "Synthetic closed-lost opportunity used to demonstrate pipeline history.",
+        ),
+    ):
+        extra_lead = _lead(
+            db,
+            atlas,
+            harbor,
+            contact,
+            admin,
+            title=title,
+            status=status,
+            source=source,
+            notes=notes,
+        )
+        _interaction(db, atlas, extra_lead, admin, f"Seeded follow-up note for {title}.")
+    _inquiry(
+        db,
+        atlas,
+        harbor,
+        lead,
+        subject="Cold storage availability for Q3",
+        body="Synthetic inquiry asking whether cold storage capacity is available this quarter.",
+    )
+    _inquiry(
+        db,
+        atlas,
+        harbor,
+        lead,
+        subject="Request for fulfillment capabilities",
+        body="Synthetic inquiry asking about regional fulfillment and packaging support.",
+    )
+    _conversation(
+        db,
+        atlas,
+        admin,
+        title="Getting started with ATLAS",
+        user_text="What can ATLAS help me with?",
+        assistant_text=(
+            "ATLAS can explain this workspace, find CRM and knowledge records, and guide "
+            "approved agent workflows. Company facts are answered from retrieved evidence."
+        ),
     )
     _company(
         db,
@@ -219,4 +285,47 @@ def _inquiry(
             body=body,
             origin=Origin.demo,
         )
+    )
+
+
+def _conversation(
+    db: Session,
+    organization: Organization,
+    user: User,
+    *,
+    title: str,
+    user_text: str,
+    assistant_text: str,
+) -> None:
+    existing = db.scalar(
+        select(Conversation).where(
+            Conversation.organization_id == organization.id,
+            Conversation.user_id == user.id,
+            Conversation.title == title,
+        )
+    )
+    if existing is not None:
+        return
+    conversation = Conversation(
+        organization_id=organization.id,
+        user_id=user.id,
+        title=title,
+    )
+    db.add(conversation)
+    db.flush()
+    db.add_all(
+        [
+            Message(
+                conversation_id=conversation.id,
+                organization_id=organization.id,
+                role=MessageRole.user,
+                content=user_text,
+            ),
+            Message(
+                conversation_id=conversation.id,
+                organization_id=organization.id,
+                role=MessageRole.assistant,
+                content=assistant_text,
+            ),
+        ]
     )

@@ -42,9 +42,15 @@ def list_companies(
     q: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    include_archived: bool = False,
 ) -> CompanyPage:
     items, total = service.list_companies(
-        db, member.organization.id, q=q, page=page, page_size=page_size
+        db,
+        member.organization.id,
+        q=q,
+        page=page,
+        page_size=page_size,
+        include_archived=include_archived,
     )
     return CompanyPage(
         items=[CompanyOut.model_validate(item) for item in items], **_page(page, page_size, total)
@@ -78,6 +84,13 @@ def delete_company(company_id: uuid.UUID, member: CsrfMember, db: DbSession) -> 
     return Response(status_code=204)
 
 
+@router.post("/companies/{company_id}/restore", response_model=CompanyOut)
+def restore_company(company_id: uuid.UUID, member: CsrfMember, db: DbSession) -> CompanyOut:
+    return CompanyOut.model_validate(
+        service.restore_company(db, member.organization.id, company_id)
+    )
+
+
 @router.get("/contacts", response_model=ContactPage)
 def list_contacts(
     member: Member,
@@ -86,6 +99,7 @@ def list_contacts(
     company_id: uuid.UUID | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    include_archived: bool = False,
 ) -> ContactPage:
     items, total = service.list_contacts(
         db,
@@ -94,6 +108,7 @@ def list_contacts(
         company_id=company_id,
         page=page,
         page_size=page_size,
+        include_archived=include_archived,
     )
     return ContactPage(
         items=[ContactOut.model_validate(item) for item in items], **_page(page, page_size, total)
@@ -127,6 +142,13 @@ def delete_contact(contact_id: uuid.UUID, member: CsrfMember, db: DbSession) -> 
     return Response(status_code=204)
 
 
+@router.post("/contacts/{contact_id}/restore", response_model=ContactOut)
+def restore_contact(contact_id: uuid.UUID, member: CsrfMember, db: DbSession) -> ContactOut:
+    return ContactOut.model_validate(
+        service.restore_contact(db, member.organization.id, contact_id)
+    )
+
+
 @router.get("/leads", response_model=LeadPage)
 def list_leads(
     member: Member,
@@ -138,6 +160,7 @@ def list_leads(
     origin: Origin | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    include_archived: bool = False,
 ) -> LeadPage:
     items, total = service.list_leads(
         db,
@@ -149,6 +172,7 @@ def list_leads(
         origin=origin.value if origin is not None else None,
         page=page,
         page_size=page_size,
+        include_archived=include_archived,
     )
     return LeadPage(
         items=[LeadOut.model_validate(item) for item in items], **_page(page, page_size, total)
@@ -185,6 +209,11 @@ def delete_lead(lead_id: uuid.UUID, member: CsrfMember, db: DbSession) -> Respon
     return Response(status_code=204)
 
 
+@router.post("/leads/{lead_id}/restore", response_model=LeadOut)
+def restore_lead(lead_id: uuid.UUID, member: CsrfMember, db: DbSession) -> LeadOut:
+    return LeadOut.model_validate(service.restore_lead(db, member.organization.id, lead_id))
+
+
 @router.get("/leads/{lead_id}/interactions", response_model=list[InteractionOut])
 def list_interactions(lead_id: uuid.UUID, member: Member, db: DbSession) -> list[InteractionOut]:
     rows = service.list_interactions(db, member.organization.id, lead_id)
@@ -209,6 +238,7 @@ def list_inquiries(
     company_id: uuid.UUID | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    include_archived: bool = False,
 ) -> InquiryPage:
     items, total = service.list_inquiries(
         db,
@@ -217,6 +247,7 @@ def list_inquiries(
         company_id=company_id,
         page=page,
         page_size=page_size,
+        include_archived=include_archived,
     )
     return InquiryPage(
         items=[InquiryOut.model_validate(item) for item in items], **_page(page, page_size, total)
@@ -248,3 +279,10 @@ def update_inquiry(
 def delete_inquiry(inquiry_id: uuid.UUID, member: CsrfMember, db: DbSession) -> Response:
     service.delete_inquiry(db, member.organization.id, inquiry_id)
     return Response(status_code=204)
+
+
+@router.post("/inquiries/{inquiry_id}/restore", response_model=InquiryOut)
+def restore_inquiry(inquiry_id: uuid.UUID, member: CsrfMember, db: DbSession) -> InquiryOut:
+    return InquiryOut.model_validate(
+        service.restore_inquiry(db, member.organization.id, inquiry_id)
+    )

@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { createInquiry, deleteInquiry, listCompanies, listInquiries, updateInquiry } from "@/lib/records-api";
+import { createInquiry, deleteInquiry, listCompanies, listInquiries, restoreInquiry, updateInquiry } from "@/lib/records-api";
 import { blankToNull, type Inquiry } from "@/lib/records";
 
 const schema = z.object({
@@ -40,11 +40,12 @@ export function InquiriesPanel({ organizationId }: { organizationId: string }) {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const inquiries = useQuery({
     queryKey: ["inquiries", organizationId, query, page],
-    queryFn: () => listInquiries(organizationId, { q: query, page }),
+    queryFn: () => listInquiries(organizationId, { q: query, page, includeArchived }),
   });
   const companies = useQuery({
     queryKey: ["companies", organizationId, "options"],
@@ -66,6 +67,7 @@ export function InquiriesPanel({ organizationId }: { organizationId: string }) {
       <section className="rounded-[10px] bg-muted">
         <div className="flex flex-col gap-3 p-4 sm:flex-row">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search inquiries" aria-label="Search inquiries" />
+          <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} /> Show archived</label>
           <Button type="button" onClick={() => setOpen(true)}>New inquiry</Button>
         </div>
         {inquiries.isPending ? <div className="space-y-2 px-4 pb-4"><Skeleton className="h-8 w-full" /></div> : null}
@@ -191,6 +193,7 @@ function InquiryEditor({
     onSuccess: onSaved,
   });
   const remove = useMutation({ mutationFn: () => deleteInquiry(organizationId, inquiry.id), onSuccess: onDeleted });
+  const restore = useMutation({ mutationFn: () => restoreInquiry(organizationId, inquiry.id), onSuccess: onDeleted });
   return (
     <aside className="rounded-[10px] bg-muted p-6">
       <h2 className="text-base font-semibold">{inquiry.subject}</h2>
@@ -202,7 +205,7 @@ function InquiryEditor({
       {remove.isError ? <div className="mt-3"><RequestError error={remove.error} /></div> : null}
       <div className="mt-4 flex gap-2">
         <Button type="submit" form="inquiry-edit" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
-        <ConfirmButton label="Delete" confirmLabel="Confirm delete" pendingLabel="Deleting…" pending={remove.isPending} onConfirm={() => remove.mutate()} />
+        {inquiry.archived_at ? <Button type="button" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button> : <ConfirmButton label="Archive" confirmLabel="Confirm archive" pendingLabel="Archiving…" pending={remove.isPending} onConfirm={() => remove.mutate()} />}
       </div>
     </aside>
   );

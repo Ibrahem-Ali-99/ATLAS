@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { createContact, deleteContact, listCompanies, listContacts, updateContact } from "@/lib/records-api";
+import { createContact, deleteContact, listCompanies, listContacts, restoreContact, updateContact } from "@/lib/records-api";
 import { blankToNull, type Contact } from "@/lib/records";
 
 const schema = z.object({
@@ -43,11 +43,12 @@ export function ContactsPanel({ organizationId }: { organizationId: string }) {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const contacts = useQuery({
     queryKey: ["contacts", organizationId, query, page],
-    queryFn: () => listContacts(organizationId, { q: query, page }),
+    queryFn: () => listContacts(organizationId, { q: query, page, includeArchived }),
   });
   const companies = useQuery({
     queryKey: ["companies", organizationId, "options"],
@@ -71,6 +72,7 @@ export function ContactsPanel({ organizationId }: { organizationId: string }) {
       <section className="rounded-[10px] bg-muted">
         <div className="flex flex-col gap-3 p-4 sm:flex-row">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search contacts" aria-label="Search contacts" />
+          <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} /> Show archived</label>
           <Button type="button" onClick={() => setOpen(true)}>New contact</Button>
         </div>
         {contacts.isPending ? <div className="space-y-2 px-4 pb-4"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div> : null}
@@ -206,6 +208,7 @@ function ContactEditor({
     onSuccess: onSaved,
   });
   const remove = useMutation({ mutationFn: () => deleteContact(organizationId, contact.id), onSuccess: onDeleted });
+  const restore = useMutation({ mutationFn: () => restoreContact(organizationId, contact.id), onSuccess: onDeleted });
   return (
     <aside className="rounded-[10px] bg-muted p-6">
       <h2 className="text-base font-semibold">{contact.full_name}</h2>
@@ -217,7 +220,7 @@ function ContactEditor({
       {remove.isError ? <div className="mt-3"><RequestError error={remove.error} /></div> : null}
       <div className="mt-4 flex gap-2">
         <Button type="submit" form="contact-edit" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
-        <ConfirmButton label="Delete" confirmLabel="Confirm delete" pendingLabel="Deleting…" pending={remove.isPending} onConfirm={() => remove.mutate()} />
+        {contact.archived_at ? <Button type="button" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button> : <ConfirmButton label="Archive" confirmLabel="Confirm archive" pendingLabel="Archiving…" pending={remove.isPending} onConfirm={() => remove.mutate()} />}
       </div>
     </aside>
   );

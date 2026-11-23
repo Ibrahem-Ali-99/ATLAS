@@ -1,6 +1,7 @@
 import enum
 import re
 import uuid
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import Select, func, or_, select
@@ -85,10 +86,23 @@ def _editable(values: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in values.items() if key != "origin"}
 
 
+def _archive(record: Any, archived: bool) -> None:
+    record.archived_at = None if not archived else datetime.now(UTC)
+
+
+def _archive_filter(query: Any, model: Any, include_archived: bool) -> Any:
+    return query if include_archived else query.where(model.archived_at.is_(None))
+
+
 def list_companies(
-    db: Session, organization_id: uuid.UUID, *, q: str | None, page: int, page_size: int
+    db: Session, organization_id: uuid.UUID, *, q: str | None, page: int, page_size: int,
+    include_archived: bool = False,
 ) -> tuple[list[Company], int]:
-    query = select(Company).where(Company.organization_id == organization_id)
+    query = _archive_filter(
+        select(Company).where(Company.organization_id == organization_id),
+        Company,
+        include_archived,
+    )
     if q and q.strip():
         term = f"%{q.strip()}%"
         query = query.where(
@@ -122,17 +136,16 @@ def update_company(
 
 def delete_company(db: Session, organization_id: uuid.UUID, company_id: uuid.UUID) -> None:
     company = _company(db, organization_id, company_id)
-    linked = db.scalar(
-        select(func.count()).select_from(Contact).where(Contact.company_id == company.id)
-    ) or db.scalar(select(func.count()).select_from(Lead).where(Lead.company_id == company.id))
-    if linked:
-        raise AppError(
-            409,
-            "company_in_use",
-            "Reassign or remove related contacts and leads before deleting this company",
-        )
-    db.delete(company)
+    _archive(company, True)
     db.commit()
+
+
+def restore_company(db: Session, organization_id: uuid.UUID, company_id: uuid.UUID) -> Company:
+    company = _company(db, organization_id, company_id)
+    _archive(company, False)
+    db.commit()
+    db.refresh(company)
+    return company
 
 
 def list_contacts(
@@ -143,8 +156,13 @@ def list_contacts(
     company_id: uuid.UUID | None,
     page: int,
     page_size: int,
+    include_archived: bool = False,
 ) -> tuple[list[Contact], int]:
-    query = select(Contact).where(Contact.organization_id == organization_id)
+    query = _archive_filter(
+        select(Contact).where(Contact.organization_id == organization_id),
+        Contact,
+        include_archived,
+    )
     if company_id is not None:
         query = query.where(Contact.company_id == company_id)
     if q and q.strip():
@@ -185,8 +203,16 @@ def update_contact(
 
 def delete_contact(db: Session, organization_id: uuid.UUID, contact_id: uuid.UUID) -> None:
     contact = _contact(db, organization_id, contact_id)
-    db.delete(contact)
+    _archive(contact, True)
     db.commit()
+
+
+def restore_contact(db: Session, organization_id: uuid.UUID, contact_id: uuid.UUID) -> Contact:
+    contact = _contact(db, organization_id, contact_id)
+    _archive(contact, False)
+    db.commit()
+    db.refresh(contact)
+    return contact
 
 
 def list_leads(
@@ -200,8 +226,13 @@ def list_leads(
     origin: str | None,
     page: int,
     page_size: int,
+    include_archived: bool = False,
 ) -> tuple[list[Lead], int]:
-    query = select(Lead).where(Lead.organization_id == organization_id)
+    query = _archive_filter(
+        select(Lead).where(Lead.organization_id == organization_id),
+        Lead,
+        include_archived,
+    )
     if origin:
         query = query.where(Lead.origin == stated_origin(origin, default=Origin.operational))
     if status:
@@ -281,8 +312,16 @@ def update_lead(
 
 def delete_lead(db: Session, organization_id: uuid.UUID, lead_id: uuid.UUID) -> None:
     lead = _lead(db, organization_id, lead_id)
-    db.delete(lead)
+    _archive(lead, True)
     db.commit()
+
+
+def restore_lead(db: Session, organization_id: uuid.UUID, lead_id: uuid.UUID) -> Lead:
+    lead = _lead(db, organization_id, lead_id)
+    _archive(lead, False)
+    db.commit()
+    db.refresh(lead)
+    return lead
 
 
 def list_inquiries(
@@ -293,8 +332,13 @@ def list_inquiries(
     company_id: uuid.UUID | None,
     page: int,
     page_size: int,
+    include_archived: bool = False,
 ) -> tuple[list[Inquiry], int]:
-    query = select(Inquiry).where(Inquiry.organization_id == organization_id)
+    query = _archive_filter(
+        select(Inquiry).where(Inquiry.organization_id == organization_id),
+        Inquiry,
+        include_archived,
+    )
     if company_id is not None:
         query = query.where(Inquiry.company_id == company_id)
     if q and q.strip():
@@ -348,8 +392,16 @@ def update_inquiry(
 
 def delete_inquiry(db: Session, organization_id: uuid.UUID, inquiry_id: uuid.UUID) -> None:
     inquiry = get_inquiry(db, organization_id, inquiry_id)
-    db.delete(inquiry)
+    _archive(inquiry, True)
     db.commit()
+
+
+def restore_inquiry(db: Session, organization_id: uuid.UUID, inquiry_id: uuid.UUID) -> Inquiry:
+    inquiry = get_inquiry(db, organization_id, inquiry_id)
+    _archive(inquiry, False)
+    db.commit()
+    db.refresh(inquiry)
+    return inquiry
 
 
 def list_interactions(

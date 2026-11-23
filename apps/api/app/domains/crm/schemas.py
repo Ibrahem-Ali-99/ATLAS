@@ -40,6 +40,7 @@ class CompanyOut(BaseModel):
     origin: Origin
     created_at: datetime
     updated_at: datetime
+    archived_at: datetime | None
 
 
 class CompanyPage(Page):
@@ -76,6 +77,7 @@ class ContactOut(BaseModel):
     origin: Origin
     created_at: datetime
     updated_at: datetime
+    archived_at: datetime | None
 
 
 class ContactPage(Page):
@@ -118,6 +120,7 @@ class LeadOut(BaseModel):
     origin: Origin
     created_at: datetime
     updated_at: datetime
+    archived_at: datetime | None
 
 
 class LeadPage(Page):
@@ -150,6 +153,7 @@ class InquiryOut(BaseModel):
     subject: str
     body: str
     created_at: datetime
+    archived_at: datetime | None
 
 
 class InquiryPage(Page):

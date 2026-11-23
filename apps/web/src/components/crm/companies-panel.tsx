@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { createCompany, deleteCompany, listCompanies, updateCompany } from "@/lib/records-api";
+import { createCompany, deleteCompany, listCompanies, restoreCompany, updateCompany } from "@/lib/records-api";
 import { blankToNull, type Company } from "@/lib/records";
 
 const schema = z.object({
@@ -51,11 +51,12 @@ export function CompaniesPanel({ organizationId }: { organizationId: string }) {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const companies = useQuery({
     queryKey: ["companies", organizationId, query, page],
-    queryFn: () => listCompanies(organizationId, { q: query, page }),
+    queryFn: () => listCompanies(organizationId, { q: query, page, includeArchived }),
   });
 
   useEffect(() => {
@@ -78,6 +79,7 @@ export function CompaniesPanel({ organizationId }: { organizationId: string }) {
             placeholder="Search companies"
             aria-label="Search companies"
           />
+          <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} /> Show archived</label>
           <Button type="button" onClick={() => setOpen(true)}>
             New company
           </Button>
@@ -239,6 +241,7 @@ function CompanyEditorForm({
     onSuccess: onSaved,
   });
   const remove = useMutation({ mutationFn: () => deleteCompany(organizationId, company.id), onSuccess: onDeleted });
+  const restore = useMutation({ mutationFn: () => restoreCompany(organizationId, company.id), onSuccess: onDeleted });
 
   return (
     <aside className="rounded-[10px] bg-muted p-6">
@@ -254,13 +257,11 @@ function CompanyEditorForm({
         <Button type="submit" form="company-edit" disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save"}
         </Button>
-        <ConfirmButton
-          label="Delete"
-          confirmLabel="Confirm delete"
-          pendingLabel="Deleting…"
-          pending={remove.isPending}
-          onConfirm={() => remove.mutate()}
-        />
+        {company.archived_at ? (
+          <Button type="button" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button>
+        ) : (
+          <ConfirmButton label="Archive" confirmLabel="Confirm archive" pendingLabel="Archiving…" pending={remove.isPending} onConfirm={() => remove.mutate()} />
+        )}
       </div>
     </aside>
   );

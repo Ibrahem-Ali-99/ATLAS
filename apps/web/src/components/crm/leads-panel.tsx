@@ -26,6 +26,7 @@ import {
   listCompanies,
   listInteractions,
   listLeads,
+  restoreLead,
   updateLead,
 } from "@/lib/records-api";
 import { blankToNull, interactionKinds, leadStatuses, type InteractionKind, type Lead, type LeadStatus } from "@/lib/records";
@@ -53,11 +54,12 @@ export function LeadsPanel({ organizationId }: { organizationId: string }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<LeadStatus | "">("");
   const [page, setPage] = useState(1);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const leads = useQuery({
     queryKey: ["leads", organizationId, query, status, page],
-    queryFn: () => listLeads(organizationId, { q: query, status, page }),
+    queryFn: () => listLeads(organizationId, { q: query, status, page, includeArchived }),
   });
   const companies = useQuery({
     queryKey: ["companies", organizationId, "options"],
@@ -79,6 +81,7 @@ export function LeadsPanel({ organizationId }: { organizationId: string }) {
       <section className="rounded-[10px] bg-muted">
         <div className="grid gap-3 p-4 sm:grid-cols-[1fr_10rem_auto]">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search leads" aria-label="Search leads" />
+          <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} /> Show archived</label>
           <select
             className="h-10 rounded-md border border-input bg-background px-3 text-sm"
             value={status}
@@ -240,6 +243,7 @@ function LeadDetail({
     onSuccess: onChanged,
   });
   const remove = useMutation({ mutationFn: () => deleteLead(organizationId, lead.id), onSuccess: onDeleted });
+  const restore = useMutation({ mutationFn: () => restoreLead(organizationId, lead.id), onSuccess: onDeleted });
   const history = useQuery({
     queryKey: ["interactions", organizationId, lead.id],
     queryFn: () => listInteractions(organizationId, lead.id),
@@ -266,7 +270,7 @@ function LeadDetail({
       {remove.isError ? <RequestError error={remove.error} /> : null}
       <div className="flex gap-2">
         <Button type="submit" form="lead-edit" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
-        <ConfirmButton label="Delete" confirmLabel="Confirm delete" pendingLabel="Deleting…" pending={remove.isPending} onConfirm={() => remove.mutate()} />
+        {lead.archived_at ? <Button type="button" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button> : <ConfirmButton label="Archive" confirmLabel="Confirm archive" pendingLabel="Archiving…" pending={remove.isPending} onConfirm={() => remove.mutate()} />}
       </div>
       <LeadScore organizationId={organizationId} leadId={lead.id} />
       <div className="border-t border-border pt-4">

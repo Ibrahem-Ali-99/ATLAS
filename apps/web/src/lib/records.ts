@@ -14,6 +14,7 @@ export type Company = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  archived_at: string | null;
 };
 
 export type CompanyInput = {
@@ -33,6 +34,7 @@ export type Contact = {
   title: string | null;
   created_at: string;
   updated_at: string;
+  archived_at: string | null;
 };
 
 export type ContactInput = {
@@ -66,6 +68,7 @@ export type Lead = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  archived_at: string | null;
 };
 
 export type LeadInput = {
@@ -85,6 +88,7 @@ export type Inquiry = {
   subject: string;
   body: string;
   created_at: string;
+  archived_at: string | null;
 };
 
 export type InquiryInput = {
