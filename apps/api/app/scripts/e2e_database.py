@@ -22,6 +22,7 @@ def main() -> None:
     from alembic import command
     from app.core.config import get_settings
     from app.core.database import SessionLocal
+    from app.domains.integrations.models import IntegrationConfig
     from app.scripts.seed import SeedSettings, seed_identity
 
     get_settings.cache_clear()
@@ -30,6 +31,8 @@ def main() -> None:
     db = SessionLocal()
     try:
         seed_identity(db, SeedSettings())
+        db.query(IntegrationConfig).delete()
+        db.commit()
     finally:
         db.close()
     print("e2e database ready")

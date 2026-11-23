@@ -123,7 +123,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await shot(page, "03-knowledge.png");
 
   await page.getByRole("link", { name: "AI Assistant" }).click();
-  await page.getByRole("button", { name: "New" }).click();
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.getByPlaceholder("Ask about records, documents or your organization…").fill(`bonded-yard-${stamp}`);
   await page.getByRole("button", { name: "Send" }).click();
   const answer = page.getByRole("article").filter({ hasText: "Grounded answer from the supplied company records." });

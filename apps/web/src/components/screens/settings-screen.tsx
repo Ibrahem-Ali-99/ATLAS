@@ -169,8 +169,8 @@ function IntegrationSettings({
       {error ? <div className="mt-4"><RequestError error={error} /></div> : null}
       {isLoading ? <Skeleton className="mt-4 h-32 w-full" /> : (
         <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          <ProviderCard key={`chat-${byType.get("chat")?.id ?? "fallback"}`} organizationId={organizationId} type="chat" title="Language model" record={byType.get("chat")} isAdmin={isAdmin} onChanged={onChanged} />
-          <ProviderCard key={`embedding-${byType.get("embedding")?.id ?? "fallback"}`} organizationId={organizationId} type="embedding" title="Embeddings" record={byType.get("embedding")} isAdmin={isAdmin} onChanged={onChanged} />
+          <ProviderCard key="chat" organizationId={organizationId} type="chat" title="Language model" record={byType.get("chat")} isAdmin={isAdmin} onChanged={onChanged} />
+          <ProviderCard key="embedding" organizationId={organizationId} type="embedding" title="Embeddings" record={byType.get("embedding")} isAdmin={isAdmin} onChanged={onChanged} />
           <N8nCard record={byType.get("n8n")} />
         </div>
       )}
