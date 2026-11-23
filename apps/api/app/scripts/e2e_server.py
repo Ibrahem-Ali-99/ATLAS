@@ -41,6 +41,7 @@ def install_provider_transport() -> None:
 
 
 def main() -> None:
+    smtp_port = os.environ.get("ATLAS_SMTP_PORT")
     from tests.bootstrap import postgres_url
 
     os.environ["ATLAS_DATABASE_URL"] = postgres_url("atlas_e2e")
@@ -58,6 +59,8 @@ def main() -> None:
     os.environ["ATLAS_CORS_ORIGINS"] = f"http://127.0.0.1:{web_port},http://localhost:{web_port}"
     os.environ["ATLAS_EMAIL_MODE"] = "sandbox"
     os.environ["ATLAS_SMTP_HOST"] = "127.0.0.1"
+    if smtp_port is not None:
+        os.environ["ATLAS_SMTP_PORT"] = smtp_port
     os.environ["ATLAS_LOG_LEVEL"] = "INFO"
 
     from app.core.config import get_settings
@@ -65,6 +68,7 @@ def main() -> None:
     get_settings.cache_clear()
     install_provider_transport()
     import uvicorn
+
     from app.main import create_app
 
     uvicorn.run(

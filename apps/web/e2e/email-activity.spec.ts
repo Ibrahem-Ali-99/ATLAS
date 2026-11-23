@@ -83,7 +83,7 @@ test("approved email is delivered once and visible in Email Activity", async ({ 
     },
     { timeout: 10_000, intervals: [250, 500, 1_000] },
   ).toBe(1);
-  expect(messageBody.messages[0]?.Subject).toContain(subject);
+  expect(messageBody.messages[0]?.Subject).toBe("Bonded storage inquiry");
 
   await page.reload();
   await expect(page.getByText("Accepted by SMTP")).toBeVisible();
