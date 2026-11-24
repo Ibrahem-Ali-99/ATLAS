@@ -24,9 +24,10 @@ type RecordTarget = { tab: TabId; id: string };
 export function CrmScreen() {
   const { organizationId, organizationName } = useWorkspace();
   const requested = useSearchParams().get("tab");
+  const requestedId = useSearchParams().get("id");
   const initial = tabs.some((item) => item.id === requested) ? (requested as TabId) : "companies";
   const [tab, setTab] = useState<TabId>(initial);
-  const [target, setTarget] = useState<RecordTarget | null>(null);
+  const [target, setTarget] = useState<RecordTarget | null>(requestedId ? { tab: initial, id: requestedId } : null);
   const navigateTo = (next: RecordTarget) => {
     setTarget(next);
     setTab(next.tab);

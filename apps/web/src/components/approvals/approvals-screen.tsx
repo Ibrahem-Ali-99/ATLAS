@@ -325,7 +325,7 @@ function ApprovalDetail({
           <p className="text-xs text-muted-foreground">Execution is the step that applies the approved change.</p>
         </div>
       ) : null}
-      {approval.status === "executed" ? <Link className="inline-block text-sm text-primary underline" href="/crm?tab=leads">View updated leads</Link> : null}
+      {approval.status === "executed" ? <Link className="inline-block text-sm text-primary underline" href={updatedRecordHref(approval)}>View updated CRM record</Link> : null}
       {approval.status !== "pending" ? (
         <Button type="button" variant="outline" disabled={resuming} onClick={onResume}>
           {resuming ? "Resuming" : "Resume agent run"}
@@ -334,6 +334,13 @@ function ApprovalDetail({
       {error ? <RequestError error={error} /> : null}
     </div>
   );
+}
+
+function updatedRecordHref(approval: Approval): string {
+  const leadId = approval.execution_result?.lead_id ?? approval.payload.lead_id;
+  return typeof leadId === "string" && leadId.length > 0
+    ? `/crm?tab=leads&id=${encodeURIComponent(leadId)}`
+    : "/crm?tab=leads";
 }
 
 function statusClass(status: string): string {

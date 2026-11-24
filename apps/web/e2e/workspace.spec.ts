@@ -147,6 +147,10 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByRole("heading", { name: "Companies in this organization" })).toBeVisible();
 
+  await page.getByPlaceholder("Ask about records, documents or your organization…").fill("Which leads need attention?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator(`a[href="/crm?tab=leads&id=${northPierId}"]`)).toBeVisible();
+
   await page.getByPlaceholder("Ask about records, documents or your organization…").fill("What does the document you mentioned say?");
   await page.getByRole("button", { name: "Send" }).click();
   const answers = page.getByRole("article").filter({
@@ -233,6 +237,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   expect(executedBody.execution_result?.lead_id).toBe(northPierId);
   await page.getByLabel("Filter approvals").selectOption("executed");
   await expect(page.getByRole("button", { name: "update lead" }).first()).toBeVisible();
+  await expect(page.locator(`a[href="/crm?tab=leads&id=${northPierId}"]`).filter({ hasText: "View updated CRM record" })).toBeVisible();
   await page.getByRole("link", { name: "CRM", exact: true }).click();
   await page.getByRole("tab", { name: "Leads" }).click();
   const refreshedLeads = page.waitForResponse(

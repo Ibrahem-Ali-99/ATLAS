@@ -459,11 +459,14 @@ function MessageView({
         <div className="mt-5">
           <p className="text-sm text-muted-foreground">Relevant actions</p>
           <div className="mt-3 flex flex-wrap gap-3">
-            {records.length > 0 ? (
-              <Link href="/crm" className="rounded-[10px] bg-muted px-4 py-3 text-xs text-primary">
-                View company record →
-              </Link>
-            ) : null}
+            {records.map((record) => {
+              const href = record.record_id ? crmRecordHref(record) : "/crm";
+              return (
+                <Link key={`${sourceKey(record)}-action`} href={href} className="rounded-[10px] bg-muted px-4 py-3 text-xs text-primary">
+                  View {recordLabel(record)} →
+                </Link>
+              );
+            })}
             {documents.length > 0 ? (
               <Link href="/knowledge" className="rounded-[10px] bg-muted px-4 py-3 text-xs text-primary">
                 Browse knowledge →
@@ -639,4 +642,19 @@ function sourceKindLabel(source: MessageSource): string {
   if (source.chunk_id) return "Supporting passage";
   if (source.kind === "document") return "Document inventory";
   return "CRM record";
+}
+
+function crmRecordHref(source: MessageSource): string {
+  const tab = source.record_type === "company" ? "companies"
+    : source.record_type === "contact" ? "contacts"
+      : source.record_type === "inquiry" ? "inquiries"
+        : "leads";
+  return `/crm?tab=${tab}&id=${encodeURIComponent(source.record_id ?? "")}`;
+}
+
+function recordLabel(source: MessageSource): string {
+  if (source.record_type === "company") return "company record";
+  if (source.record_type === "contact") return "contact record";
+  if (source.record_type === "inquiry") return "inquiry";
+  return "lead record";
 }
