@@ -32,7 +32,9 @@ export default defineConfig({
       ? `npm run start -- --hostname 127.0.0.1 --port ${e2eWebPort}`
       : `npm run dev -- --hostname 127.0.0.1 --port ${e2eWebPort}`,
     url: `http://127.0.0.1:${e2eWebPort}/login`,
-    reuseExistingServer: true,
+    // Production acceptance must exercise the build selected by NEXT_DIST_DIR;
+    // reusing an older process can silently serve stale markup and test IDs.
+    reuseExistingServer: false,
     timeout: 120_000,
     env: {
       ...withLocalNode(process.env),

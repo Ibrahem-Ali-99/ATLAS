@@ -8,17 +8,19 @@ import { DataScopeControl } from "@/components/data-scope";
 import { RequestError } from "@/components/request-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Approval } from "@/lib/agent";
-import { listAgentRuns, listApprovals } from "@/lib/agent-api";
-import { getHealth, getReady } from "@/lib/api";
-import { getAutomations, type WorkflowRun } from "@/lib/automations";
-import { getAnalytics, type AnalyticsSnapshot, type StatusCount } from "@/lib/intelligence";
+import { listApprovals } from "@/lib/agent-api";
+import { getAnalytics, type AnalyticsSnapshot } from "@/lib/intelligence";
+import { listCompanies, listInquiries, listLeads } from "@/lib/records-api";
+import type { Company, Inquiry, Lead } from "@/lib/records";
 import { isDataScope, type DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
 
-const PIPELINE = [
-  { status: "new", label: "New", bar: "bg-primary" },
-  { status: "qualified", label: "Qualified", bar: "bg-success" },
-  { status: "contacted", label: "Contacted", bar: "bg-primary" },
+const STAGES = [
+  ["new", "New", "bg-blue-400"],
+  ["contacted", "Contacted", "bg-violet-400"],
+  ["qualified", "Qualified", "bg-emerald-400"],
+  ["won", "Won", "bg-teal-300"],
+  ["lost", "Lost", "bg-slate-500"],
 ] as const;
 
 export function OverviewScreen() {
@@ -26,384 +28,66 @@ export function OverviewScreen() {
   const organizationId = workspace.organizationId;
   const [scopeByOrganization, setScopeByOrganization] = useState<Record<string, DataScope>>({});
   const scope = organizationId ? scopeByOrganization[organizationId] ?? storedScope(organizationId) : "all";
+  const analytics = useQuery({ queryKey: ["analytics", organizationId, scope], queryFn: () => getAnalytics(organizationId ?? "", scope), enabled: Boolean(organizationId) });
+  const companies = useQuery({ queryKey: ["overview-companies", organizationId], queryFn: () => listCompanies(organizationId ?? "", { pageSize: 100 }), enabled: Boolean(organizationId) });
+  const leads = useQuery({ queryKey: ["overview-leads", organizationId], queryFn: () => listLeads(organizationId ?? "", { pageSize: 100 }), enabled: Boolean(organizationId) });
+  const inquiries = useQuery({ queryKey: ["overview-inquiries", organizationId], queryFn: () => listInquiries(organizationId ?? "", { pageSize: 100 }), enabled: Boolean(organizationId) });
+  const approvals = useQuery({ queryKey: ["overview-approvals", organizationId], queryFn: () => listApprovals(organizationId ?? "", { status: "pending" }), enabled: Boolean(organizationId) });
+
   const selectScope = (next: DataScope) => {
-    if (organizationId) {
-      setScopeByOrganization((current) => ({ ...current, [organizationId]: next }));
-      window.localStorage.setItem(`atlas.dashboard.scope.${organizationId}`, next);
-    }
+    if (!organizationId) return;
+    setScopeByOrganization((current) => ({ ...current, [organizationId]: next }));
+    window.localStorage.setItem(`atlas.dashboard.scope.${organizationId}`, next);
   };
-  const analytics = useQuery({
-    queryKey: ["analytics", organizationId, scope],
-    queryFn: () => getAnalytics(organizationId ?? "", scope),
-    enabled: Boolean(organizationId),
-  });
-  const approvals = useQuery({
-    queryKey: ["inbox-approvals", organizationId],
-    queryFn: () => listApprovals(organizationId ?? "", { status: "pending" }),
-    enabled: Boolean(organizationId),
-  });
-  const failures = useQuery({
-    queryKey: ["inbox-runs", organizationId, "failed", scope],
-    queryFn: () => listAgentRuns(organizationId ?? "", { status: "failed", scope }),
-    enabled: Boolean(organizationId),
-  });
-  const automations = useQuery({
-    queryKey: ["automations", organizationId, scope],
-    queryFn: () => getAutomations(organizationId ?? "", scope),
-    enabled: Boolean(organizationId),
-  });
-  const health = useQuery({ queryKey: ["health"], queryFn: getHealth, retry: false });
-  const ready = useQuery({ queryKey: ["ready"], queryFn: getReady, retry: false });
+
+  if (analytics.isPending) return <OverviewSkeleton />;
+  if (analytics.isError) return <RequestError error={analytics.error} />;
+  if (!analytics.data) return null;
+  const empty = analytics.data.companies_total === 0 && analytics.data.leads_total === 0 && analytics.data.inquiries_total === 0;
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-6">
-      <header>
-        <h1 className="text-[31px] leading-none text-foreground">Operations overview</h1>
-        <p className="mt-3 max-w-3xl text-[13px] text-muted-foreground">
-          Decisions, customer activity and execution health
-        </p>
-        <DataScopeControl value={scope} onChange={selectScope} advanced />
-        <Link href="/setup" className="mt-3 inline-block text-xs text-primary">Open first-run setup checklist →</Link>
-        {analytics.data ? (
-          <details className="mt-3 max-w-3xl text-xs leading-5 text-subtle">
-            <summary className="cursor-pointer">About this view</summary>
-            <p className="mt-2">{analytics.data.provenance_notice}</p>
-          </details>
-        ) : null}
+    <div className="mx-auto flex w-full max-w-[1440px] min-w-0 flex-col gap-5">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border/70 pb-4">
+        <div><p className="text-xs font-medium uppercase tracking-[0.14em] text-primary">{workspace.organizationName ?? "Workspace"}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">Overview</h1></div>
+        <div className="flex flex-wrap items-center gap-2"><DataScopeControl value={scope} onChange={selectScope} advanced /><Link href="/crm?tab=leads" className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90">Open CRM</Link></div>
       </header>
-      {analytics.isPending ? <Skeleton className="h-36 w-full" /> : null}
-      {analytics.isError ? <RequestError error={analytics.error} /> : null}
-      {analytics.data && isWorkspaceEmpty(analytics.data) ? <OperationalEmptyState /> : null}
-      {analytics.data && !isWorkspaceEmpty(analytics.data) ? (
-        <>
-          <MetricRow data={analytics.data} />
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(16rem,0.7fr)]">
-            <PriorityInbox
-              approvals={approvals.data?.items ?? []}
-              approvalsPending={approvals.isPending}
-              approvalsError={approvals.error}
-              failures={failures.data?.items ?? []}
-              failuresPending={failures.isPending}
-              failuresError={failures.error}
-            />
-            <Pipeline data={analytics.data} />
-          </div>
-          <RecentActivity
-            runs={automations.data?.runs ?? []}
-            pendingApprovals={analytics.data.approvals.pending}
-            recentInteractions={analytics.data.recent_interactions}
-            pending={automations.isPending}
-            error={automations.error}
-          />
-        </>
-      ) : null}
-      <p className="text-xs text-subtle">
-        API {health.isError ? "unreachable" : health.data?.status ?? "checking"}. Database{" "}
-        {ready.isError ? "not ready" : ready.data?.database ?? "checking"}.
-      </p>
+      {empty ? <EmptyWorkspace /> : <>
+        <Kpis data={analytics.data} />
+        <div className="grid gap-4 xl:grid-cols-[1.35fr_0.9fr]"><ActivitySection data={analytics.data} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} /><Pipeline data={analytics.data} /></div>
+        <div className="grid gap-4 xl:grid-cols-[1.35fr_0.9fr]"><InquirySection inquiries={inquiries.data?.items ?? []} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} pending={inquiries.isPending} /><Attention approvals={approvals.data?.items ?? []} pending={approvals.isPending} /></div>
+      </>}
     </div>
   );
 }
 
-function isWorkspaceEmpty(data: AnalyticsSnapshot): boolean {
-  return data.companies_total === 0 && data.leads_total === 0 && data.inquiries_total === 0 && data.approvals.pending === 0 && data.failed_runs === 0;
+function Kpis({ data }: { data: AnalyticsSnapshot }) {
+  const active = data.lead_status.filter((item) => ["new", "contacted", "qualified"].includes(item.status)).reduce((sum, item) => sum + item.count, 0);
+  return <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="CRM metrics"><Kpi href="/crm?tab=companies" label="Companies" value={data.companies_total} /><Kpi href="/crm?tab=leads" label="Active leads" value={active} detail={`${data.leads_total} total`} /><Kpi href="/crm?tab=inquiries" label="Open inquiries" value={data.open_inquiries} /><Kpi href="/approvals" label="Pending approvals" value={data.approvals.pending} attention={data.approvals.pending > 0} /></section>;
 }
 
-function storedScope(organizationId: string): DataScope {
-  if (typeof window === "undefined") return "all";
-  const saved = window.localStorage.getItem(`atlas.dashboard.scope.${organizationId}`);
-  return isDataScope(saved) ? saved : "all";
+function Kpi({ href, label, value, detail, attention }: { href: string; label: string; value: number; detail?: string; attention?: boolean }) {
+  const slug = label.toLowerCase().replaceAll(" ", "-");
+  return <Link data-testid={`overview-kpi-${slug}`} href={href} className="rounded-lg border border-border/80 bg-card px-4 py-3 transition-colors hover:border-primary/60 hover:bg-accent/40"><div className="flex items-center justify-between gap-2"><span className="text-xs text-muted-foreground">{label}</span>{attention ? <span className="size-2 rounded-full bg-warning" aria-label="Needs attention" /> : null}</div><p data-testid={`overview-kpi-${slug}-value`} className="mt-2 text-2xl font-semibold tabular-nums text-foreground">{value}</p>{detail ? <p className="mt-1 text-[11px] text-subtle">{detail}</p> : null}</Link>;
 }
 
-function OperationalEmptyState() {
-  return (
-    <section className="rounded-[10px] bg-muted px-6 py-8" aria-labelledby="empty-overview-title">
-      <p className="text-xs uppercase tracking-[0.14em] text-primary">Workspace setup</p>
-      <h2 id="empty-overview-title" className="mt-2 text-2xl text-foreground">Your operational workspace is ready for its first record</h2>
-      <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">There are no customer records in this workspace yet. Start with a company, a knowledge document, or the guided setup path.</p>
-      <div className="mt-6 grid gap-3 sm:grid-cols-3">
-        <Link href="/crm?tab=companies" className="rounded-[10px] bg-secondary px-4 py-4 text-sm text-foreground hover:bg-accent"><span className="block font-medium">Create a company</span><span className="mt-2 block text-xs text-muted-foreground">Add the first operational organization record.</span></Link>
-        <Link href="/knowledge" className="rounded-[10px] bg-secondary px-4 py-4 text-sm text-foreground hover:bg-accent"><span className="block font-medium">Upload knowledge</span><span className="mt-2 block text-xs text-muted-foreground">Add a document and choose its origin explicitly.</span></Link>
-        <Link href="/setup" className="rounded-[10px] bg-secondary px-4 py-4 text-sm text-foreground hover:bg-accent"><span className="block font-medium">Open guided setup</span><span className="mt-2 block text-xs text-muted-foreground">Review what is configured and what still needs an operator.</span></Link>
-      </div>
-    </section>
-  );
-}
-
-function MetricRow({ data }: { data: AnalyticsSnapshot }) {
-  const active =
-    statusCount(data.lead_status, "new") +
-    statusCount(data.lead_status, "contacted") +
-    statusCount(data.lead_status, "qualified");
-  const recorded = data.automation.succeeded + data.automation.failed;
-  const rate =
-    data.automation.success_rate === null ? "—" : `${Math.round(data.automation.success_rate * 100)}%`;
-  return (
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-      <Metric href="/crm?tab=companies" label="Active companies" value={pad(data.companies_total)} detail="Customer accounts" detailClass="text-primary" />
-      <Metric
-        href="/approvals"
-        label="Pending approvals"
-        value={pad(data.approvals.pending)}
-        detail="Needs your decision"
-        detailClass="text-warning"
-      />
-      <Metric
-        href="/crm?tab=leads"
-        label="Active leads"
-        value={pad(active)}
-        detail="Across the pipeline"
-        detailClass="text-primary"
-      />
-      <Metric href="/crm?tab=inquiries" label="Open inquiries" value={pad(data.open_inquiries)} detail="Customer requests" detailClass="text-warning" />
-      <Metric
-        href="/monitoring"
-        label="Agent failures"
-        value={pad(data.failed_runs)}
-        detail="Historical / review"
-        detailClass="text-destructive"
-      />
-      <Metric
-        href="/workflows"
-        label="Automation success"
-        value={rate}
-        detail={recorded === 0 ? "No completed or failed runs" : `${data.automation.succeeded} of ${recorded} recorded`}
-        detailClass="text-success"
-      />
-    </section>
-  );
-}
-
-function Metric({
-  href,
-  label,
-  value,
-  detail,
-  detailClass,
-}: {
-  href: string;
-  label: string;
-  value: string;
-  detail: string;
-  detailClass: string;
-}) {
-  return (
-    <Link href={href} className="rounded-[10px] bg-muted px-5 py-6 transition-colors hover:bg-accent">
-      <p className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
-      <p className="mt-4 text-[34px] leading-none text-foreground tabular-nums">{value}</p>
-      <p className={`mt-5 text-[11px] ${detailClass}`}>{detail}</p>
-    </Link>
-  );
-}
-
-function PriorityInbox({
-  approvals,
-  approvalsPending,
-  approvalsError,
-  failures,
-  failuresPending,
-  failuresError,
-}: {
-  approvals: Approval[];
-  approvalsPending: boolean;
-  approvalsError: unknown;
-  failures: { id: string; inquiry_subject: string; error_code: string | null; error_message: string | null }[];
-  failuresPending: boolean;
-  failuresError: unknown;
-}) {
-  const items = inboxItems(approvals, failures);
-  return (
-    <section className="rounded-[10px] bg-muted px-6 py-6">
-      <h2 className="text-xl text-foreground">Priority inbox</h2>
-      <p className="mt-2 text-xs text-muted-foreground">Decisions that need a human</p>
-      {approvalsPending || failuresPending ? <Skeleton className="mt-6 h-16 w-full" /> : null}
-      {approvalsError ? <div className="mt-4"><RequestError error={approvalsError} /></div> : null}
-      {failuresError ? <div className="mt-4"><RequestError error={failuresError} /></div> : null}
-      {!approvalsPending && !failuresPending && items.length === 0 ? (
-        <p className="mt-6 text-sm text-muted-foreground">Nothing is waiting for a decision.</p>
-      ) : null}
-      <ul className="mt-4 divide-y divide-border/60">
-        {items.map((item) => (
-          <li key={item.id} className="grid gap-2 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-            <div className="min-w-0">
-              <p className="truncate text-[15px] text-foreground">{item.title}</p>
-              <p className="mt-1 truncate text-[11px] text-muted-foreground">{item.detail}</p>
-            </div>
-            <Link href={item.href} className="text-xs text-primary">
-              View →
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
+function ActivitySection({ data, leads, companies }: { data: AnalyticsSnapshot; leads: Lead[]; companies: Company[] }) {
+  return <section className="rounded-lg border border-border/80 bg-card" aria-labelledby="recent-activity-title"><div className="flex items-center justify-between border-b border-border/70 px-4 py-3"><h2 id="recent-activity-title" className="text-sm font-semibold text-foreground">Recent customer activity</h2><Link href="/crm?tab=leads" className="text-xs text-primary">View CRM</Link></div>{data.recent_interactions.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">No customer activity recorded yet.</p> : <ul className="divide-y divide-border/60">{data.recent_interactions.map((item) => { const lead = leads.find((entry) => entry.id === item.lead_id); const company = lead ? companies.find((entry) => entry.id === lead.company_id) : undefined; return <li key={item.id} className="px-4 py-3"><Link href={`/crm?tab=leads&id=${item.lead_id}`} className="block rounded-md hover:bg-accent/30"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-medium text-foreground">{company?.name ?? "Customer activity"}</span><time className="text-[11px] text-subtle">{new Date(item.created_at).toLocaleString()}</time></div><p className="mt-1 text-xs text-muted-foreground">{item.kind} · {lead?.title ?? "Related lead"}</p><p className="mt-1 truncate text-xs text-subtle">{item.summary}</p></Link></li>; })}</ul>}</section>;
 }
 
 function Pipeline({ data }: { data: AnalyticsSnapshot }) {
-  const counts = PIPELINE.map((stage) => statusCount(data.lead_status, stage.status));
+  const counts = STAGES.map(([status]) => data.lead_status.find((item) => item.status === status)?.count ?? 0);
   const max = Math.max(1, ...counts);
-  return (
-    <section className="rounded-[10px] bg-muted px-6 py-6">
-      <h2 className="text-xl text-foreground">Lead pipeline</h2>
-      <p className="mt-2 text-xs text-muted-foreground">Current CRM records</p>
-      <ul className="mt-6 space-y-5">
-        {PIPELINE.map((stage, index) => (
-          <li key={stage.status}>
-            <Link href={`/crm?tab=leads`} className="block">
-              <span className="flex items-center justify-between gap-3 text-[13px] text-foreground">
-                <span>{stage.label}</span>
-                <span className="tabular-nums">{counts[index]}</span>
-              </span>
-              <span className="mt-2 block h-2 rounded-full bg-secondary">
-                <span
-                  className={`block h-2 rounded-full ${stage.bar}`}
-                  style={{ width: counts[index] === 0 ? "0%" : `${(counts[index] / max) * 100}%` }}
-                />
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
+  return <section className="rounded-lg border border-border/80 bg-card px-4 py-3" aria-labelledby="pipeline-title"><div className="flex items-center justify-between"><h2 id="pipeline-title" className="text-sm font-semibold text-foreground">Lead pipeline</h2><Link href="/crm?tab=leads" className="text-xs text-primary">All leads</Link></div><p className="mt-1 text-xs text-muted-foreground">{data.leads_total} total · {counts.slice(0, 3).reduce((a, b) => a + b, 0)} active</p><ul className="mt-5 space-y-3">{STAGES.map(([status, label, color], index) => <li key={status}><Link href={`/crm?tab=leads&status=${status}`} className="block"><div className="flex justify-between text-xs"><span>{label}</span><span className="tabular-nums text-muted-foreground">{counts[index]}</span></div><div className="mt-1.5 h-1.5 rounded-full bg-secondary"><span className={`block h-full rounded-full ${color}`} style={{ width: `${(counts[index] / max) * 100}%` }} /></div></Link></li>)}</ul></section>;
 }
 
-function RecentActivity({
-  runs,
-  pendingApprovals,
-  recentInteractions,
-  pending,
-  error,
-}: {
-  runs: WorkflowRun[];
-  pendingApprovals: number;
-  recentInteractions: AnalyticsSnapshot["recent_interactions"];
-  pending: boolean;
-  error: unknown;
-}) {
-  const lines = activityLines(runs, pendingApprovals);
-  return (
-    <section className="rounded-[10px] bg-muted px-6 py-5">
-      <h2 className="text-[19px] text-foreground">Recent activity</h2>
-      {pending ? <Skeleton className="mt-4 h-6 w-64" /> : null}
-      {error ? <div className="mt-4"><RequestError error={error} /></div> : null}
-      {!pending && lines.length === 0 && recentInteractions.length === 0 ? (
-        <p className="mt-4 text-sm text-muted-foreground">No automation activity is stored yet.</p>
-      ) : null}
-      {lines.length > 0 ? (
-        <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          {lines.map((line) => (
-            <Link key={line.text} href={line.href} className={`text-[13px] ${line.className}`}>
-              {line.text}
-            </Link>
-          ))}
-        </div>
-      ) : null}
-      {recentInteractions.length > 0 ? (
-        <ul className="mt-4 grid gap-2 border-t border-border/60 pt-4 text-sm">
-          {recentInteractions.map((item) => (
-            <li key={item.id}>
-              <Link href={`/crm?tab=leads&id=${item.lead_id}`} className="text-foreground hover:text-primary"><span className="font-medium">{item.kind}</span> · {item.summary}</Link>
-              <time className="ml-2 text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()}</time>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </section>
-  );
+function InquirySection({ inquiries, leads, companies, pending }: { inquiries: Inquiry[]; leads: Lead[]; companies: Company[]; pending: boolean }) {
+  return <section className="rounded-lg border border-border/80 bg-card" aria-labelledby="inquiries-title"><div className="flex items-center justify-between border-b border-border/70 px-4 py-3"><h2 id="inquiries-title" className="text-sm font-semibold text-foreground">Open inquiries</h2><Link href="/crm?tab=inquiries" className="text-xs text-primary">View all</Link></div>{pending ? <Skeleton className="m-4 h-12" /> : inquiries.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">No open inquiries.</p> : <ul className="divide-y divide-border/60">{inquiries.slice(0, 5).map((item) => { const lead = leads.find((entry) => entry.id === item.lead_id); const company = companies.find((entry) => entry.id === item.company_id); return <li key={item.id} className="px-4 py-3"><Link href={`/crm?tab=inquiries&id=${item.id}`} className="flex items-center justify-between gap-3 rounded-md hover:bg-accent/30"><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{item.subject}</p><p className="mt-1 truncate text-xs text-muted-foreground">{company?.name ?? "Company"}{lead ? ` · ${lead.title}` : ""}</p></div><span className="shrink-0 text-[11px] text-warning">Open</span></Link></li>; })}</ul>}</section>;
 }
 
-function inboxItems(
-  approvals: Approval[],
-  failures: { id: string; inquiry_subject: string; error_code: string | null; error_message: string | null }[],
-): { id: string; title: string; detail: string; href: string }[] {
-  const decisions = approvals.slice(0, 3).map((approval) => ({
-    id: approval.id,
-    title: approvalTitle(approval),
-    detail: "Awaiting approval",
-    href: `/approvals?approval=${approval.id}`,
-  }));
-  const remaining = 4 - decisions.length;
-  const problems = failures.slice(0, remaining).map((run) => ({
-    id: run.id,
-    title: run.inquiry_subject || "Investigate agent failure",
-    detail: run.error_code ?? run.error_message ?? "Failed run",
-    href: `/monitoring?run=${run.id}`,
-  }));
-  return [...decisions, ...problems];
+function Attention({ approvals, pending }: { approvals: Approval[]; pending: boolean }) {
+  return <section className="rounded-lg border border-border/80 bg-card" aria-labelledby="attention-title"><div className="flex items-center justify-between border-b border-border/70 px-4 py-3"><h2 id="attention-title" className="text-sm font-semibold text-foreground">Attention required</h2><Link href="/approvals" className="text-xs text-primary">Approvals</Link></div>{pending ? <Skeleton className="m-4 h-12" /> : approvals.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">You’re caught up.</p> : <ul className="divide-y divide-border/60">{approvals.slice(0, 4).map((approval) => <li key={approval.id} className="px-4 py-3"><Link href={`/approvals?approval=${approval.id}`} className="block rounded-md hover:bg-accent/30"><p className="truncate text-sm text-foreground">Review approval</p><p className="mt-1 text-xs text-muted-foreground">Awaiting your decision</p></Link></li>)}</ul>}</section>;
 }
 
-function approvalTitle(approval: Approval): string {
-  const title = payloadText(approval.payload, "title");
-  const subject = payloadText(approval.payload, "subject");
-  if (approval.action_type === "create_lead") {
-    return title ? `Approve ${title}` : "Approve lead creation";
-  }
-  if (approval.action_type === "update_lead") {
-    return "Review lead update";
-  }
-  if (approval.action_type === "prepare_customer_response") {
-    return subject ? `Review ${subject}` : "Review follow-up proposal";
-  }
-  return "Review appointment request";
-}
-
-function payloadText(payload: Record<string, unknown>, key: string): string | null {
-  const value = payload[key];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function activityLines(runs: WorkflowRun[], pendingApprovals: number): { text: string; href: string; className: string }[] {
-  const lines: { text: string; href: string; className: string }[] = [];
-  const completed = runs.find((run) => run.status === "completed");
-  const attention = runs.find((run) => run.status === "needs_attention" || run.status === "failed");
-  if (completed) {
-    const record = completed.company_name ?? completed.lead_title;
-    const outcome =
-      completed.kind === "lead_processing" && !record ? "Signed callback recorded" : record ?? completed.status;
-    lines.push({
-      text: `${processName(completed.kind)} completed · ${outcome}`,
-      href: "/workflows",
-      className: "text-success",
-    });
-  }
-  if (attention) {
-    lines.push({
-      text: `${processName(attention.kind)} · ${attention.last_error ?? statusLabel(attention.status)}`,
-      href: "/workflows",
-      className: "text-destructive",
-    });
-  } else if (pendingApprovals > 0) {
-    lines.push({
-      text: pendingApprovals === 1 ? "1 approval is waiting" : `${pendingApprovals} approvals are waiting`,
-      href: "/approvals",
-      className: "text-warning",
-    });
-  }
-  return lines.slice(0, 2);
-}
-
-function processName(kind: string): string {
-  if (kind === "lead_processing") {
-    return "Lead processing";
-  }
-  if (kind === "follow_up") {
-    return "Follow-up";
-  }
-  return kind.replaceAll("_", " ");
-}
-
-function statusLabel(status: string): string {
-  return status.replaceAll("_", " ");
-}
-
-function statusCount(items: StatusCount[], status: string): number {
-  return items.find((item) => item.status === status)?.count ?? 0;
-}
-
-function pad(value: number): string {
-  if (value >= 100) {
-    return String(value);
-  }
-  return String(value).padStart(2, "0");
-}
+function EmptyWorkspace() { return <section className="rounded-lg border border-dashed border-border bg-card px-5 py-8"><h2 className="text-lg font-semibold text-foreground">Your workspace is ready</h2><p className="mt-2 max-w-lg text-sm text-muted-foreground">Create your first company or lead to start tracking customer work here.</p><Link href="/crm?tab=companies" className="mt-4 inline-flex rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">Open CRM</Link></section>; }
+function OverviewSkeleton() { return <div className="space-y-5"><Skeleton className="h-16 w-full" /><div className="grid gap-3 sm:grid-cols-4"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div><Skeleton className="h-64 w-full" /></div>; }
+function storedScope(id: string): DataScope { if (typeof window === "undefined") return "all"; const saved = window.localStorage.getItem(`atlas.dashboard.scope.${id}`); return isDataScope(saved) ? saved : "all"; }

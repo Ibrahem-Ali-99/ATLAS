@@ -170,10 +170,11 @@ function storedScope(organizationId: string): DataScope {
 }
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  const slug = label.toLowerCase().replaceAll(" ", "-");
   return (
-    <section className="rounded-[10px] bg-muted p-4">
+    <section data-testid={`analytics-metric-${slug}`} className="rounded-[10px] bg-muted p-4">
       <p className="text-xs uppercase tracking-[0.12em] text-subtle">{label}</p>
-      <p className="mt-3 text-2xl tabular-nums text-foreground">{value}</p>
+      <p data-testid={`analytics-metric-${slug}-value`} className="mt-3 text-2xl tabular-nums text-foreground">{value}</p>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">{detail}</p>
     </section>
   );

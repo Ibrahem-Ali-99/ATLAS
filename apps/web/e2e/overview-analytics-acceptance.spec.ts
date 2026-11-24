@@ -10,13 +10,40 @@ async function screenshot(page: import("@playwright/test").Page, name: string): 
 }
 
 async function metric(page: import("@playwright/test").Page, label: string): Promise<number> {
-  const heading = page.getByText(label, { exact: true }).first();
-  if (await heading.count() === 0) {
-    return 0;
+  const slug = label.toLowerCase().replaceAll(" ", "-");
+  const overviewValue = page.getByTestId(`overview-kpi-${slug}-value`);
+  const analyticsValue = page.getByTestId(`analytics-metric-${slug}-value`);
+  const overviewCount = await overviewValue.count();
+  const analyticsCount = await analyticsValue.count();
+  if (overviewCount + analyticsCount !== 1) {
+    throw new Error(`Metric ${label} must have exactly one page-specific value element; found Overview=${overviewCount}, Analytics=${analyticsCount}`);
   }
-  const card = heading.locator("..");
-  const value = await card.locator("p").nth(1).textContent();
-  return Number.parseInt(value?.trim() ?? "0", 10);
+  const valueElement = overviewCount === 1 ? overviewValue : analyticsValue;
+  await expect(valueElement).toBeVisible();
+  const valueText = await valueElement.textContent();
+  const value = Number.parseInt(valueText?.trim() ?? "", 10);
+  if (!Number.isFinite(value)) throw new Error(`Metric ${label} did not render a numeric value: ${valueText ?? "<missing>"}`);
+  return value;
+}
+
+async function waitForAnalytics(page: import("@playwright/test").Page): Promise<void> {
+  await expect(page.getByTestId("analytics-metric-active-companies")).toBeVisible();
+  await expect(page.getByTestId("analytics-metric-leads")).toBeVisible();
+  await expect(page.getByTestId("analytics-metric-open-inquiries")).toBeVisible();
+}
+
+async function assertWorkspace(page: import("@playwright/test").Page): Promise<void> {
+  await expect(page.getByRole("combobox", { name: "Organization" }).locator("option:checked")).toHaveText("Atlas Demo");
+}
+
+async function openOverview(page: import("@playwright/test").Page): Promise<void> {
+  await page.goto("/overview");
+  await expect(page).toHaveURL(/\/overview$/);
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await assertWorkspace(page);
+  await expect(page.getByTestId("overview-kpi-companies")).toBeVisible();
+  await expect(page.getByTestId("overview-kpi-active-leads")).toBeVisible();
+  await expect(page.getByTestId("overview-kpi-open-inquiries")).toBeVisible();
 }
 
 async function signIn(page: import("@playwright/test").Page): Promise<void> {
@@ -24,7 +51,7 @@ async function signIn(page: import("@playwright/test").Page): Promise<void> {
   await page.getByLabel("Email").fill("admin@example.com");
   await page.getByLabel("Password").fill("change-me-admin");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Operations overview" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 }
 
 async function allRecords(page: import("@playwright/test").Page): Promise<void> {
@@ -44,14 +71,21 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
 
   await signIn(page);
   await page.goto("/analytics");
+  await assertWorkspace(page);
+  await waitForAnalytics(page);
   await allRecords(page);
   const companiesBefore = await metric(page, "Active companies");
   const leadsBefore = await metric(page, "Leads");
   const inquiriesBefore = await metric(page, "Open inquiries");
   console.log(JSON.stringify({ metricsBefore: { companies: companiesBefore, leads: leadsBefore, openInquiries: inquiriesBefore } }));
-  await page.goto("/overview");
+  await openOverview(page);
+  const activeLeadsBefore = await metric(page, "Active leads");
+  console.log(JSON.stringify({ activeLeadsBefore }));
   await allRecords(page);
-  await expect(page.getByRole("link", { name: "Active companies" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Companies/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent customer activity" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Lead pipeline" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Open inquiries" })).toBeVisible();
   await screenshot(page, "overview-before.png");
 
   await page.goto("/crm");
@@ -75,14 +109,16 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("button", { name: inquiry })).toBeVisible();
 
-  await page.goto("/overview");
+  await openOverview(page);
   await allRecords(page);
-  await expect.poll(() => metric(page, "Active companies")).toBe(companiesBefore + 1);
-  await expect.poll(() => metric(page, "Active leads")).toBe(leadsBefore + 1);
+  await expect.poll(() => metric(page, "Companies")).toBe(companiesBefore + 1);
+  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore + 1);
   await expect.poll(() => metric(page, "Open inquiries")).toBe(inquiriesBefore + 1);
-  console.log(JSON.stringify({ metricsAfterCreate: { companies: companiesBefore + 1, leads: leadsBefore + 1, openInquiries: inquiriesBefore + 1 } }));
+  console.log(JSON.stringify({ metricsAfterCreate: { companies: companiesBefore + 1, totalLeads: leadsBefore + 1, activeLeads: activeLeadsBefore + 1, openInquiries: inquiriesBefore + 1 } }));
 
   await page.goto("/analytics");
+  await assertWorkspace(page);
+  await waitForAnalytics(page);
   await allRecords(page);
   await expect(page.getByRole("heading", { name: "Lead pipeline" })).toBeVisible();
   await expect(page.getByText("new", { exact: true })).toBeVisible();
@@ -94,18 +130,20 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   await expect(page.getByText("Saved.")).toBeVisible();
 
   await page.goto("/analytics");
+  await assertWorkspace(page);
+  await waitForAnalytics(page);
   await allRecords(page);
   const pipeline = page.locator("section").filter({ has: page.getByRole("heading", { name: "Lead pipeline" }) });
   await expect(pipeline.getByText("qualified", { exact: true })).toBeVisible();
   await screenshot(page, "analytics-after-stage.png");
 
-  await page.goto("/overview");
+  await openOverview(page);
   await allRecords(page);
-  await page.getByRole("link", { name: "Active companies" }).click();
+  await page.getByRole("link", { name: /Companies/ }).click();
   await expect(page).toHaveURL(/\/crm\?tab=companies/);
   await page.getByLabel("Search companies").fill(company);
   await expect(page.getByRole("button", { name: company })).toBeVisible();
-  await page.goto("/overview");
+  await openOverview(page);
   await allRecords(page);
   await page.getByRole("link", { name: "Active leads" }).click();
   await expect(page).toHaveURL(/\/crm\?tab=leads/);
@@ -115,21 +153,24 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   await page.getByRole("button", { name: lead }).click();
   await page.getByRole("button", { name: "Archive" }).click();
   await page.getByRole("button", { name: "Confirm archive" }).click();
-  await page.goto("/overview");
+  await openOverview(page);
   await allRecords(page);
-  await expect.poll(() => metric(page, "Active leads")).toBe(leadsBefore);
-  console.log(JSON.stringify({ metricsAfterArchive: { activeLeads: leadsBefore } }));
+  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore);
+  console.log(JSON.stringify({ metricsAfterArchive: { activeLeads: activeLeadsBefore } }));
   await page.getByRole("link", { name: "Active leads" }).click();
   await page.getByLabel("Show archived").check();
   await page.getByLabel("Search leads").fill(lead);
   await page.getByRole("button", { name: lead }).click();
   await page.getByRole("button", { name: "Restore" }).click();
 
-  await page.goto("/overview");
-  await expect.poll(() => metric(page, "Active leads")).toBe(leadsBefore + 1);
+  await openOverview(page);
+  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore + 1);
   await page.reload();
-  await expect.poll(() => metric(page, "Active leads")).toBe(leadsBefore + 1);
-  console.log(JSON.stringify({ metricsAfterRestore: { activeLeads: leadsBefore + 1 } }));
+  await expect(page).toHaveURL(/\/overview$/);
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await expect(page.getByTestId("overview-kpi-active-leads")).toBeVisible();
+  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore + 1);
+  console.log(JSON.stringify({ metricsAfterRestore: { activeLeads: activeLeadsBefore + 1 } }));
   await screenshot(page, "overview-after-restore.png");
 
   await page.setViewportSize({ width: 390, height: 844 });
