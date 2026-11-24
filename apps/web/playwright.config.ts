@@ -39,7 +39,7 @@ export default defineConfig({
       NEXT_PUBLIC_API_URL: "http://127.0.0.1:8011",
       ATLAS_E2E_API_PORT: "8011",
       ATLAS_E2E_WEB_PORT: e2eWebPort,
-      NEXT_DIST_DIR: ".next-e2e-phase2d",
+      NEXT_DIST_DIR: process.env.NEXT_DIST_DIR ?? ".next-e2e-phase2d",
     },
   },
 });

@@ -1,12 +1,10 @@
 import {
-  Activity,
   BarChart3,
   BookOpen,
-  Bot,
-  CheckCheck,
   LayoutDashboard,
   Settings,
   ListChecks,
+  Plug,
   Sparkles,
   Users,
   Workflow,
@@ -28,18 +26,16 @@ const overview = { href: "/overview", label: "Overview", icon: LayoutDashboard }
 const assistant = { href: "/assistant", label: "AI Assistant", icon: Sparkles };
 const crm = { href: "/crm", label: "CRM", icon: Users };
 const knowledge = { href: "/knowledge", label: "Knowledge", icon: BookOpen };
-const agentRuns = { href: "/agent-runs", label: "Agent Runs", icon: Bot };
-const approvals = { href: "/approvals", label: "Approvals", icon: CheckCheck };
-const workflows = { href: "/workflows", label: "Workflows", icon: Workflow };
+const automations = { href: "/workflows", label: "Automations", icon: Workflow };
+const integrations = { href: "/integrations", label: "Integrations", icon: Plug };
 const analytics = { href: "/analytics", label: "Analytics", icon: BarChart3 };
-const monitoring = { href: "/monitoring", label: "Monitoring", icon: Activity };
 const settings = { href: "/settings", label: "Settings", icon: Settings };
-const setup = { href: "/setup", label: "First-run setup", icon: ListChecks };
+const setup = { href: "/setup", label: "Setup", icon: ListChecks };
 
 export const navigationGroups: NavGroup[] = [
   { label: "Business operations", items: [overview, assistant, crm, knowledge] },
-  { label: "Operations", items: [agentRuns, approvals, workflows] },
-  { label: "Insight", items: [analytics, monitoring, setup, settings] },
+  { label: "Automation", items: [automations, integrations] },
+  { label: "Insight & administration", items: [analytics, setup, settings] },
 ];
 
 export const navigation: NavItem[] = navigationGroups.flatMap((group) => group.items);

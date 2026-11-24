@@ -255,7 +255,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await expect(page.getByLabel("Notes")).toHaveValue("Rates for bonded storage");
   await shot(page, "06-crm-lead.png");
 
-  await page.getByRole("link", { name: "Workflows" }).click();
+  await page.getByRole("link", { name: "Automations" }).click();
   await expect(page.getByRole("heading", { name: "Automations" })).toBeVisible();
   await expect(page.getByText("sandbox", { exact: false }).first()).toBeVisible();
   await shot(page, "07-workflows.png");
@@ -326,7 +326,7 @@ test("narrow viewport opens every page without a missing chunk", async ({ page }
     ["AI Assistant", "/assistant"],
     ["Agent Runs", "/agent-runs"],
     ["Approvals", "/approvals"],
-    ["Workflows", "/workflows"],
+    ["Automations", "/workflows"],
     ["Analytics", "/analytics"],
     ["Monitoring", "/monitoring"],
     ["Settings", "/settings"],

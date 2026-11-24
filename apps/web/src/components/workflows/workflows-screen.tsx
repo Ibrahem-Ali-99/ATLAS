@@ -78,7 +78,11 @@ function WorkflowsBody({
   cancelError: unknown;
   onCancel: (bookingId: string) => void;
 }) {
+  const [view, setView] = useState<"overview" | "approvals" | "history" | "email">("overview");
+  const [search, setSearch] = useState("");
+  const [selectedRun, setSelectedRun] = useState<WorkflowRun | null>(null);
   const visible = data.runs.filter((run) => (!kind || run.kind === kind) && (!status || run.status === status));
+  const searched = visible.filter((run) => `${run.kind} ${run.lead_title ?? ""} ${run.company_name ?? ""} ${run.status}`.toLowerCase().includes(search.trim().toLowerCase()));
   const focus = data.automations.find((item) => item.kind === kind);
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
@@ -90,7 +94,12 @@ function WorkflowsBody({
         <p className="mt-2 max-w-4xl text-xs leading-5 text-subtle">{configurationCopy(data)}</p>
         <DataScopeControl value={scope} onChange={onScope} />
       </header>
-      <section className="grid gap-4 lg:grid-cols-2">
+      <nav className="flex flex-wrap gap-2 border-b border-border pb-3" aria-label="Automation workspace views">
+        {([ ["overview", "Overview"], ["approvals", "Approvals"], ["history", "Execution history"], ["email", "Email activity"] ] as const).map(([id, label]) => (
+          <button key={id} type="button" className={`rounded-md px-3 py-2 text-sm ${view === id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`} aria-pressed={view === id} onClick={() => setView(id)}>{label}</button>
+        ))}
+      </nav>
+      {view === "overview" ? <section className="grid gap-4 lg:grid-cols-2">
         {data.automations.map((automation) => (
           <article key={automation.kind} className="flex min-h-52 flex-col rounded-[10px] bg-muted px-6 py-6">
             <div className="flex items-start justify-between gap-4">
@@ -124,8 +133,9 @@ function WorkflowsBody({
             </div>
           </article>
         ))}
-      </section>
-      <section id="execution-history" className="rounded-[10px] bg-muted px-5 py-6">
+      </section> : null}
+      {view === "approvals" ? <section className="rounded-[10px] bg-muted px-5 py-6"><h2 className="text-xl text-foreground">Human approvals</h2><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Review proposed CRM changes and customer responses in the existing approval workspace. Approval and execution permissions remain enforced by the API.</p><Link className="mt-5 inline-block text-sm text-primary underline" href="/approvals">Open approvals →</Link></section> : null}
+      {view === "history" || view === "overview" ? <section id="execution-history" className="rounded-[10px] bg-muted px-5 py-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-[22px] text-foreground">Execution history</h2>
@@ -138,6 +148,9 @@ function WorkflowsBody({
               Show all · {focus.name}
             </button>
           ) : null}
+          <label className="text-xs text-muted-foreground">Search
+            <input aria-label="Search execution history" className="ml-2 h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground" placeholder="Customer or process" value={search} onChange={(event) => setSearch(event.target.value)} />
+          </label>
           <label className="text-xs text-muted-foreground">
             Status
             <select aria-label="Filter execution history" className="ml-2 h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground" value={status ?? ""} onChange={(event) => onStatus(event.target.value || null)}>
@@ -157,7 +170,7 @@ function WorkflowsBody({
             </select>
           </label>
         </div>
-        {visible.length === 0 ? (
+        {searched.length === 0 ? (
           <p className="mt-6 text-sm text-muted-foreground">No workflow runs are stored for this view.</p>
         ) : (
           <div className="mt-5 overflow-x-auto">
@@ -168,14 +181,15 @@ function WorkflowsBody({
               <span>Time</span>
             </div>
             <ul className="min-w-0 md:min-w-[40rem]">
-              {visible.map((run) => (
-                <HistoryRow key={run.id} run={run} />
+                {searched.map((run) => (
+                <HistoryRow key={run.id} run={run} onSelect={setSelectedRun} />
               ))}
             </ul>
           </div>
         )}
-      </section>
-      <EmailActivitySection emails={data.emails} />
+      </section> : null}
+      {selectedRun ? <ExecutionDetail run={selectedRun} onClose={() => setSelectedRun(null)} /> : null}
+      {view === "email" || view === "overview" ? <EmailActivitySection emails={data.emails} /> : null}
       {data.bookings.length > 0 ? (
         <section className="rounded-[10px] bg-muted px-5 py-6">
           <h2 className="text-lg text-foreground">Calendar bookings</h2>
@@ -285,10 +299,11 @@ function emailStateClass(state?: string | null): string {
   return "text-warning";
 }
 
-function HistoryRow({ run }: { run: WorkflowRun }) {
+function HistoryRow({ run, onSelect }: { run: WorkflowRun; onSelect: (run: WorkflowRun) => void }) {
   const record = run.company_name ?? run.lead_title ?? "No CRM record";
   return (
     <li className="border-b border-border/50 px-1 py-4 last:border-0 md:px-4">
+      <button type="button" className="w-full text-left" onClick={() => onSelect(run)} aria-label={`Inspect ${record} ${statusLabel(run.status)}`}>
       <div className="grid gap-2 md:grid-cols-[minmax(8rem,1fr)_minmax(10rem,1.3fr)_minmax(8rem,1fr)_6rem] md:items-center md:gap-3">
         <p className="text-[13px] text-foreground">{processLabel(run.kind)}</p>
         <p className="text-[13px] text-muted-foreground">
@@ -303,6 +318,7 @@ function HistoryRow({ run }: { run: WorkflowRun }) {
         <p className={`text-xs ${statusClass(run.status)}`}>{statusLabel(run.status)}</p>
         <p className="text-[11px] text-subtle">{activityTime(run.created_at)}</p>
       </div>
+      </button>
       {run.last_error ? <p className="mt-2 text-xs leading-5 text-destructive">{run.last_error}</p> : null}
       {run.attempts.length > 0 ? (
         <ul className="mt-2 space-y-1 text-xs text-subtle">
@@ -316,6 +332,11 @@ function HistoryRow({ run }: { run: WorkflowRun }) {
       ) : null}
     </li>
   );
+}
+
+function ExecutionDetail({ run, onClose }: { run: WorkflowRun; onClose: () => void }) {
+  const record = run.company_name ?? run.lead_title ?? "No CRM record";
+  return <section className="rounded-[10px] border border-primary/30 bg-background px-5 py-5" aria-label="Execution details"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[0.12em] text-subtle">Execution detail</p><h2 className="mt-1 text-xl text-foreground">{processLabel(run.kind)} · {record}</h2><p className={`mt-2 text-sm ${statusClass(run.status)}`}>{statusLabel(run.status)}</p></div><button type="button" className="text-xs text-primary" onClick={onClose}>Close</button></div><dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3"><div><dt className="text-xs text-subtle">Created</dt><dd>{activityTime(run.created_at)}</dd></div><div><dt className="text-xs text-subtle">Attempts</dt><dd>{run.attempt_count}</dd></div><div><dt className="text-xs text-subtle">Next action</dt><dd>{run.status === "needs_attention" || run.status === "failed" ? "Review before retrying" : run.status === "awaiting_approval" ? "Open approval" : "No action required"}</dd></div></dl>{run.lead_id ? <Link className="mt-4 inline-block text-sm text-primary underline" href={`/crm?tab=leads&id=${run.lead_id}`}>Open related lead →</Link> : null}{run.last_error ? <p className="mt-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">{run.last_error}</p> : null}{run.attempts.length > 0 ? <div className="mt-4"><h3 className="text-sm font-medium">Execution steps</h3><ul className="mt-2 space-y-2 text-sm text-muted-foreground">{run.attempts.map((attempt) => <li key={`${run.id}-detail-${attempt.started_at}`}>{attempt.outcome}{attempt.error ? ` · ${attempt.error}` : ""}</li>)}</ul></div> : null}</section>;
 }
 
 function configurationCopy(data: AutomationSnapshot): string {

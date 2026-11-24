@@ -27,7 +27,7 @@ import {
   type IntegrationType,
 } from "@/lib/integrations";
 
-export function SettingsScreen() {
+export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?: boolean }) {
   const session = useQuery(sessionQueryOptions);
   const queryClient = useQueryClient();
   const { organizationId } = useWorkspace();
@@ -50,9 +50,9 @@ export function SettingsScreen() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <div>
-        <h1 className="text-[31px] leading-none text-foreground">Settings</h1>
+        <h1 className="text-[31px] leading-none text-foreground">{integrationsOnly ? "Integrations" : "Settings"}</h1>
         <p className="mt-3 max-w-3xl text-sm text-muted-foreground">
-          Account, organization, and integration readiness. Secrets are never shown after they are saved.
+          {integrationsOnly ? "Connect the services that power your workspace. Secrets are never shown after they are saved." : "Account, organization, and integration readiness. Secrets are never shown after they are saved."}
         </p>
       </div>
       <div className="grid items-start gap-4 xl:grid-cols-2">
@@ -69,6 +69,7 @@ export function SettingsScreen() {
           }}
         />
       ) : null}
+      {!integrationsOnly ? <>
       <section className="rounded-[10px] bg-muted p-4">
         <h2 className="text-base text-foreground">Account</h2>
         <p className="mt-1 text-sm text-muted-foreground">Read-only fields returned by the session.</p>
@@ -138,6 +139,7 @@ export function SettingsScreen() {
         </Button>
       </section>
       <SignOutDialog open={signOutOpen} onOpenChange={setSignOutOpen} />
+      </> : null}
       </div>
     </div>
   );
@@ -159,6 +161,10 @@ function IntegrationSettings({
   onChanged: () => void;
 }) {
   const byType = useMemo(() => new Map(integrations.map((item) => [item.integration_type, item])), [integrations]);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("all");
+  const matches = (name: string, group: string) =>
+    (category === "all" || category === group) && name.toLowerCase().includes(query.trim().toLowerCase());
   return (
     <section className="rounded-[10px] bg-muted p-4 xl:col-span-2" aria-labelledby="integrations-heading">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -170,13 +176,25 @@ function IntegrationSettings({
         </div>
         <Badge variant="secondary">{isAdmin ? "Administrator access" : "Read only"}</Badge>
       </div>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <Input aria-label="Search integrations" className="max-w-sm" placeholder="Search providers" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <select aria-label="Filter integrations by category" className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={category} onChange={(event) => setCategory(event.target.value)}>
+          <option value="all">All categories</option>
+          <option value="ai">AI models</option>
+          <option value="email">Email</option>
+          <option value="automation">Automation</option>
+          <option value="infrastructure">Infrastructure</option>
+        </select>
+      </div>
       {error ? <div className="mt-4"><RequestError error={error} /></div> : null}
       {isLoading ? <Skeleton className="mt-4 h-32 w-full" /> : (
         <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          <ProviderCard key="chat" organizationId={organizationId} type="chat" title="Language model" record={byType.get("chat")} isAdmin={isAdmin} onChanged={onChanged} />
-          <ProviderCard key="embedding" organizationId={organizationId} type="embedding" title="Embeddings" record={byType.get("embedding")} isAdmin={isAdmin} onChanged={onChanged} />
-          <N8nCard record={byType.get("n8n")} />
-          <EmailSettingsCard organizationId={organizationId} isAdmin={isAdmin} record={byType.get("email")} onChanged={onChanged} />
+          {matches("Language model Groq OpenAI", "ai") ? <ProviderCard key="chat" organizationId={organizationId} type="chat" title="Language model" record={byType.get("chat")} isAdmin={isAdmin} onChanged={onChanged} /> : null}
+          {matches("Embeddings Ollama OpenAI", "ai") ? <ProviderCard key="embedding" organizationId={organizationId} type="embedding" title="Embeddings" record={byType.get("embedding")} isAdmin={isAdmin} onChanged={onChanged} /> : null}
+          {matches("n8n automation", "automation") ? <N8nCard record={byType.get("n8n")} /> : null}
+          {matches("MCP retrieval", "infrastructure") ? <McpCard /> : null}
+          {matches("Email SMTP Resend", "email") ? <EmailSettingsCard organizationId={organizationId} isAdmin={isAdmin} record={byType.get("email")} onChanged={onChanged} /> : null}
+          {!matches("Language model Groq OpenAI", "ai") && !matches("Embeddings Ollama OpenAI", "ai") && !matches("n8n automation", "automation") && !matches("MCP retrieval", "infrastructure") && !matches("Email SMTP Resend", "email") ? <p className="rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground lg:col-span-3">No integrations match this filter.</p> : null}
         </div>
       )}
     </section>
@@ -253,4 +271,8 @@ function ProviderCard({
 
 function N8nCard({ record }: { record?: IntegrationMetadata }) {
   return <div className="rounded-[10px] border border-border bg-background p-4"><div className="flex items-start justify-between gap-2"><div><h3 className="font-medium">n8n automation</h3><p className="mt-1 text-xs text-muted-foreground">Read-only integration status</p></div><Badge variant="secondary">{record?.status ?? "Environment"}</Badge></div><p className="mt-4 text-sm leading-6 text-muted-foreground">Workflow availability and callback verification remain managed by the existing provisioning and webhook safeguards. No unsupported activation or secret controls are exposed here.</p></div>;
+}
+
+function McpCard() {
+  return <div className="rounded-[10px] border border-border bg-background p-4"><div className="flex items-start justify-between gap-2"><div><h3 className="font-medium">MCP retrieval</h3><p className="mt-1 text-xs text-muted-foreground">Infrastructure capability</p></div><Badge variant="secondary">Available</Badge></div><p className="mt-4 text-sm leading-6 text-muted-foreground">MCP is provisioned by the server and receives only the organization-scoped embedding settings required for retrieval. There is no separate user-managed connection or credential form.</p></div>;
 }
