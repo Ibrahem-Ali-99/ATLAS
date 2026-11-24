@@ -17,6 +17,7 @@ export function WorkflowsScreen() {
   const organizationId = workspace.organizationId;
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [scope, setScope] = useState<DataScope>("operational");
   const automations = useQuery({
     queryKey: ["automations", organizationId, scope],
@@ -42,6 +43,8 @@ export function WorkflowsScreen() {
       onScope={setScope}
       kind={kind}
       onKind={setKind}
+      status={status}
+      onStatus={setStatus}
       isAdmin={workspace.role === "admin"}
       cancelPending={cancel.isPending}
       cancelError={cancel.error}
@@ -56,6 +59,8 @@ function WorkflowsBody({
   onScope,
   kind,
   onKind,
+  status,
+  onStatus,
   isAdmin,
   cancelPending,
   cancelError,
@@ -66,12 +71,14 @@ function WorkflowsBody({
   onScope: (scope: DataScope) => void;
   kind: string | null;
   onKind: (kind: string | null) => void;
+  status: string | null;
+  onStatus: (status: string | null) => void;
   isAdmin: boolean;
   cancelPending: boolean;
   cancelError: unknown;
   onCancel: (bookingId: string) => void;
 }) {
-  const visible = kind ? data.runs.filter((run) => run.kind === kind) : data.runs;
+  const visible = data.runs.filter((run) => (!kind || run.kind === kind) && (!status || run.status === status));
   const focus = data.automations.find((item) => item.kind === kind);
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
@@ -131,6 +138,24 @@ function WorkflowsBody({
               Show all · {focus.name}
             </button>
           ) : null}
+          <label className="text-xs text-muted-foreground">
+            Status
+            <select aria-label="Filter execution history" className="ml-2 h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground" value={status ?? ""} onChange={(event) => onStatus(event.target.value || null)}>
+              <option value="">All statuses</option>
+              <option value="running">Running</option>
+              <option value="awaiting_approval">Awaiting approval</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="executing">Executing</option>
+              <option value="queued">Queued</option>
+              <option value="dispatching">Dispatching</option>
+              <option value="completed">Completed</option>
+              <option value="accepted">Accepted by SMTP</option>
+              <option value="rejected">Rejected</option>
+              <option value="failed">Failed</option>
+              <option value="needs_attention">Needs attention</option>
+            </select>
+          </label>
         </div>
         {visible.length === 0 ? (
           <p className="mt-6 text-sm text-muted-foreground">No workflow runs are stored for this view.</p>
@@ -231,6 +256,10 @@ function EmailActivitySection({ emails }: { emails: AutomationSnapshot["emails"]
                 </ul>
               </details>
             ) : null}
+            <div className="mt-3 flex flex-wrap gap-3 text-xs">
+              {email.approval_id ? <Link className="text-primary underline" href={`/approvals?approval=${email.approval_id}`}>Open approval</Link> : null}
+              {email.lead_id ? <Link className="text-primary underline" href={`/crm?tab=leads&id=${email.lead_id}`}>Open lead</Link> : null}
+            </div>
           </li>
         ))}
       </ul>
@@ -264,7 +293,7 @@ function HistoryRow({ run }: { run: WorkflowRun }) {
         <p className="text-[13px] text-foreground">{processLabel(run.kind)}</p>
         <p className="text-[13px] text-muted-foreground">
           {run.lead_id ? (
-            <Link href="/crm?tab=leads" className="hover:text-foreground">
+            <Link href={`/crm?tab=leads&id=${run.lead_id}`} className="hover:text-foreground">
               {record}
             </Link>
           ) : (

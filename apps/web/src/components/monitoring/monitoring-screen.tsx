@@ -102,10 +102,12 @@ export function MonitoringScreen() {
           <h2 className="text-base text-foreground">Needs a look</h2>
           {data.needs_attention.length === 0 ? <p className="text-sm text-muted-foreground">No approval is waiting because its outcome was uncertain.</p> : null}
           {data.needs_attention.map((item) => (
-            <p key={item.id} className="text-sm leading-6 text-muted-foreground">
-              <span className="font-medium text-foreground">{item.action_type.replaceAll("_", " ")}</span>
-              {item.hint ? `. ${item.hint}` : ""}
-            </p>
+            <div key={item.id} className="text-sm leading-6 text-muted-foreground">
+              <Link className="font-medium text-foreground underline" href={`/approvals?approval=${item.id}`}>
+                {item.action_type.replaceAll("_", " ")}
+              </Link>
+              {item.hint ? `. ${item.hint}` : ". Review the approval before deciding whether reconciliation is safe."}
+            </div>
           ))}
         </div>
         <div className="space-y-2 rounded-[10px] bg-muted p-4">
