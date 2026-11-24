@@ -158,6 +158,7 @@ function KnowledgeWorkspace({
                       setSelectedId(null);
                     }
                     void queryClient.invalidateQueries({ queryKey: ["documents", organizationId] });
+                    void queryClient.invalidateQueries({ queryKey: ["document-search", organizationId] });
                   }}
                 />
               ))}
