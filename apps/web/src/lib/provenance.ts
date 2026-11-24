@@ -7,3 +7,7 @@ export const DATA_SCOPES = [
 ] as const;
 
 export type DataScope = (typeof DATA_SCOPES)[number]["id"];
+
+export function isDataScope(value: string | null): value is DataScope {
+  return DATA_SCOPES.some((scope) => scope.id === value);
+}

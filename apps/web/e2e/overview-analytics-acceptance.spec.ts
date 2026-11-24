@@ -51,7 +51,7 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   console.log(JSON.stringify({ metricsBefore: { companies: companiesBefore, leads: leadsBefore, openInquiries: inquiriesBefore } }));
   await page.goto("/overview");
   await allRecords(page);
-  await expect(page.getByText("Your operational workspace is ready for its first record")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Active companies" })).toBeVisible();
   await screenshot(page, "overview-before.png");
 
   await page.goto("/crm");

@@ -12,7 +12,7 @@ import { listAgentRuns, listApprovals } from "@/lib/agent-api";
 import { getHealth, getReady } from "@/lib/api";
 import { getAutomations, type WorkflowRun } from "@/lib/automations";
 import { getAnalytics, type AnalyticsSnapshot, type StatusCount } from "@/lib/intelligence";
-import type { DataScope } from "@/lib/provenance";
+import { isDataScope, type DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
 
 const PIPELINE = [
@@ -24,7 +24,14 @@ const PIPELINE = [
 export function OverviewScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
-  const [scope, setScope] = useState<DataScope>("operational");
+  const [scopeByOrganization, setScopeByOrganization] = useState<Record<string, DataScope>>({});
+  const scope = organizationId ? scopeByOrganization[organizationId] ?? storedScope(organizationId) : "all";
+  const selectScope = (next: DataScope) => {
+    if (organizationId) {
+      setScopeByOrganization((current) => ({ ...current, [organizationId]: next }));
+      window.localStorage.setItem(`atlas.dashboard.scope.${organizationId}`, next);
+    }
+  };
   const analytics = useQuery({
     queryKey: ["analytics", organizationId, scope],
     queryFn: () => getAnalytics(organizationId ?? "", scope),
@@ -55,16 +62,19 @@ export function OverviewScreen() {
         <p className="mt-3 max-w-3xl text-[13px] text-muted-foreground">
           Decisions, customer activity and execution health
         </p>
-        <DataScopeControl value={scope} onChange={setScope} />
+        <DataScopeControl value={scope} onChange={selectScope} advanced />
         <Link href="/setup" className="mt-3 inline-block text-xs text-primary">Open first-run setup checklist →</Link>
         {analytics.data ? (
-          <p className="mt-2 max-w-3xl text-xs leading-5 text-subtle">{analytics.data.provenance_notice}</p>
+          <details className="mt-3 max-w-3xl text-xs leading-5 text-subtle">
+            <summary className="cursor-pointer">About this view</summary>
+            <p className="mt-2">{analytics.data.provenance_notice}</p>
+          </details>
         ) : null}
       </header>
       {analytics.isPending ? <Skeleton className="h-36 w-full" /> : null}
       {analytics.isError ? <RequestError error={analytics.error} /> : null}
-      {analytics.data && isOperationalEmpty(analytics.data) ? <OperationalEmptyState /> : null}
-      {analytics.data && !isOperationalEmpty(analytics.data) ? (
+      {analytics.data && isWorkspaceEmpty(analytics.data) ? <OperationalEmptyState /> : null}
+      {analytics.data && !isWorkspaceEmpty(analytics.data) ? (
         <>
           <MetricRow data={analytics.data} />
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(16rem,0.7fr)]">
@@ -95,16 +105,22 @@ export function OverviewScreen() {
   );
 }
 
-function isOperationalEmpty(data: AnalyticsSnapshot): boolean {
+function isWorkspaceEmpty(data: AnalyticsSnapshot): boolean {
   return data.companies_total === 0 && data.leads_total === 0 && data.inquiries_total === 0 && data.approvals.pending === 0 && data.failed_runs === 0;
+}
+
+function storedScope(organizationId: string): DataScope {
+  if (typeof window === "undefined") return "all";
+  const saved = window.localStorage.getItem(`atlas.dashboard.scope.${organizationId}`);
+  return isDataScope(saved) ? saved : "all";
 }
 
 function OperationalEmptyState() {
   return (
     <section className="rounded-[10px] bg-muted px-6 py-8" aria-labelledby="empty-overview-title">
-      <p className="text-xs uppercase tracking-[0.14em] text-primary">Operational workspace</p>
+      <p className="text-xs uppercase tracking-[0.14em] text-primary">Workspace setup</p>
       <h2 id="empty-overview-title" className="mt-2 text-2xl text-foreground">Your operational workspace is ready for its first record</h2>
-      <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">There is no operational business activity yet, so ATLAS is not showing invented totals or empty scorecards. Start with a company, a knowledge document, or the guided setup path.</p>
+      <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">There are no customer records in this workspace yet. Start with a company, a knowledge document, or the guided setup path.</p>
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
         <Link href="/crm?tab=companies" className="rounded-[10px] bg-secondary px-4 py-4 text-sm text-foreground hover:bg-accent"><span className="block font-medium">Create a company</span><span className="mt-2 block text-xs text-muted-foreground">Add the first operational organization record.</span></Link>
         <Link href="/knowledge" className="rounded-[10px] bg-secondary px-4 py-4 text-sm text-foreground hover:bg-accent"><span className="block font-medium">Upload knowledge</span><span className="mt-2 block text-xs text-muted-foreground">Add a document and choose its origin explicitly.</span></Link>
@@ -287,7 +303,7 @@ function RecentActivity({
         <ul className="mt-4 grid gap-2 border-t border-border/60 pt-4 text-sm">
           {recentInteractions.map((item) => (
             <li key={item.id}>
-              <Link href="/crm?tab=leads" className="text-foreground hover:text-primary"><span className="font-medium">{item.kind}</span> · {item.summary}</Link>
+              <Link href={`/crm?tab=leads&id=${item.lead_id}`} className="text-foreground hover:text-primary"><span className="font-medium">{item.kind}</span> · {item.summary}</Link>
               <time className="ml-2 text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()}</time>
             </li>
           ))}

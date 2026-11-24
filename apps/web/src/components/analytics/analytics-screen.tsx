@@ -9,13 +9,20 @@ import { DataScopeControl } from "@/components/data-scope";
 import { RequestError } from "@/components/request-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAnalytics, type AnalyticsSnapshot, type StatusCount } from "@/lib/intelligence";
-import type { DataScope } from "@/lib/provenance";
+import { isDataScope, type DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
 
 export function AnalyticsScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
-  const [scope, setScope] = useState<DataScope>("operational");
+  const [scopeByOrganization, setScopeByOrganization] = useState<Record<string, DataScope>>({});
+  const scope = organizationId ? scopeByOrganization[organizationId] ?? storedScope(organizationId) : "all";
+  const selectScope = (next: DataScope) => {
+    if (organizationId) {
+      setScopeByOrganization((current) => ({ ...current, [organizationId]: next }));
+      window.localStorage.setItem(`atlas.dashboard.scope.${organizationId}`, next);
+    }
+  };
   const analytics = useQuery({
     queryKey: ["analytics", organizationId, scope],
     queryFn: () => getAnalytics(organizationId ?? "", scope),
@@ -27,7 +34,7 @@ export function AnalyticsScreen() {
   if (analytics.isError) {
     return <RequestError error={analytics.error} />;
   }
-  return <AnalyticsBody data={analytics.data} scope={scope} onScope={setScope} />;
+  return <AnalyticsBody data={analytics.data} scope={scope} onScope={selectScope} />;
 }
 
 function AnalyticsBody({
@@ -46,8 +53,11 @@ function AnalyticsBody({
     <div className="flex w-full min-w-0 flex-col gap-6">
       <div>
         <h1 className="text-[31px] leading-none text-foreground">Analytics</h1>
-        <DataScopeControl value={scope} onChange={onScope} />
-        <p className="mt-3 max-w-3xl text-sm text-muted-foreground">{data.provenance_notice}</p>
+        <DataScopeControl value={scope} onChange={onScope} advanced />
+        <details className="mt-3 max-w-3xl text-xs leading-5 text-subtle">
+          <summary className="cursor-pointer">About this view</summary>
+          <p className="mt-2">{data.provenance_notice}</p>
+        </details>
         <p className="mt-2 max-w-3xl text-xs leading-5 text-subtle">
           Lead creation counts use the last {data.window_days} days, including days with zero. The window is fixed by the API.
         </p>
@@ -151,6 +161,12 @@ const chartTooltip = {
 
 function shortDay(value: string): string {
   return value.length >= 10 ? value.slice(5) : value;
+}
+
+function storedScope(organizationId: string): DataScope {
+  if (typeof window === "undefined") return "all";
+  const saved = window.localStorage.getItem(`atlas.dashboard.scope.${organizationId}`);
+  return isDataScope(saved) ? saved : "all";
 }
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
