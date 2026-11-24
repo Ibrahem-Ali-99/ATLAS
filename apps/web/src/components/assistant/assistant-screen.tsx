@@ -401,17 +401,17 @@ function EmptyThread({
     "What documents are available?",
   ];
   return (
-    <div className="rounded-2xl border border-border bg-card px-5 py-6 shadow-sm sm:px-7 sm:py-8">
-      <p className="text-xl font-semibold tracking-tight">Ask ATLAS about {organizationName}</p>
-      <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+    <div className="rounded-xl border border-border bg-card px-4 py-4 shadow-sm sm:px-5 sm:py-5">
+      <p className="text-base font-semibold tracking-tight">Ask ATLAS about {organizationName}</p>
+      <p className="mt-1 max-w-xl text-sm leading-5 text-muted-foreground">
         Ask what ATLAS can do, what this organization has stored, or a fact from a document or CRM record. A company fact is answered only when a retrieved row supports it. Selecting a prompt fills the composer and does not send it.
       </p>
-      <div className="mt-6 grid gap-2 sm:grid-cols-2">
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
         {prompts.map((prompt) => (
           <button
             key={prompt}
             type="button"
-            className="rounded-xl border border-border bg-background px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:bg-accent hover:text-foreground"
+            className="rounded-lg border border-border bg-background px-3 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:bg-accent hover:text-foreground"
             onClick={() => onPrompt(prompt)}
           >
             {prompt}

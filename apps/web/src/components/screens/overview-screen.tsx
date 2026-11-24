@@ -46,15 +46,15 @@ export function OverviewScreen() {
   const empty = analytics.data.companies_total === 0 && analytics.data.leads_total === 0 && analytics.data.inquiries_total === 0;
 
   return (
-    <div className="mx-auto flex w-full max-w-[1440px] min-w-0 flex-col gap-5">
+    <div className="mx-auto flex w-full max-w-[1118px] min-w-0 flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border/70 pb-4">
-        <div><p className="text-xs font-medium uppercase tracking-[0.14em] text-primary">{workspace.organizationName ?? "Workspace"}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">Overview</h1></div>
-        <div className="flex flex-wrap items-center gap-2"><DataScopeControl value={scope} onChange={selectScope} advanced /><Link href="/crm?tab=leads" className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90">Open CRM</Link></div>
+        <div><p className="text-xs text-muted-foreground">{workspace.organizationName ?? "Workspace"}</p><h1 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">Overview</h1><p className="mt-2 text-sm text-muted-foreground">Here’s what needs your attention across the business.</p></div>
+        <div className="flex flex-wrap items-center gap-2"><DataScopeControl value={scope} onChange={selectScope} advanced /><Link href="/crm?tab=leads" className="rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm hover:opacity-90">+ New opportunity</Link></div>
       </header>
       {empty ? <EmptyWorkspace /> : <>
         <Kpis data={analytics.data} />
         <div className="grid gap-4 xl:grid-cols-[1.35fr_0.9fr]"><ActivitySection data={analytics.data} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} /><Pipeline data={analytics.data} /></div>
-        <div className="grid gap-4 xl:grid-cols-[1.35fr_0.9fr]"><InquirySection inquiries={inquiries.data?.items ?? []} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} pending={inquiries.isPending} /><Attention approvals={approvals.data?.items ?? []} pending={approvals.isPending} /></div>
+        <div className={approvals.isPending || (approvals.data?.items.length ?? 0) > 0 ? "grid gap-4 xl:grid-cols-[1.35fr_0.9fr]" : "grid gap-4"}><InquirySection inquiries={inquiries.data?.items ?? []} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} pending={inquiries.isPending} /><Attention approvals={approvals.data?.items ?? []} pending={approvals.isPending} /></div>
       </>}
     </div>
   );
@@ -67,7 +67,7 @@ function Kpis({ data }: { data: AnalyticsSnapshot }) {
 
 function Kpi({ href, label, value, detail, attention }: { href: string; label: string; value: number; detail?: string; attention?: boolean }) {
   const slug = label.toLowerCase().replaceAll(" ", "-");
-  return <Link data-testid={`overview-kpi-${slug}`} href={href} className="rounded-lg border border-border/80 bg-card px-4 py-3 transition-colors hover:border-primary/60 hover:bg-accent/40"><div className="flex items-center justify-between gap-2"><span className="text-xs text-muted-foreground">{label}</span>{attention ? <span className="size-2 rounded-full bg-warning" aria-label="Needs attention" /> : null}</div><p data-testid={`overview-kpi-${slug}-value`} className="mt-2 text-2xl font-semibold tabular-nums text-foreground">{value}</p>{detail ? <p className="mt-1 text-[11px] text-subtle">{detail}</p> : null}</Link>;
+  return <Link data-testid={`overview-kpi-${slug}`} href={href} className="rounded-lg border border-border bg-card px-4 py-4 shadow-sm transition-colors hover:border-primary/50 hover:bg-accent/30"><div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-muted-foreground">{label}</span>{attention ? <span className="size-2 rounded-full bg-warning" aria-label="Needs attention" /> : null}</div><p data-testid={`overview-kpi-${slug}-value`} className="mt-3 text-2xl font-semibold tabular-nums text-foreground">{value}</p>{detail ? <p className="mt-1 text-[11px] text-subtle">{detail}</p> : null}</Link>;
 }
 
 function ActivitySection({ data, leads, companies }: { data: AnalyticsSnapshot; leads: Lead[]; companies: Company[] }) {
@@ -85,7 +85,8 @@ function InquirySection({ inquiries, leads, companies, pending }: { inquiries: I
 }
 
 function Attention({ approvals, pending }: { approvals: Approval[]; pending: boolean }) {
-  return <section className="rounded-lg border border-border/80 bg-card" aria-labelledby="attention-title"><div className="flex items-center justify-between border-b border-border/70 px-4 py-3"><h2 id="attention-title" className="text-sm font-semibold text-foreground">Attention required</h2><Link href="/approvals" className="text-xs text-primary">Approvals</Link></div>{pending ? <Skeleton className="m-4 h-12" /> : approvals.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">You’re caught up.</p> : <ul className="divide-y divide-border/60">{approvals.slice(0, 4).map((approval) => <li key={approval.id} className="px-4 py-3"><Link href={`/approvals?approval=${approval.id}`} className="block rounded-md hover:bg-accent/30"><p className="truncate text-sm text-foreground">Review approval</p><p className="mt-1 text-xs text-muted-foreground">Awaiting your decision</p></Link></li>)}</ul>}</section>;
+  if (!pending && approvals.length === 0) return null;
+  return <section className="rounded-lg border border-border bg-card shadow-sm" aria-labelledby="attention-title"><div className="flex items-center justify-between border-b border-border/70 px-4 py-3"><h2 id="attention-title" className="text-sm font-semibold text-foreground">Attention required</h2><Link href="/approvals" className="text-xs text-primary">Approvals</Link></div>{pending ? <Skeleton className="m-4 h-12" /> : <ul className="divide-y divide-border/60">{approvals.slice(0, 4).map((approval) => <li key={approval.id} className="px-4 py-3"><Link href={`/approvals?approval=${approval.id}`} className="block rounded-md hover:bg-accent/30"><p className="truncate text-sm text-foreground">Review approval</p><p className="mt-1 text-xs text-muted-foreground">Awaiting your decision</p></Link></li>)}</ul>}</section>;
 }
 
 function EmptyWorkspace() { return <section className="rounded-lg border border-dashed border-border bg-card px-5 py-8"><h2 className="text-lg font-semibold text-foreground">Your workspace is ready</h2><p className="mt-2 max-w-lg text-sm text-muted-foreground">Create your first company or lead to start tracking customer work here.</p><Link href="/crm?tab=companies" className="mt-4 inline-flex rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">Open CRM</Link></section>; }

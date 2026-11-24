@@ -31,7 +31,7 @@ def seed_sample_crm(
         name="Harbor & Co.",
         website="https://harbor.example",
         industry="Logistics",
-        notes="Synthetic demonstration company.",
+        notes="Regional warehousing and fulfillment partner.",
     )
     contact = _contact(
         db,
@@ -50,7 +50,7 @@ def seed_sample_crm(
         title="North pier expansion",
         status=LeadStatus.qualified,
         source="Website inquiry",
-        notes="Synthetic lead asking about warehousing capacity.",
+        notes="Customer asked about warehousing capacity and onboarding timelines.",
     )
     _interaction(
         db,
@@ -65,7 +65,7 @@ def seed_sample_crm(
         harbor,
         lead,
         subject="Request for warehousing rates",
-        body="Synthetic inquiry. Please send the service sheet for cold storage.",
+        body="Please send the service sheet for cold storage.",
     )
     for title, status, source, notes in (
         (
@@ -84,13 +84,13 @@ def seed_sample_crm(
             "Warehouse renewal",
             LeadStatus.won,
             "Existing customer",
-            "Synthetic won opportunity used to demonstrate reporting.",
+            "Renewal confirmed for the current operating footprint.",
         ),
         (
             "Packaging services review",
             LeadStatus.lost,
             "Outbound",
-            "Synthetic closed-lost opportunity used to demonstrate pipeline history.",
+            "Opportunity paused after the customer changed priorities.",
         ),
     ):
         extra_lead = _lead(
@@ -104,14 +104,14 @@ def seed_sample_crm(
             source=source,
             notes=notes,
         )
-        _interaction(db, atlas, extra_lead, admin, f"Seeded follow-up note for {title}.")
+        _interaction(db, atlas, extra_lead, admin, f"Follow-up recorded for {title}.")
     _inquiry(
         db,
         atlas,
         harbor,
         lead,
         subject="Cold storage availability for Q3",
-        body="Synthetic inquiry asking whether cold storage capacity is available this quarter.",
+        body="Could you confirm whether cold storage capacity is available this quarter?",
     )
     _inquiry(
         db,
@@ -119,7 +119,7 @@ def seed_sample_crm(
         harbor,
         lead,
         subject="Request for fulfillment capabilities",
-        body="Synthetic inquiry asking about regional fulfillment and packaging support.",
+        body="We would like to understand your regional fulfillment and packaging support.",
     )
     _conversation(
         db,
@@ -138,7 +138,7 @@ def seed_sample_crm(
         name="Northwind Traders",
         website="https://northwind.example",
         industry="Wholesale",
-        notes="Synthetic company in a separate organization.",
+        notes="Wholesale partner with a separate workspace relationship.",
     )
     _lead(
         db,
@@ -149,7 +149,7 @@ def seed_sample_crm(
         title="Catalog refresh",
         status=LeadStatus.new,
         source="Internal",
-        notes="Synthetic Northwind lead.",
+        notes="Initial catalog refresh discussion.",
     )
 
 

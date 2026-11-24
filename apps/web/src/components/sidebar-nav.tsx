@@ -16,12 +16,13 @@ export function SidebarNav({
   const pathname = usePathname();
 
   return (
-    <div className="flex h-full flex-col px-3 py-7">
-      <p className="px-2 text-[22px] leading-none text-foreground">ATLAS</p>
-      <p className="mt-3 px-2 text-[10px] uppercase tracking-[0.16em] text-subtle">
-        {organizationName ?? "Business operations"}
-      </p>
-      <nav className="mt-8 flex flex-1 flex-col gap-7" aria-label="Workspace">
+    <div className="flex h-full flex-col px-4 py-6 text-white">
+      <p className="px-2 text-[22px] font-semibold leading-none"><span className="text-[#b3a7ff]">A</span> atlas</p>
+      <div className="mt-8 rounded-lg bg-[#202d46] px-3 py-3">
+        <p className="truncate text-sm font-semibold">{organizationName ?? "Business operations"}</p>
+        <p className="mt-1 text-[10px] text-[#91a0bb]">Workspace / Business</p>
+      </div>
+      <nav className="mt-6 flex flex-1 flex-col gap-6" aria-label="Workspace">
         {navigationGroups.map((group) => (
           <div key={group.label} className="flex flex-col gap-1">
             <div className="flex flex-col">
@@ -34,8 +35,8 @@ export function SidebarNav({
                     aria-current={active ? "page" : undefined}
                     onClick={onNavigate}
                     className={cn(
-                      "flex h-10 items-center rounded-[10px] px-4 text-sm text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground",
-                      active && "bg-accent text-foreground hover:bg-accent",
+                      "flex h-9 items-center rounded-md px-3 text-sm text-[#aab5cb] transition-colors hover:bg-[#202d46] hover:text-white",
+                      active && "bg-[#3a315f] font-medium text-white hover:bg-[#3a315f]",
                     )}
                   >
                     {item.label}
@@ -46,6 +47,8 @@ export function SidebarNav({
           </div>
         ))}
       </nav>
+      <div className="border-t border-white/10 pt-5 text-[11px] text-[#72d5bb]">● All systems operational</div>
+      <div className="mt-3 px-1 text-[10px] text-[#71809b]">ATLAS / v1.0</div>
     </div>
   );
 }

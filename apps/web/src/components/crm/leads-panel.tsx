@@ -53,11 +53,11 @@ type NoteValues = z.infer<typeof noteSchema>;
 
 type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string }) => void;
 
-export function LeadsPanel({ organizationId, selectedId: requestedId, onNavigate }: { organizationId: string; selectedId?: string | null; onNavigate: Navigate }) {
+export function LeadsPanel({ organizationId, selectedId: requestedId, initialStatus = "", onNavigate }: { organizationId: string; selectedId?: string | null; initialStatus?: LeadStatus | ""; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<LeadStatus | "">("");
+  const [status, setStatus] = useState<LeadStatus | "">(initialStatus);
   const [page, setPage] = useState(1);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
@@ -91,9 +91,9 @@ export function LeadsPanel({ organizationId, selectedId: requestedId, onNavigate
   const selected = leads.data?.items.find((item) => item.id === selectedId) ?? null;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.9fr)]">
-      <section className="rounded-[10px] bg-muted">
-        <div className="grid gap-3 p-4 sm:grid-cols-[1fr_10rem_auto]">
+    <div className={selected ? "grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.9fr)]" : "w-full"}>
+      <section className="min-w-0 rounded-lg border border-border bg-card shadow-sm">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search leads" aria-label="Search leads" />
           <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} /> Show archived</label>
           <select
@@ -118,6 +118,7 @@ export function LeadsPanel({ organizationId, selectedId: requestedId, onNavigate
           <p className="px-4 pb-6 text-sm text-muted-foreground">No leads match this search.</p>
         ) : null}
         {leads.data && leads.data.items.length > 0 ? (
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -138,6 +139,7 @@ export function LeadsPanel({ organizationId, selectedId: requestedId, onNavigate
               ))}
             </TableBody>
           </Table>
+          </div>
         ) : null}
         {leads.data ? <Pager page={leads.data.page} pageSize={leads.data.page_size} total={leads.data.total} onPage={setPage} /> : null}
       </section>
@@ -157,7 +159,7 @@ export function LeadsPanel({ organizationId, selectedId: requestedId, onNavigate
           }}
         />
       ) : (
-        <aside className="rounded-[10px] bg-muted p-6 text-sm text-muted-foreground">
+        <aside className="rounded-lg border border-dashed border-border bg-card p-6 text-sm text-muted-foreground lg:min-h-32">
           Select a lead to update its status and interaction history.
         </aside>
       )}
@@ -288,12 +290,11 @@ function LeadDetail({
   });
 
   return (
-    <aside className="space-y-4 rounded-[10px] bg-muted p-6">
+    <aside className="min-w-0 space-y-5 rounded-lg border border-border bg-card p-5 shadow-sm">
       <div>
-        <h2 className="text-base font-semibold">{lead.title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Owned by the member who created it unless reassigned by the API.</p>
+        <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Lead detail</p><h2 className="mt-1 break-words text-lg font-semibold">{lead.title}</h2></div><Badge variant="secondary">{lead.status}</Badge></div>
       </div>
-      <div className="border-t border-border pt-3 text-sm"><h3 className="font-medium">Related records</h3><div className="mt-2 grid gap-1">
+      <div className="border-t border-border pt-4 text-sm"><h3 className="font-medium">Related records</h3><div className="mt-2 grid min-w-0 gap-1">
         {lead.company_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "companies", id: lead.company_id! })}>{companies.find((item) => item.id === lead.company_id)?.name ?? "Company"}</button> : null}
         {lead.contact_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "contacts", id: lead.contact_id! })}>{contacts.find((item) => item.id === lead.contact_id)?.full_name ?? "Contact"}</button> : null}
         {inquiries.filter((item) => item.lead_id === lead.id).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
