@@ -81,6 +81,7 @@ export function OverviewScreen() {
           <RecentActivity
             runs={automations.data?.runs ?? []}
             pendingApprovals={analytics.data.approvals.pending}
+            recentInteractions={analytics.data.recent_interactions}
             pending={automations.isPending}
             error={automations.error}
           />
@@ -95,7 +96,7 @@ export function OverviewScreen() {
 }
 
 function isOperationalEmpty(data: AnalyticsSnapshot): boolean {
-  return data.lead_origins.operational === 0 && data.inquiries_total === 0 && data.approvals.pending === 0 && data.failed_runs === 0;
+  return data.companies_total === 0 && data.leads_total === 0 && data.inquiries_total === 0 && data.approvals.pending === 0 && data.failed_runs === 0;
 }
 
 function OperationalEmptyState() {
@@ -122,7 +123,8 @@ function MetricRow({ data }: { data: AnalyticsSnapshot }) {
   const rate =
     data.automation.success_rate === null ? "—" : `${Math.round(data.automation.success_rate * 100)}%`;
   return (
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <Metric href="/crm?tab=companies" label="Active companies" value={pad(data.companies_total)} detail="Customer accounts" detailClass="text-primary" />
       <Metric
         href="/approvals"
         label="Pending approvals"
@@ -137,6 +139,7 @@ function MetricRow({ data }: { data: AnalyticsSnapshot }) {
         detail="Across the pipeline"
         detailClass="text-primary"
       />
+      <Metric href="/crm?tab=inquiries" label="Open inquiries" value={pad(data.open_inquiries)} detail="Customer requests" detailClass="text-warning" />
       <Metric
         href="/monitoring"
         label="Agent failures"
@@ -252,11 +255,13 @@ function Pipeline({ data }: { data: AnalyticsSnapshot }) {
 function RecentActivity({
   runs,
   pendingApprovals,
+  recentInteractions,
   pending,
   error,
 }: {
   runs: WorkflowRun[];
   pendingApprovals: number;
+  recentInteractions: AnalyticsSnapshot["recent_interactions"];
   pending: boolean;
   error: unknown;
 }) {
@@ -266,7 +271,7 @@ function RecentActivity({
       <h2 className="text-[19px] text-foreground">Recent activity</h2>
       {pending ? <Skeleton className="mt-4 h-6 w-64" /> : null}
       {error ? <div className="mt-4"><RequestError error={error} /></div> : null}
-      {!pending && lines.length === 0 ? (
+      {!pending && lines.length === 0 && recentInteractions.length === 0 ? (
         <p className="mt-4 text-sm text-muted-foreground">No automation activity is stored yet.</p>
       ) : null}
       {lines.length > 0 ? (
@@ -277,6 +282,16 @@ function RecentActivity({
             </Link>
           ))}
         </div>
+      ) : null}
+      {recentInteractions.length > 0 ? (
+        <ul className="mt-4 grid gap-2 border-t border-border/60 pt-4 text-sm">
+          {recentInteractions.map((item) => (
+            <li key={item.id}>
+              <Link href="/crm?tab=leads" className="text-foreground hover:text-primary"><span className="font-medium">{item.kind}</span> · {item.summary}</Link>
+              <time className="ml-2 text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()}</time>
+            </li>
+          ))}
+        </ul>
       ) : null}
     </section>
   );

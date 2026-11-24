@@ -14,7 +14,7 @@ from app.domains.automation.models import (
     WorkflowRun,
     WorkflowStatus,
 )
-from app.domains.crm.models import Inquiry, Interaction, Lead, LeadStatus
+from app.domains.crm.models import Company, Inquiry, Interaction, Lead, LeadStatus
 from app.domains.provenance.origin import DataScope, Origin, provenance_notice, scope_clause
 
 WINDOW_DAYS = 30
@@ -33,8 +33,10 @@ def snapshot(
         "scope": scope.value,
         "lead_origins": origins,
         "provenance_notice": provenance_notice(scope, origins),
+        "companies_total": _count(db, Company, organization_id, scope),
         "leads_total": _count(db, Lead, organization_id, scope),
         "inquiries_total": _count(db, Inquiry, organization_id, scope),
+        "open_inquiries": _count(db, Inquiry, organization_id, scope),
         "lead_status": _grouped(db, Lead.status, Lead, organization_id, scope),
         "qualification": {
             "qualified": _status_count(db, organization_id, (LeadStatus.qualified,), scope),
@@ -55,11 +57,15 @@ def snapshot(
         "follow_ups": _follow_ups(db, organization_id, scope),
         "email": _email(db, organization_id, scope),
         "calendar": _calendar(db, organization_id, scope),
+        "recent_interactions": _recent_interactions(db, organization_id, scope),
+        "recent_agent_activity": _recent_agent_activity(db, organization_id, scope),
     }
 
 
 def _filters(model: Any, organization_id: uuid.UUID, scope: DataScope) -> list[Any]:
     filters = [model.organization_id == organization_id]
+    if hasattr(model, "archived_at"):
+        filters.append(model.archived_at.is_(None))
     clause = scope_clause(model.origin, scope)
     if clause is not None:
         filters.append(clause)
@@ -69,7 +75,7 @@ def _filters(model: Any, organization_id: uuid.UUID, scope: DataScope) -> list[A
 def _lead_origins(db: Session, organization_id: uuid.UUID) -> dict[str, int]:
     rows = db.execute(
         select(Lead.origin, func.count())
-        .where(Lead.organization_id == organization_id)
+        .where(Lead.organization_id == organization_id, Lead.archived_at.is_(None))
         .group_by(Lead.origin)
     ).all()
     counts = {item.value: 0 for item in Origin}
@@ -257,3 +263,44 @@ def failed_run_count(
         )
         or 0
     )
+
+
+def _recent_interactions(
+    db: Session, organization_id: uuid.UUID, scope: DataScope
+) -> list[dict[str, Any]]:
+    rows = db.scalars(
+        select(Interaction)
+        .where(*_filters(Interaction, organization_id, scope))
+        .order_by(Interaction.created_at.desc())
+        .limit(5)
+    ).all()
+    return [
+        {
+            "id": str(item.id),
+            "lead_id": str(item.lead_id),
+            "kind": item.kind.value,
+            "summary": item.body[:140],
+            "created_at": item.created_at.isoformat(),
+        }
+        for item in rows
+    ]
+
+
+def _recent_agent_activity(
+    db: Session, organization_id: uuid.UUID, scope: DataScope
+) -> list[dict[str, Any]]:
+    rows = db.scalars(
+        select(AgentRun)
+        .where(*_filters(AgentRun, organization_id, scope))
+        .order_by(AgentRun.updated_at.desc())
+        .limit(5)
+    ).all()
+    return [
+        {
+            "id": str(item.id),
+            "status": item.status.value,
+            "inquiry_id": str(item.inquiry_id),
+            "updated_at": item.updated_at.isoformat(),
+        }
+        for item in rows
+    ]

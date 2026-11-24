@@ -58,8 +58,9 @@ function AnalyticsBody({
         </p>
       ) : null}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric label="Active companies" value={String(data.companies_total)} detail="Customer accounts in the selected scope." />
         <Metric label="Leads" value={String(data.leads_total)} detail="Leads in the selected scope." />
-        <Metric label="Inquiries" value={String(data.inquiries_total)} detail="Inquiries in the selected scope." />
+        <Metric label="Open inquiries" value={String(data.open_inquiries)} detail="Customer requests in the selected scope." />
         <Metric
           label="Won or lost"
           value={rate}

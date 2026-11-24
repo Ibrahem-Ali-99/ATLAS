@@ -7,14 +7,18 @@ function organizationPath(organizationId: string, path: string): string {
 
 export type StatusCount = { status: string; count: number };
 export type DayCount = { day: string; count: number };
+export type RecentInteraction = { id: string; lead_id: string; kind: string; summary: string; created_at: string };
+export type RecentAgentActivity = { id: string; status: string; inquiry_id: string; updated_at: string };
 
 export type AnalyticsSnapshot = {
   window_days: number;
   scope: string;
   lead_origins: { operational: number; demo: number; evaluation: number; unknown: number };
   provenance_notice: string;
+  companies_total: number;
   leads_total: number;
   inquiries_total: number;
+  open_inquiries: number;
   lead_status: StatusCount[];
   qualification: {
     qualified: number;
@@ -50,6 +54,8 @@ export type AnalyticsSnapshot = {
   follow_ups: { approval_requests: number; interactions: number };
   email: { sandbox_sent: number; live_sent: number; failed: number };
   calendar: { booked: number; cancelled: number; providers: string[]; notice: string };
+  recent_interactions: RecentInteraction[];
+  recent_agent_activity: RecentAgentActivity[];
 };
 
 export type LeadPrediction = {
