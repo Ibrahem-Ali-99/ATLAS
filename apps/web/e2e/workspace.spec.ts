@@ -65,7 +65,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByLabel("Password").fill("change-me-admin");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await expect(page.getByText("Pending approvals")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Operations overview" })).toBeVisible();
   await shot(page, "01-overview.png");
 
   await page.getByRole("link", { name: "CRM", exact: true }).click();
@@ -79,9 +79,14 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByLabel("Industry").fill("Warehousing");
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Saved.")).toBeVisible();
-  await page.getByRole("button", { name: "Delete" }).click();
-  await page.getByRole("button", { name: "Confirm delete" }).click();
+  await page.getByRole("button", { name: "Archive" }).click();
+  await page.getByRole("button", { name: "Confirm archive" }).click();
   await expect(page.getByRole("button", { name: companyName })).toHaveCount(0);
+  await page.getByLabel("Show archived").check();
+  await page.getByRole("button", { name: companyName }).click();
+  await page.getByRole("button", { name: "Restore" }).click();
+  await page.getByLabel("Show archived").uncheck();
+  await expect(page.getByRole("button", { name: companyName })).toHaveCount(1);
 
   await page.getByRole("tab", { name: "Leads" }).click();
   const seededLeads = page.waitForResponse(

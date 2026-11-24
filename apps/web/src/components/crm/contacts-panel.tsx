@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { createContact, deleteContact, listCompanies, listContacts, restoreContact, updateContact } from "@/lib/records-api";
+import { createContact, deleteContact, listCompanies, listContacts, listInquiries, listLeads, restoreContact, updateContact } from "@/lib/records-api";
 import { blankToNull, type Contact } from "@/lib/records";
 
 const schema = z.object({
@@ -38,21 +38,28 @@ function payload(values: FormValues) {
   };
 }
 
-export function ContactsPanel({ organizationId }: { organizationId: string }) {
+type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string }) => void;
+
+export function ContactsPanel({ organizationId, selectedId: requestedId, onNavigate }: { organizationId: string; selectedId?: string | null; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
   const contacts = useQuery({
-    queryKey: ["contacts", organizationId, query, page],
+    queryKey: ["contacts", organizationId, query, page, includeArchived],
     queryFn: () => listContacts(organizationId, { q: query, page, includeArchived }),
   });
   const companies = useQuery({
     queryKey: ["companies", organizationId, "options"],
     queryFn: () => listCompanies(organizationId, { pageSize: 100 }),
+  });
+  const related = useQuery({
+    queryKey: ["contact-relations", organizationId, selectedId],
+    queryFn: async () => Promise.all([listLeads(organizationId, { pageSize: 100 }), listInquiries(organizationId, { pageSize: 100 })]),
+    enabled: Boolean(selectedId),
   });
 
   useEffect(() => {
@@ -112,6 +119,8 @@ export function ContactsPanel({ organizationId }: { organizationId: string }) {
           organizationId={organizationId}
           contact={selected}
           companies={companies.data?.items ?? []}
+          related={related.data}
+          onNavigate={onNavigate}
           onSaved={() => void queryClient.invalidateQueries({ queryKey: ["contacts", organizationId] })}
           onDeleted={() => {
             setSelectedId(null);
@@ -184,12 +193,16 @@ function ContactEditor({
   organizationId,
   contact,
   companies,
+  related,
+  onNavigate,
   onSaved,
   onDeleted,
 }: {
   organizationId: string;
   contact: Contact;
   companies: { id: string; name: string }[];
+  related?: [{ items: import("@/lib/records").Lead[] }, { items: import("@/lib/records").Inquiry[] }];
+  onNavigate: Navigate;
   onSaved: () => void;
   onDeleted: () => void;
 }) {
@@ -212,6 +225,11 @@ function ContactEditor({
   return (
     <aside className="rounded-[10px] bg-muted p-6">
       <h2 className="text-base font-semibold">{contact.full_name}</h2>
+      <div className="mt-3 border-t border-border pt-3 text-sm"><h3 className="font-medium">Related records</h3><div className="mt-2 grid gap-1">
+        {contact.company_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "companies", id: contact.company_id! })}>{companies.find((item) => item.id === contact.company_id)?.name ?? "Company"}</button> : null}
+        {related?.[0].items.filter((item) => item.contact_id === contact.id).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "leads", id: item.id })}>{item.title}</button>)}
+        {related?.[1].items.filter((item) => item.lead_id && related[0].items.some((lead) => lead.id === item.lead_id && lead.contact_id === contact.id)).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
+      </div></div>
       <div className="mt-4">
         <ContactFields form={form} formId="contact-edit" companies={companies} onSubmit={(values) => save.mutate(values)} />
       </div>

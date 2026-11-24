@@ -24,6 +24,8 @@ import {
   createLead,
   deleteLead,
   listCompanies,
+  listContacts,
+  listInquiries,
   listInteractions,
   listLeads,
   restoreLead,
@@ -35,6 +37,7 @@ const schema = z.object({
   title: z.string().trim().min(1, "Title is required").max(200),
   status: z.enum(leadStatuses),
   company_id: z.string(),
+  contact_id: z.string(),
   source: z.string().max(120),
   notes: z.string().max(4000),
 });
@@ -48,7 +51,9 @@ const noteSchema = z.object({
 
 type NoteValues = z.infer<typeof noteSchema>;
 
-export function LeadsPanel({ organizationId }: { organizationId: string }) {
+type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string }) => void;
+
+export function LeadsPanel({ organizationId, selectedId: requestedId, onNavigate }: { organizationId: string; selectedId?: string | null; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
@@ -56,14 +61,23 @@ export function LeadsPanel({ organizationId }: { organizationId: string }) {
   const [page, setPage] = useState(1);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
   const leads = useQuery({
-    queryKey: ["leads", organizationId, query, status, page],
+    queryKey: ["leads", organizationId, query, status, page, includeArchived],
     queryFn: () => listLeads(organizationId, { q: query, status, page, includeArchived }),
   });
   const companies = useQuery({
     queryKey: ["companies", organizationId, "options"],
     queryFn: () => listCompanies(organizationId, { pageSize: 100 }),
+  });
+  const contacts = useQuery({
+    queryKey: ["contacts", organizationId, "options"],
+    queryFn: () => listContacts(organizationId, { pageSize: 100 }),
+  });
+  const inquiries = useQuery({
+    queryKey: ["lead-relations", organizationId, selectedId],
+    queryFn: () => listInquiries(organizationId, { pageSize: 100 }),
+    enabled: Boolean(selectedId),
   });
 
   useEffect(() => {
@@ -133,6 +147,9 @@ export function LeadsPanel({ organizationId }: { organizationId: string }) {
           organizationId={organizationId}
           lead={selected}
           companies={companies.data?.items ?? []}
+          contacts={contacts.data?.items ?? []}
+          inquiries={inquiries.data?.items ?? []}
+          onNavigate={onNavigate}
           onChanged={() => void queryClient.invalidateQueries({ queryKey: ["leads", organizationId] })}
           onDeleted={() => {
             setSelectedId(null);
@@ -147,6 +164,7 @@ export function LeadsPanel({ organizationId }: { organizationId: string }) {
       <LeadDialog
         organizationId={organizationId}
         companies={companies.data?.items ?? []}
+        contacts={contacts.data?.items ?? []}
         open={open}
         onOpenChange={setOpen}
         onCreated={(lead) => {
@@ -161,19 +179,21 @@ export function LeadsPanel({ organizationId }: { organizationId: string }) {
 function LeadDialog({
   organizationId,
   companies,
+  contacts,
   open,
   onOpenChange,
   onCreated,
 }: {
   organizationId: string;
   companies: { id: string; name: string }[];
+  contacts: { id: string; full_name: string }[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (lead: Lead) => void;
 }) {
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { title: "", status: "new", company_id: "", source: "", notes: "" },
+    defaultValues: { title: "", status: "new", company_id: "", contact_id: "", source: "", notes: "" },
   });
   const mutation = useMutation({
     mutationFn: (values: FormValues) =>
@@ -181,6 +201,7 @@ function LeadDialog({
         title: values.title.trim(),
         status: values.status,
         company_id: blankToNull(values.company_id),
+        contact_id: blankToNull(values.contact_id),
         source: blankToNull(values.source),
         notes: blankToNull(values.notes),
       }),
@@ -197,7 +218,7 @@ function LeadDialog({
           <DialogTitle>New lead</DialogTitle>
           <DialogDescription>You become the owner. The assistant can read this lead and cannot change it.</DialogDescription>
         </DialogHeader>
-        <LeadFields form={form} companies={companies} onSubmit={(values) => mutation.mutate(values)} />
+        <LeadFields form={form} companies={companies} contacts={contacts} onSubmit={(values) => mutation.mutate(values)} />
         {mutation.isError ? <RequestError error={mutation.error} /> : null}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -212,12 +233,18 @@ function LeadDetail({
   organizationId,
   lead,
   companies,
+  contacts,
+  inquiries,
+  onNavigate,
   onChanged,
   onDeleted,
 }: {
   organizationId: string;
   lead: Lead;
   companies: { id: string; name: string }[];
+  contacts: { id: string; full_name: string }[];
+  inquiries: import("@/lib/records").Inquiry[];
+  onNavigate: Navigate;
   onChanged: () => void;
   onDeleted: () => void;
 }) {
@@ -227,6 +254,7 @@ function LeadDetail({
       title: lead.title,
       status: lead.status,
       company_id: lead.company_id ?? "",
+      contact_id: lead.contact_id ?? "",
       source: lead.source ?? "",
       notes: lead.notes ?? "",
     },
@@ -237,6 +265,7 @@ function LeadDetail({
         title: values.title.trim(),
         status: values.status,
         company_id: blankToNull(values.company_id),
+        contact_id: blankToNull(values.contact_id),
         source: blankToNull(values.source),
         notes: blankToNull(values.notes),
       }),
@@ -264,7 +293,12 @@ function LeadDetail({
         <h2 className="text-base font-semibold">{lead.title}</h2>
         <p className="mt-1 text-sm text-muted-foreground">Owned by the member who created it unless reassigned by the API.</p>
       </div>
-      <LeadFields form={form} formId="lead-edit" companies={companies} onSubmit={(values) => save.mutate(values)} />
+      <div className="border-t border-border pt-3 text-sm"><h3 className="font-medium">Related records</h3><div className="mt-2 grid gap-1">
+        {lead.company_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "companies", id: lead.company_id! })}>{companies.find((item) => item.id === lead.company_id)?.name ?? "Company"}</button> : null}
+        {lead.contact_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "contacts", id: lead.contact_id! })}>{contacts.find((item) => item.id === lead.contact_id)?.full_name ?? "Contact"}</button> : null}
+        {inquiries.filter((item) => item.lead_id === lead.id).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
+      </div></div>
+      <LeadFields form={form} formId="lead-edit" companies={companies} contacts={contacts} onSubmit={(values) => save.mutate(values)} />
       {save.isSuccess ? <p className="text-sm text-muted-foreground">Saved.</p> : null}
       {save.isError ? <RequestError error={save.error} /> : null}
       {remove.isError ? <RequestError error={remove.error} /> : null}
@@ -357,11 +391,13 @@ function LeadScore({ organizationId, leadId }: { organizationId: string; leadId:
 function LeadFields({
   form,
   companies,
+  contacts,
   formId = "lead-create",
   onSubmit,
 }: {
   form: ReturnType<typeof useForm<FormValues>>;
   companies: { id: string; name: string }[];
+  contacts: { id: string; full_name: string }[];
   formId?: string;
   onSubmit: (values: FormValues) => void;
 }) {
@@ -388,6 +424,13 @@ function LeadFields({
       <div className="grid gap-1.5">
         <Label htmlFor={`${formId}-source`}>Source</Label>
         <Input id={`${formId}-source`} {...form.register("source")} />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${formId}-contact`}>Contact</Label>
+        <select id={`${formId}-contact`} className="h-10 rounded-md border border-input bg-background px-3 text-sm" {...form.register("contact_id")}>
+          <option value="">No contact</option>
+          {contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.full_name}</option>)}
+        </select>
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor={`${formId}-notes`}>Notes</Label>

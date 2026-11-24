@@ -35,7 +35,7 @@ export default async function globalTeardown(): Promise<void> {
   }
   try {
     const name = readFileSync(path.resolve(process.cwd(), "../../var/e2e-mailpit.name"), "utf8").trim();
-    execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+    if (name) execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
     unlinkSync(path.resolve(process.cwd(), "../../var/e2e-mailpit.name"));
     unlinkSync(path.resolve(process.cwd(), "../../var/e2e-mailpit.http-port"));
   } catch {

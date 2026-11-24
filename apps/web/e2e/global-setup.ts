@@ -53,7 +53,7 @@ function spawnApi(): Promise<ChildProcess> {
       env: {
         ...process.env,
         ATLAS_E2E_API_PORT: String(apiPort),
-        ATLAS_E2E_WEB_PORT: "3011",
+        ATLAS_E2E_WEB_PORT: process.env.ATLAS_E2E_WEB_PORT ?? "3011",
         ATLAS_E2E_PROVIDER_TRANSPORT: "1",
         ATLAS_E2E_RESEND_TRANSPORT: "1",
         ATLAS_ENVIRONMENT: "development",
@@ -99,6 +99,10 @@ async function startMailpit(): Promise<void> {
   throw new Error("Disposable Mailpit did not become ready");
 }
 
+function mailpitRequired(): boolean {
+  return process.env.ATLAS_E2E_SKIP_MAILPIT !== "1";
+}
+
 function projectPython(): string {
   return process.platform === "win32"
     ? path.join(apiRoot, ".venv", "Scripts", "python.exe")
@@ -132,7 +136,13 @@ export default async function globalSetup(): Promise<void> {
   if (code !== 0) {
     throw new Error("The e2e database was not prepared");
   }
-  await startMailpit();
+  if (mailpitRequired()) {
+    await startMailpit();
+  } else {
+    mailpitPort = 1025;
+    writeFileSync(mailpitFile, "", "utf8");
+    writeFileSync(mailpitHttpFile, "", "utf8");
+  }
   const api = await spawnApi();
   if (api.pid === undefined) {
     throw new Error("The e2e API did not start");

@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { createCompany, deleteCompany, listCompanies, restoreCompany, updateCompany } from "@/lib/records-api";
+import { createCompany, deleteCompany, listCompanies, listContacts, listInquiries, listLeads, restoreCompany, updateCompany } from "@/lib/records-api";
 import { blankToNull, type Company } from "@/lib/records";
 
 const schema = z.object({
@@ -46,17 +46,24 @@ function payload(values: FormValues) {
   };
 }
 
-export function CompaniesPanel({ organizationId }: { organizationId: string }) {
+type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string }) => void;
+
+export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavigate }: { organizationId: string; selectedId?: string | null; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
   const companies = useQuery({
-    queryKey: ["companies", organizationId, query, page],
+    queryKey: ["companies", organizationId, query, page, includeArchived],
     queryFn: () => listCompanies(organizationId, { q: query, page, includeArchived }),
+  });
+  const related = useQuery({
+    queryKey: ["company-relations", organizationId, selectedId],
+    queryFn: async () => Promise.all([listContacts(organizationId, { pageSize: 100 }), listLeads(organizationId, { pageSize: 100 }), listInquiries(organizationId, { pageSize: 100 })]),
+    enabled: Boolean(selectedId),
   });
 
   useEffect(() => {
@@ -133,6 +140,8 @@ export function CompaniesPanel({ organizationId }: { organizationId: string }) {
       <CompanyEditor
         organizationId={organizationId}
         company={selected}
+        related={related.data}
+        onNavigate={onNavigate}
         onDeleted={() => {
           setSelectedId(null);
           void queryClient.invalidateQueries({ queryKey: ["companies", organizationId] });
@@ -198,11 +207,15 @@ function CompanyDialog({
 function CompanyEditor({
   organizationId,
   company,
+  related,
+  onNavigate,
   onSaved,
   onDeleted,
 }: {
   organizationId: string;
   company: Company | null;
+  related?: [{ items: import("@/lib/records").Contact[] }, { items: import("@/lib/records").Lead[] }, { items: import("@/lib/records").Inquiry[] }];
+  onNavigate: Navigate;
   onSaved: () => void;
   onDeleted: () => void;
 }) {
@@ -218,6 +231,8 @@ function CompanyEditor({
       key={company.id}
       organizationId={organizationId}
       company={company}
+      related={related}
+      onNavigate={onNavigate}
       onSaved={onSaved}
       onDeleted={onDeleted}
     />
@@ -227,11 +242,15 @@ function CompanyEditor({
 function CompanyEditorForm({
   organizationId,
   company,
+  related,
+  onNavigate,
   onSaved,
   onDeleted,
 }: {
   organizationId: string;
   company: Company;
+  related?: [{ items: import("@/lib/records").Contact[] }, { items: import("@/lib/records").Lead[] }, { items: import("@/lib/records").Inquiry[] }];
+  onNavigate: Navigate;
   onSaved: () => void;
   onDeleted: () => void;
 }) {
@@ -247,6 +266,15 @@ function CompanyEditorForm({
     <aside className="rounded-[10px] bg-muted p-6">
       <h2 className="text-base font-semibold">{company.name}</h2>
       <p className="mt-1 text-sm text-muted-foreground">Updated {new Date(company.updated_at).toLocaleString()}</p>
+      <div className="mt-4 border-t border-border pt-4">
+        <h3 className="text-sm font-medium">Related records</h3>
+        <div className="mt-2 grid gap-1 text-sm">
+          {related?.[0].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "contacts", id: item.id })}>{item.full_name}</button>)}
+          {related?.[1].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "leads", id: item.id })}>{item.title}</button>)}
+          {related?.[2].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
+          {related && related.every((page) => page.items.every((item) => item.company_id !== company.id)) ? <p className="text-muted-foreground">No linked records yet.</p> : null}
+        </div>
+      </div>
       <div className="mt-4">
         <CompanyFields form={form} formId="company-edit" onSubmit={(values) => save.mutate(values)} />
       </div>

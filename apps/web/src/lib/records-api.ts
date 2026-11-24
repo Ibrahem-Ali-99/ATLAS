@@ -116,6 +116,7 @@ export function listLeads(
     status: params.status,
     page: params.page ?? 1,
     page_size: params.pageSize ?? 20,
+    include_archived: params.includeArchived ? "true" : undefined,
   });
   return apiFetch(organizationPath(organizationId, `/leads${search}`));
 }

@@ -16,13 +16,14 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { createInquiry, deleteInquiry, listCompanies, listInquiries, restoreInquiry, updateInquiry } from "@/lib/records-api";
+import { createInquiry, deleteInquiry, listCompanies, listInquiries, listLeads, restoreInquiry, updateInquiry } from "@/lib/records-api";
 import { blankToNull, type Inquiry } from "@/lib/records";
 
 const schema = z.object({
   subject: z.string().trim().min(1, "Subject is required").max(200),
   body: z.string().trim().min(1, "Body is required").max(8000),
   company_id: z.string(),
+  lead_id: z.string(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -32,24 +33,31 @@ function payload(values: FormValues) {
     subject: values.subject.trim(),
     body: values.body.trim(),
     company_id: blankToNull(values.company_id),
+    lead_id: blankToNull(values.lead_id),
   };
 }
 
-export function InquiriesPanel({ organizationId }: { organizationId: string }) {
+type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string }) => void;
+
+export function InquiriesPanel({ organizationId, selectedId: requestedId, onNavigate }: { organizationId: string; selectedId?: string | null; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
   const inquiries = useQuery({
-    queryKey: ["inquiries", organizationId, query, page],
+    queryKey: ["inquiries", organizationId, query, page, includeArchived],
     queryFn: () => listInquiries(organizationId, { q: query, page, includeArchived }),
   });
   const companies = useQuery({
     queryKey: ["companies", organizationId, "options"],
     queryFn: () => listCompanies(organizationId, { pageSize: 100 }),
+  });
+  const leads = useQuery({
+    queryKey: ["leads", organizationId, "options"],
+    queryFn: () => listLeads(organizationId, { pageSize: 100 }),
   });
 
   useEffect(() => {
@@ -103,6 +111,8 @@ export function InquiriesPanel({ organizationId }: { organizationId: string }) {
           organizationId={organizationId}
           inquiry={selected}
           companies={companies.data?.items ?? []}
+          leads={leads.data?.items ?? []}
+          onNavigate={onNavigate}
           onSaved={() => void queryClient.invalidateQueries({ queryKey: ["inquiries", organizationId] })}
           onDeleted={() => {
             setSelectedId(null);
@@ -117,6 +127,7 @@ export function InquiriesPanel({ organizationId }: { organizationId: string }) {
       <InquiryDialog
         organizationId={organizationId}
         companies={companies.data?.items ?? []}
+        leads={leads.data?.items ?? []}
         open={open}
         onOpenChange={setOpen}
         onCreated={(inquiry) => {
@@ -131,19 +142,21 @@ export function InquiriesPanel({ organizationId }: { organizationId: string }) {
 function InquiryDialog({
   organizationId,
   companies,
+  leads,
   open,
   onOpenChange,
   onCreated,
 }: {
   organizationId: string;
   companies: { id: string; name: string }[];
+  leads: { id: string; title: string }[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (inquiry: Inquiry) => void;
 }) {
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { subject: "", body: "", company_id: "" },
+    defaultValues: { subject: "", body: "", company_id: "", lead_id: "" },
   });
   const mutation = useMutation({
     mutationFn: (values: FormValues) => createInquiry(organizationId, payload(values)),
@@ -160,7 +173,7 @@ function InquiryDialog({
           <DialogTitle>New inquiry</DialogTitle>
           <DialogDescription>Inquiries stay inside this organization.</DialogDescription>
         </DialogHeader>
-        <InquiryFields form={form} companies={companies} onSubmit={(values) => mutation.mutate(values)} />
+        <InquiryFields form={form} companies={companies} leads={leads} onSubmit={(values) => mutation.mutate(values)} />
         {mutation.isError ? <RequestError error={mutation.error} /> : null}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -175,18 +188,22 @@ function InquiryEditor({
   organizationId,
   inquiry,
   companies,
+  leads,
+  onNavigate,
   onSaved,
   onDeleted,
 }: {
   organizationId: string;
   inquiry: Inquiry;
   companies: { id: string; name: string }[];
+  leads: { id: string; title: string }[];
+  onNavigate: Navigate;
   onSaved: () => void;
   onDeleted: () => void;
 }) {
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { subject: inquiry.subject, body: inquiry.body, company_id: inquiry.company_id ?? "" },
+    defaultValues: { subject: inquiry.subject, body: inquiry.body, company_id: inquiry.company_id ?? "", lead_id: inquiry.lead_id ?? "" },
   });
   const save = useMutation({
     mutationFn: (values: FormValues) => updateInquiry(organizationId, inquiry.id, payload(values)),
@@ -197,8 +214,12 @@ function InquiryEditor({
   return (
     <aside className="rounded-[10px] bg-muted p-6">
       <h2 className="text-base font-semibold">{inquiry.subject}</h2>
+      <div className="mt-3 border-t border-border pt-3 text-sm"><h3 className="font-medium">Related records</h3><div className="mt-2 grid gap-1">
+        {inquiry.company_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "companies", id: inquiry.company_id! })}>{companies.find((item) => item.id === inquiry.company_id)?.name ?? "Company"}</button> : null}
+        {inquiry.lead_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "leads", id: inquiry.lead_id! })}>{leads.find((item) => item.id === inquiry.lead_id)?.title ?? "Lead"}</button> : null}
+      </div></div>
       <div className="mt-4">
-        <InquiryFields form={form} formId="inquiry-edit" companies={companies} onSubmit={(values) => save.mutate(values)} />
+        <InquiryFields form={form} formId="inquiry-edit" companies={companies} leads={leads} onSubmit={(values) => save.mutate(values)} />
       </div>
       {save.isSuccess ? <p className="mt-3 text-sm text-muted-foreground">Saved.</p> : null}
       {save.isError ? <div className="mt-3"><RequestError error={save.error} /></div> : null}
@@ -214,11 +235,13 @@ function InquiryEditor({
 function InquiryFields({
   form,
   companies,
+  leads,
   formId = "inquiry-create",
   onSubmit,
 }: {
   form: ReturnType<typeof useForm<FormValues>>;
   companies: { id: string; name: string }[];
+  leads: { id: string; title: string }[];
   formId?: string;
   onSubmit: (values: FormValues) => void;
 }) {
@@ -239,6 +262,13 @@ function InquiryFields({
         <select id={`${formId}-company`} className="h-10 rounded-md border border-input bg-background px-3 text-sm" {...form.register("company_id")}>
           <option value="">No company</option>
           {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+        </select>
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${formId}-lead`}>Lead</Label>
+        <select id={`${formId}-lead`} className="h-10 rounded-md border border-input bg-background px-3 text-sm" {...form.register("lead_id")}>
+          <option value="">No lead</option>
+          {leads.map((lead) => <option key={lead.id} value={lead.id}>{lead.title}</option>)}
         </select>
       </div>
     </form>

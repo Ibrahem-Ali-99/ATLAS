@@ -19,12 +19,18 @@ const tabs = [
 ] as const;
 
 type TabId = (typeof tabs)[number]["id"];
+type RecordTarget = { tab: TabId; id: string };
 
 export function CrmScreen() {
   const { organizationId, organizationName } = useWorkspace();
   const requested = useSearchParams().get("tab");
   const initial = tabs.some((item) => item.id === requested) ? (requested as TabId) : "companies";
   const [tab, setTab] = useState<TabId>(initial);
+  const [target, setTarget] = useState<RecordTarget | null>(null);
+  const navigateTo = (next: RecordTarget) => {
+    setTarget(next);
+    setTab(next.tab);
+  };
   if (!organizationId) {
     return null;
   }
@@ -52,16 +58,16 @@ export function CrmScreen() {
             role="tab"
             aria-selected={tab === item.id}
             variant="ghost"
-            onClick={() => setTab(item.id)}
+          onClick={() => { setTarget(null); setTab(item.id); }}
           >
             {item.label}
           </Button>
         ))}
       </div>
-      {tab === "companies" ? <CompaniesPanel organizationId={organizationId} /> : null}
-      {tab === "contacts" ? <ContactsPanel organizationId={organizationId} /> : null}
-      {tab === "leads" ? <LeadsPanel organizationId={organizationId} /> : null}
-      {tab === "inquiries" ? <InquiriesPanel organizationId={organizationId} /> : null}
+      {tab === "companies" ? <CompaniesPanel key={`companies-${target?.id ?? "none"}`} organizationId={organizationId} selectedId={target?.tab === "companies" ? target.id : null} onNavigate={navigateTo} /> : null}
+      {tab === "contacts" ? <ContactsPanel key={`contacts-${target?.id ?? "none"}`} organizationId={organizationId} selectedId={target?.tab === "contacts" ? target.id : null} onNavigate={navigateTo} /> : null}
+      {tab === "leads" ? <LeadsPanel key={`leads-${target?.id ?? "none"}`} organizationId={organizationId} selectedId={target?.tab === "leads" ? target.id : null} onNavigate={navigateTo} /> : null}
+      {tab === "inquiries" ? <InquiriesPanel key={`inquiries-${target?.id ?? "none"}`} organizationId={organizationId} selectedId={target?.tab === "inquiries" ? target.id : null} onNavigate={navigateTo} /> : null}
     </div>
   );
 }
