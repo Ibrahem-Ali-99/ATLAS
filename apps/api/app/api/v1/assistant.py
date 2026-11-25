@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 from collections.abc import Iterator
 from typing import Annotated, cast
@@ -16,6 +17,7 @@ from app.domains.assistant.schemas import (
     ReplyOut,
 )
 from app.domains.identity.dependencies import CsrfMember, DbSession, Member
+from app.domains.observability.tracing import record_operation
 from app.integrations.language import (
     ChatClient,
     EmbeddingClient,
@@ -89,10 +91,35 @@ def create_message(
         chat,
     )
     _require_model(db, turn, chat)
+    started = time.perf_counter()
     try:
-        return service.complete_turn(db, turn, chat)
+        result = service.complete_turn(db, turn, chat)
+        record_operation(
+            operation="assistant_response",
+            status="escalated" if turn.escalation_reason else "succeeded",
+            organization_id=member.organization.id,
+            latency_ms=round((time.perf_counter() - started) * 1000),
+            provider=getattr(chat, "provider", None),
+            model_name=getattr(chat, "model", None),
+            detail={
+                "grounding": "grounded" if turn.documents or turn.crm_records else "none",
+                "evidence_confidence": turn.evidence_confidence,
+                "escalation_reason": turn.escalation_reason,
+            },
+        )
+        return result
     except AppError as exc:
         service.record_provider_failure(db, turn.conversation, exc.message)
+        record_operation(
+            operation="assistant_response",
+            status="failed",
+            organization_id=member.organization.id,
+            latency_ms=round((time.perf_counter() - started) * 1000),
+            provider=getattr(chat, "provider", None),
+            model_name=getattr(chat, "model", None),
+            error_code=exc.code,
+            detail={"grounding": "failed", "fallback_reason": exc.code},
+        )
         raise
 
 

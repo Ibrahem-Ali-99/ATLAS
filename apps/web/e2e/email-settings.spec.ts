@@ -1,12 +1,10 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
+import { signInAsSeedAdmin } from "./auth";
 
 test("admin manages sandbox email settings and sender domain", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("admin@example.com");
-  await page.getByLabel("Password").fill("change-me-admin");
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await signInAsSeedAdmin(page);
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Integrations" })).toBeVisible();
   await expect(page.getByText("MAILPIT SANDBOX", { exact: true })).toBeVisible();

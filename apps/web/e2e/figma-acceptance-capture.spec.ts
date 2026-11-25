@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
+import { signInAsSeedAdmin } from "./auth";
 
 const screenshotDir = path.resolve(
   process.env.ATLAS_FIGMA_SCREENSHOT_DIR ?? "D:/ATLAS/var/figma-acceptance/screenshots",
@@ -12,17 +13,9 @@ async function capture(page: import("@playwright/test").Page, name: string): Pro
   await page.screenshot({ path: path.join(screenshotDir, name), fullPage: true });
 }
 
-async function signIn(page: import("@playwright/test").Page): Promise<void> {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("admin@example.com");
-  await page.getByLabel("Password").fill("change-me-admin");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
-}
-
 test("capture populated Overview, CRM, and Assistant screens", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await signIn(page);
+  await signInAsSeedAdmin(page);
   await expect(page.getByRole("heading", { name: "Customer activity" })).toBeVisible();
   await capture(page, "overview-desktop.png");
 
@@ -49,10 +42,37 @@ test("capture populated Overview, CRM, and Assistant screens", async ({ page }) 
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/overview");
-  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await expect(page.getByTestId("overview-workspace")).toBeVisible();
   await capture(page, "overview-mobile.png");
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("link", { name: "CRM", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Customer records", exact: true })).toBeVisible();
   await capture(page, "crm-mobile.png");
+});
+
+test("capture all primary product screens at desktop width", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await signInAsSeedAdmin(page);
+
+  const screens = [
+    ["overview", "/overview"],
+    ["crm", "/crm?tab=leads"],
+    ["assistant", "/assistant"],
+    ["workflows", "/workflows"],
+    ["knowledge", "/knowledge"],
+    ["analytics", "/analytics"],
+    ["settings", "/settings"],
+  ] as const;
+
+  for (const [name, route] of screens) {
+    await page.goto(route);
+    if (route === "/workflows") {
+      await expect(page).toHaveURL(/\/workflows$/);
+      await expect(page.getByRole("heading", { name: "Workflows", exact: true })).toBeVisible();
+      await expect(page.getByTestId("workflow-topology")).toBeVisible();
+    }
+    await expect(page.locator("main")).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    await capture(page, `${name}-desktop-1600x1000.png`);
+  }
 });

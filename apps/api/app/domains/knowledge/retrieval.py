@@ -85,14 +85,23 @@ def search_chunks(
     _fuse_text(fused, text_rows)
     _mark_shared_terms(fused, query)
     ranked = sorted(fused.values(), key=lambda item: item.score, reverse=True)
-    evidence = [item for item in ranked if _is_evidence(item)]
+    evidence = [
+        item for item in ranked if _is_evidence(item, settings.rag_vector_only_max_distance)
+    ]
     from app.domains.observability.tracing import record_operation
 
     record_operation(
         operation="retrieval",
         status="succeeded",
         organization_id=organization_id,
-        detail={"count": len(evidence[:limit])},
+        detail={
+            "count": len(evidence[:limit]),
+            "sources": [
+                {"document_id": str(item.chunk.document_id), "score": item.score}
+                for item in evidence[:limit]
+            ],
+            "reason": None if evidence else "no_relevant_evidence",
+        },
     )
     return [_record(item) for item in evidence[:limit]]
 
@@ -140,7 +149,7 @@ def _content_terms(text: str) -> set[str]:
     }
 
 
-def _is_evidence(candidate: _Candidate) -> bool:
+def _is_evidence(candidate: _Candidate, vector_threshold: float = VECTOR_ONLY_MAX_DISTANCE) -> bool:
     """A neighbor is not evidence unless the words overlap or the vectors are close.
 
     Rank position alone is not enough. The nearest passage in a small index can
@@ -149,7 +158,7 @@ def _is_evidence(candidate: _Candidate) -> bool:
 
     if candidate.lexical:
         return True
-    return candidate.distance is not None and candidate.distance <= VECTOR_ONLY_MAX_DISTANCE
+    return candidate.distance is not None and candidate.distance <= vector_threshold
 
 
 def _fuse_vector(

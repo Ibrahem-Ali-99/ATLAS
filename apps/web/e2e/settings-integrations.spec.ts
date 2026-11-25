@@ -1,17 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { signInAsSeedAdmin, signInAsSeedStaff } from "./auth";
 
 const screenshots = "D:/ATLAS/.pytest-tmp/phase2d-screenshots";
 
-async function signIn(page: import("@playwright/test").Page, email: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible({ timeout: 10_000 });
-}
-
 test("admin settings expose editable provider controls and fallback state", async ({ page }) => {
-  await signIn(page, "admin@example.com", "change-me-admin");
+  await signInAsSeedAdmin(page);
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Integrations" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("Administrator access")).toBeVisible();
@@ -27,9 +20,8 @@ test("admin settings expose editable provider controls and fallback state", asyn
   expect(overflow).toBeLessThanOrEqual(1);
   await page.screenshot({ path: `${screenshots}/settings-admin-mobile.png`, fullPage: true });
 });
-
 test("organization selection switches and persists the workspace", async ({ page }) => {
-  await signIn(page, "admin@example.com", "change-me-admin");
+  await signInAsSeedAdmin(page);
   const selector = page.getByLabel("Organization");
   await expect(selector).toBeVisible();
   await expect(selector.locator("option")).toHaveCount(2);
@@ -42,7 +34,7 @@ test("organization selection switches and persists the workspace", async ({ page
 });
 
 test("staff settings are read-only", async ({ page }) => {
-  await signIn(page, "staff@example.com", "change-me-staff");
+  await signInAsSeedStaff(page);
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Integrations" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("Read only").first()).toBeVisible();
@@ -53,7 +45,7 @@ test("staff settings are read-only", async ({ page }) => {
 });
 
 test("admin saves and persists a disposable organization override", async ({ page }) => {
-  await signIn(page, "admin@example.com", "change-me-admin");
+  await signInAsSeedAdmin(page);
   await page.goto("/settings");
   const model = page.getByLabel("Model").first();
   const key = page.getByLabel("API key").first();
@@ -70,7 +62,7 @@ test("admin saves and persists a disposable organization override", async ({ pag
 });
 
 test("admin disable confirmation persists and staff cannot mutate", async ({ page }) => {
-  await signIn(page, "admin@example.com", "change-me-admin");
+  await signInAsSeedAdmin(page);
   await page.goto("/settings");
   await page.on("dialog", (dialog) => dialog.accept());
   if (await page.getByRole("button", { name: "Enable" }).count()) {
@@ -83,7 +75,7 @@ test("admin disable confirmation persists and staff cannot mutate", async ({ pag
   await expect(page.getByText(/disabled/).first()).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
-  await signIn(page, "staff@example.com", "change-me-staff");
+  await signInAsSeedStaff(page);
   await page.goto("/settings");
   await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Disable" })).toHaveCount(0);
@@ -91,7 +83,7 @@ test("admin disable confirmation persists and staff cannot mutate", async ({ pag
 });
 
 test("indexed knowledge blocks incompatible embedding changes", async ({ page }) => {
-  await signIn(page, "admin@example.com", "change-me-admin");
+  await signInAsSeedAdmin(page);
   await page.getByLabel("Organization").selectOption({ label: "Northwind" });
   await expect(page.getByLabel("Organization").locator("option:checked")).toHaveText("Northwind");
   await page.goto("/settings");
@@ -106,7 +98,7 @@ test("indexed knowledge blocks incompatible embedding changes", async ({ page })
 });
 
 test("provider connection verification reports success, invalid credentials, and timeout", async ({ page }) => {
-  await signIn(page, "admin@example.com", "change-me-admin");
+  await signInAsSeedAdmin(page);
   await page.goto("/settings");
   const key = page.getByLabel("API key").first();
   const save = page.getByRole("button", { name: "Save" }).first();
@@ -131,7 +123,7 @@ test("provider connection verification reports success, invalid credentials, and
 });
 
 test("stale configuration edits show a conflict without overwriting the newer update", async ({ page, browser }) => {
-  await signIn(page, "admin@example.com", "change-me-admin");
+  await signInAsSeedAdmin(page);
   await page.goto("/settings");
   const initialModel = page.getByLabel("Model").first();
   if (await page.getByRole("button", { name: "Save" }).count()) {
@@ -145,7 +137,7 @@ test("stale configuration edits show a conflict without overwriting the newer up
   }
   const sessionB = await browser.newContext();
   const pageB = await sessionB.newPage();
-  await signIn(pageB, "admin@example.com", "change-me-admin");
+  await signInAsSeedAdmin(pageB);
   await pageB.goto("/settings");
   const modelB = pageB.getByLabel("Model").first();
   await modelB.fill("session-b-model");
@@ -167,7 +159,7 @@ test("stale configuration edits show a conflict without overwriting the newer up
 });
 
 test("invalid CSRF mutation is rejected without a success state", async ({ page }) => {
-  await signIn(page, "admin@example.com", "change-me-admin");
+  await signInAsSeedAdmin(page);
   await page.goto("/settings");
   await page.route("**/api/v1/organizations/*/integration-configs/chat", async (route) => {
     const headers = { ...route.request().headers() };

@@ -9,6 +9,7 @@ import { DataScopeControl } from "@/components/data-scope";
 import { RequestError } from "@/components/request-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAnalytics, type AnalyticsSnapshot, type StatusCount } from "@/lib/intelligence";
+import { listTeam } from "@/lib/organization";
 import { isDataScope, type DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
 
@@ -16,6 +17,12 @@ export function AnalyticsScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
   const [scopeByOrganization, setScopeByOrganization] = useState<Record<string, DataScope>>({});
+  const [period, setPeriod] = useState("30d");
+  const [channel, setChannel] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [ownerUserId, setOwnerUserId] = useState("");
+  const team = useQuery({ queryKey: ["analytics-team", organizationId], queryFn: () => listTeam(organizationId ?? ""), enabled: Boolean(organizationId) });
   const scope = organizationId ? scopeByOrganization[organizationId] ?? storedScope(organizationId) : "all";
   const selectScope = (next: DataScope) => {
     if (organizationId) {
@@ -24,8 +31,8 @@ export function AnalyticsScreen() {
     }
   };
   const analytics = useQuery({
-    queryKey: ["analytics", organizationId, scope],
-    queryFn: () => getAnalytics(organizationId ?? "", scope),
+    queryKey: ["analytics", organizationId, scope, period, channel, startDate, endDate, ownerUserId],
+    queryFn: () => getAnalytics(organizationId ?? "", scope, { period, channel, startDate, endDate, ownerUserId }),
     enabled: Boolean(organizationId),
   });
   if (!organizationId || analytics.isPending) {
@@ -34,17 +41,19 @@ export function AnalyticsScreen() {
   if (analytics.isError) {
     return <RequestError error={analytics.error} />;
   }
-  return <AnalyticsBody data={analytics.data} scope={scope} onScope={selectScope} />;
+  return <AnalyticsBody data={analytics.data} scope={scope} onScope={selectScope} period={period} onPeriod={setPeriod} channel={channel} onChannel={setChannel} ownerUserId={ownerUserId} onOwner={setOwnerUserId} team={team.data ?? []} startDate={startDate} endDate={endDate} onStartDate={setStartDate} onEndDate={setEndDate} />;
 }
 
 function AnalyticsBody({
   data,
   scope,
   onScope,
+  period, onPeriod, channel, onChannel, ownerUserId, onOwner, team, startDate, endDate, onStartDate, onEndDate,
 }: {
   data: AnalyticsSnapshot;
   scope: DataScope;
   onScope: (scope: DataScope) => void;
+  period: string; onPeriod: (value: string) => void; channel: string; onChannel: (value: string) => void; ownerUserId: string; onOwner: (value: string) => void; team: { user_id: string; full_name: string; is_active: boolean }[]; startDate: string; endDate: string; onStartDate: (value: string) => void; onEndDate: (value: string) => void;
 }) {
   const rate = data.conversion.rate === null ? "Not enough closed leads" : `${Math.round(data.conversion.rate * 1000) / 10}%`;
   const automation =
@@ -54,6 +63,7 @@ function AnalyticsBody({
       <div>
         <h1 className="text-[31px] leading-none text-foreground">Analytics</h1>
         <DataScopeControl value={scope} onChange={onScope} advanced />
+        <div className="mt-3 flex flex-wrap gap-2"><select aria-label="Analytics date range" className="h-9 rounded-md bg-secondary px-3 text-sm" value={period} onChange={(e) => onPeriod(e.target.value)}><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="90d">Last 90 days</option><option value="custom">Custom range</option></select><select aria-label="Analytics channel" className="h-9 rounded-md bg-secondary px-3 text-sm" value={channel} onChange={(e) => onChannel(e.target.value)}><option value="">All channels</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="webchat">Web chat</option></select><select aria-label="Analytics opportunity owner" className="h-9 rounded-md bg-secondary px-3 text-sm" value={ownerUserId} onChange={(e) => onOwner(e.target.value)}><option value="">All owners</option>{team.filter((item) => item.is_active).map((item) => <option key={item.user_id} value={item.user_id}>{item.full_name}</option>)}</select>{period === "custom" ? <><input aria-label="Analytics start date" type="date" value={startDate} onChange={(e) => onStartDate(e.target.value)} /><input aria-label="Analytics end date" type="date" value={endDate} onChange={(e) => onEndDate(e.target.value)} /></> : null}</div>
         <details className="mt-3 max-w-3xl text-xs leading-5 text-subtle">
           <summary className="cursor-pointer">About this view</summary>
           <p className="mt-2">{data.provenance_notice}</p>
@@ -78,6 +88,13 @@ function AnalyticsBody({
         />
         <Metric label="Automation" value={automation} detail={data.automation.definition} />
       </div>
+      {data.sales ? <section className="rounded-[10px] bg-muted p-4" aria-label="Sales analytics"><h2 className="text-base text-foreground">Opportunity pipeline</h2><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><Metric label="Opportunities" value={String(data.sales.opportunities_total)} detail={`${data.sales.won.count} won · ${data.sales.lost.count} lost`} /><Metric label="Win rate" value={data.sales.win_rate === null ? "Unavailable" : `${Math.round(data.sales.win_rate * 100)}%`} detail="Won opportunities / all opportunities in period." /><Metric label="Won value" value={data.sales.won.value.toLocaleString()} detail="Persisted value; currency totals remain separate below." /><Metric label="Avg won value" value={data.sales.average_won_value === null ? "Unavailable" : data.sales.average_won_value.toLocaleString()} detail="Average among won opportunities." /><Metric label="Lead conversion" value={data.sales.lead_to_opportunity.rate === null ? "Unavailable" : `${Math.round(data.sales.lead_to_opportunity.rate * 100)}%`} detail={`${data.sales.lead_to_opportunity.converted_leads}/${data.sales.lead_to_opportunity.eligible_leads} distinct leads.`} /></div><ul className="mt-4 space-y-2">{data.sales.by_stage.map((stage) => <li key={stage.stage} className="flex justify-between text-sm"><span>{stage.stage}</span><span className="tabular-nums text-muted-foreground">{stage.count} · {stage.value.toLocaleString()}</span></li>)}</ul></section> : null}
+      {data.support ? <Metric label="First response" value={data.support.average_first_response_seconds === null ? "Unavailable" : `${Math.round(data.support.average_first_response_seconds / 60)} min`} detail={`${data.support.first_response_sample_size} conversations with a persisted response.`} /> : null}
+      {data.sales ? <TrendSection title="Pipeline value by stage and currency" rows={data.sales.stage_trend.map((item) => ({ day: item.day, label: `${item.stage} · ${item.currency}`, value: item.value }))} unit="value" /> : null}
+      {data.support ? <TrendSection title="Conversation volume by channel" rows={data.support.volume_trend.map((item) => ({ day: item.day, label: item.channel, value: item.count }))} unit="conversations" /> : null}
+      {data.ai ? <TrendSection title="AI requests and failures" rows={data.ai.trend.map((item) => ({ day: item.day, label: item.status, value: item.count }))} unit="requests" /> : null}
+      {data.workflow_performance ? <section className="rounded-[10px] bg-muted p-4" aria-label="Workflow performance"><h2 className="text-base text-foreground">Workflow performance</h2><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3"><Metric label="Executions" value={String(data.workflow_performance.total)} detail={`${data.workflow_performance.pending} pending · ${data.workflow_performance.running} running.`} /><Metric label="Workflow success" value={data.workflow_performance.success_rate === null ? "Unavailable" : `${Math.round(data.workflow_performance.success_rate * 100)}%`} detail={`${data.workflow_performance.successful} successful / ${data.workflow_performance.denominator} terminal executions.`} /><Metric label="Failed workflows" value={String(data.workflow_performance.failed)} detail="Failed and needs-attention terminal runs." /></div><TrendSection title="Successful versus failed executions" rows={data.workflow_performance.trend.filter((item) => ["completed", "failed", "needs_attention"].includes(item.status)).map((item) => ({ day: item.day, label: item.status, value: item.count }))} unit="runs" /></section> : null}
+      {data.support || data.ai || data.evaluation ? <div className="grid gap-3 md:grid-cols-3">{data.support ? <Metric label="Human handoffs" value={String(data.support.handoffs)} detail={`${data.support.by_channel.length} channel/status groups.`} /> : null}{data.ai ? <Metric label="AI requests" value={String(data.ai.requests)} detail={data.ai.failure_rate === null ? "No recorded AI operations." : `${Math.round(data.ai.failure_rate * 1000) / 10}% failed`} /> : null}{data.evaluation ? <Metric label="Evaluation pass rate" value={data.evaluation.pass_rate === null ? "Unavailable" : `${Math.round(data.evaluation.pass_rate * 1000) / 10}%`} detail={`${data.evaluation.passed} of ${data.evaluation.executed} cases passed.`} /> : null}</div> : null}
       <section className="rounded-[10px] bg-muted p-4">
         <h2 className="text-base text-foreground">Lead pipeline</h2>
         <p className="mt-2 text-xs leading-5 text-subtle">{data.qualification.definition}</p>
@@ -150,6 +167,11 @@ function PipelineRow({ item, max }: { item: StatusCount; max: number }) {
       </div>
     </li>
   );
+}
+
+function TrendSection({ title, rows, unit }: { title: string; rows: { day: string; label: string; value: number }[]; unit: string }) {
+  const max = Math.max(...rows.map((row) => row.value), 0);
+  return <section className="rounded-[10px] bg-muted p-4" aria-label={title}><h2 className="text-base text-foreground">{title}</h2>{rows.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">No persisted data is available for this period.</p> : <div className="mt-4 space-y-3">{rows.slice(-30).map((row, index) => <div key={`${row.day}-${row.label}-${index}`}><div className="flex justify-between gap-3 text-xs"><span>{row.day} · {row.label}</span><span className="tabular-nums text-muted-foreground">{row.value.toLocaleString()} {unit}</span></div><div className="mt-1 h-2 rounded-full bg-secondary"><div className="h-2 rounded-full bg-primary" style={{ width: `${max ? Math.max(4, (row.value / max) * 100) : 0}%` }} /></div></div>)}</div>}</section>;
 }
 
 const chartTooltip = {

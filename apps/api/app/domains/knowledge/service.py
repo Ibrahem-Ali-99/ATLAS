@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import structlog
@@ -10,7 +11,13 @@ from app.core.database import SessionLocal
 from app.core.errors import AppError
 from app.domains.knowledge.chunking import chunk_pages
 from app.domains.knowledge.extract import extract_text
-from app.domains.knowledge.models import Chunk, Document, DocumentStatus
+from app.domains.knowledge.models import (
+    Chunk,
+    Document,
+    DocumentStatus,
+    IngestionJob,
+    IngestionJobStatus,
+)
 from app.domains.knowledge.vectors import store_chunk_embedding
 from app.domains.provenance.origin import Origin
 from app.integrations.language import EmbeddingClient, get_embedding_client
@@ -91,6 +98,11 @@ def store_upload(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(payload)
     document.storage_path = str(path)
+    db.add(IngestionJob(
+        organization_id=organization_id,
+        document_id=document.id,
+        idempotency_key=f"document:{document.id}:v1",
+    ))
     db.commit()
     db.refresh(document)
     return document
@@ -99,6 +111,7 @@ def store_upload(
 def delete_document(db: Session, organization_id: uuid.UUID, document_id: uuid.UUID) -> None:
     document = get_document(db, organization_id, document_id)
     path = Path(document.storage_path)
+    db.execute(delete(IngestionJob).where(IngestionJob.document_id == document.id))
     db.delete(document)
     db.commit()
     _unlink_stored(path)
@@ -108,6 +121,19 @@ def mark_reindex(db: Session, organization_id: uuid.UUID, document_id: uuid.UUID
     document = get_document(db, organization_id, document_id)
     document.status = DocumentStatus.pending
     document.error_message = None
+    existing = db.scalar(select(IngestionJob).where(IngestionJob.document_id == document.id))
+    if existing is None:
+        db.add(IngestionJob(
+            organization_id=organization_id,
+            document_id=document.id,
+            idempotency_key=f"document:{document.id}:v1",
+        ))
+    else:
+        existing.status = IngestionJobStatus.queued
+        existing.next_attempt_at = datetime.now(UTC)
+        existing.error_message = None
+        existing.lease_owner = None
+        existing.lease_expires_at = None
     db.commit()
     db.refresh(document)
     return document
@@ -142,12 +168,167 @@ def resume_incomplete_documents(embedder: EmbeddingClient | None = None) -> int:
         )
     finally:
         db.close()
-    for document_id in document_ids:
-        ingest_document(document_id, embedder)
+    db = SessionLocal()
+    try:
+        for document_id in document_ids:
+            document = db.get(Document, document_id)
+            if document is None:
+                continue
+            existing = db.scalar(
+                select(IngestionJob).where(IngestionJob.document_id == document_id)
+            )
+            if existing is None:
+                db.add(IngestionJob(
+                    organization_id=document.organization_id,
+                    document_id=document_id,
+                    idempotency_key=f"document:{document_id}:v1",
+                ))
+            elif existing.status in {
+                IngestionJobStatus.succeeded,
+                IngestionJobStatus.failed,
+            }:
+                existing.status = IngestionJobStatus.queued
+                existing.next_attempt_at = datetime.now(UTC)
+                existing.error_message = None
+                existing.lease_owner = None
+                existing.lease_expires_at = None
+            elif (
+                existing.status == IngestionJobStatus.running
+                and existing.lease_expires_at is not None
+                and existing.lease_expires_at < datetime.now(UTC)
+            ):
+                existing.status = IngestionJobStatus.retrying
+                existing.lease_owner = None
+                existing.lease_expires_at = None
+                existing.next_attempt_at = datetime.now(UTC)
+        db.commit()
+    finally:
+        db.close()
     return len(document_ids)
 
 
-def ingest_document(document_id: uuid.UUID, embedder: EmbeddingClient | None = None) -> None:
+def claim_ingestion_job(worker_id: str, lease_seconds: int = 60) -> IngestionJob | None:
+    db = SessionLocal()
+    try:
+        now = datetime.now(UTC)
+        job = db.scalar(
+            select(IngestionJob)
+            .where(
+                IngestionJob.status.in_(
+                    [
+                        IngestionJobStatus.queued,
+                        IngestionJobStatus.retrying,
+                        IngestionJobStatus.running,
+                    ]
+                ),
+                IngestionJob.next_attempt_at <= now,
+                (IngestionJob.lease_expires_at.is_(None) | (IngestionJob.lease_expires_at < now)),
+            )
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        if job is None:
+            db.rollback()
+            return None
+        job.status = IngestionJobStatus.running
+        job.attempts += 1
+        job.lease_owner = worker_id
+        job.lease_expires_at = now + timedelta(seconds=lease_seconds)
+        job.heartbeat_at = now
+        db.commit()
+        db.refresh(job)
+        return job
+    finally:
+        db.close()
+
+
+def retry_ingestion_job(
+    db: Session, organization_id: uuid.UUID, document_id: uuid.UUID
+) -> Document:
+    document = get_document(db, organization_id, document_id)
+    job = db.scalar(
+        select(IngestionJob).where(
+            IngestionJob.document_id == document.id,
+            IngestionJob.organization_id == organization_id,
+        ).with_for_update()
+    )
+    if job is None:
+        raise AppError(
+            404, "ingestion_job_not_found", "No ingestion job exists for this document"
+        )
+    if job.status not in {IngestionJobStatus.failed, IngestionJobStatus.retrying}:
+        raise AppError(
+            409,
+            "ingestion_retry_not_allowed",
+            "This ingestion job is not eligible for retry",
+        )
+    job.status = IngestionJobStatus.queued
+    job.next_attempt_at = datetime.now(UTC)
+    job.error_message = None
+    job.lease_owner = None
+    job.lease_expires_at = None
+    document.status = DocumentStatus.pending
+    document.error_message = None
+    db.commit()
+    db.refresh(document)
+    return document
+
+
+def run_ingestion_job(
+    job: IngestionJob, worker_id: str, embedder: EmbeddingClient | None = None
+) -> None:
+    ingest_document(job.document_id, embedder, job_id=job.id, worker_id=worker_id)
+    db = SessionLocal()
+    try:
+        document = db.get(Document, job.document_id)
+        current = db.get(IngestionJob, job.id)
+        if current is None:
+            return
+        now = datetime.now(UTC)
+        owns_lease = db.scalar(
+            select(IngestionJob.id).where(
+                IngestionJob.id == job.id,
+                IngestionJob.status == IngestionJobStatus.running,
+                IngestionJob.lease_owner == worker_id,
+                IngestionJob.lease_expires_at > now,
+            )
+        )
+        if owns_lease is None:
+            logger.warning("knowledge_ingestion_stale_completion", job_id=str(job.id))
+            db.rollback()
+            return
+        current.lease_owner = None
+        current.lease_expires_at = None
+        current.heartbeat_at = now
+        if document is not None and document.status == DocumentStatus.ready:
+            current.status = IngestionJobStatus.succeeded
+            current.error_message = None
+        else:
+            current.error_message = (
+                document.error_message
+                if document and document.error_message
+                else "Document was removed"
+            )[:500]
+            current.status = (
+                IngestionJobStatus.failed
+                if current.attempts >= current.max_attempts
+                else IngestionJobStatus.retrying
+            )
+            current.next_attempt_at = datetime.now(UTC) + timedelta(
+                seconds=min(300, 2**current.attempts)
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
+def ingest_document(
+    document_id: uuid.UUID,
+    embedder: EmbeddingClient | None = None,
+    *,
+    job_id: uuid.UUID | None = None,
+    worker_id: str | None = None,
+) -> None:
     db = SessionLocal()
     try:
         document = db.get(Document, document_id)
@@ -197,6 +378,19 @@ def ingest_document(document_id: uuid.UUID, embedder: EmbeddingClient | None = N
         )
         document.status = DocumentStatus.ready
         document.error_message = None
+        if job_id is not None and worker_id is not None:
+            lease_ok = db.scalar(
+                select(IngestionJob.id).where(
+                    IngestionJob.id == job_id,
+                    IngestionJob.status == IngestionJobStatus.running,
+                    IngestionJob.lease_owner == worker_id,
+                    IngestionJob.lease_expires_at > datetime.now(UTC),
+                )
+            )
+            if lease_ok is None:
+                db.rollback()
+                logger.warning("knowledge_ingestion_lease_lost", job_id=str(job_id))
+                return
         db.commit()
     except AppError as exc:
         db.rollback()

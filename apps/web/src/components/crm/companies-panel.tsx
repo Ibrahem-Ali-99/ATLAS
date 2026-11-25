@@ -53,7 +53,7 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [includeArchived, setIncludeArchived] = useState(false);
+  const [includeArchived, setIncludeArchived] = useState(Boolean(requestedId));
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
   const companies = useQuery({
@@ -77,9 +77,9 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
   const selected = companies.data?.items.find((item) => item.id === selectedId) ?? null;
 
   return (
-    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
-      <section className="rounded-[10px] bg-muted">
-        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+    <div className={selected ? "grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.8fr)]" : "min-w-0"}>
+      <section className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_18px_60px_rgba(0,0,0,0.16)]">
+        <div className="flex flex-col gap-3 border-b border-border/80 bg-card/80 p-4 sm:flex-row sm:items-center">
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -119,10 +119,10 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
                 <TableRow
                   key={company.id}
                   className={company.id === selectedId ? "bg-accent/40" : undefined}
-                  onClick={() => setSelectedId(company.id)}
+                  onClick={() => onNavigate({ tab: "companies", id: company.id })}
                 >
                   <TableCell>
-                    <button type="button" className="text-left font-medium" onClick={() => setSelectedId(company.id)}>
+                    <button type="button" className="text-left font-medium" onClick={() => onNavigate({ tab: "companies", id: company.id })}>
                       {company.name}
                     </button>
                   </TableCell>
@@ -263,7 +263,7 @@ function CompanyEditorForm({
   const restore = useMutation({ mutationFn: () => restoreCompany(organizationId, company.id), onSuccess: onDeleted });
 
   return (
-    <aside className="rounded-[10px] bg-muted p-6">
+    <aside className="rounded-[10px] bg-muted p-6" data-testid="crm-detail-companies" data-record-id={company.id} data-archived={company.archived_at ? "true" : "false"}>
       <h2 className="text-base font-semibold">{company.name}</h2>
       <p className="mt-1 text-sm text-muted-foreground">Updated {new Date(company.updated_at).toLocaleString()}</p>
       <div className="mt-4 border-t border-border pt-4">

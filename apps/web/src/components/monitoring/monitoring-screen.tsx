@@ -73,6 +73,28 @@ export function MonitoringScreen() {
           detail={data.cost_notice}
         />
       </div>
+      <section className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-2 rounded-[10px] bg-muted p-4">
+          <h2 className="text-base text-foreground">Worker health</h2>
+          {data.workers.length === 0 ? <p className="text-sm text-muted-foreground">No worker heartbeat has been recorded.</p> : null}
+          {data.workers.map((worker) => (
+            <div key={worker.id} className="flex items-center justify-between gap-3 text-sm">
+              <span>{worker.kind}</span>
+              <span className={worker.status === "stalled" || worker.status === "error" ? "text-destructive" : "text-success"}>{worker.status}</span>
+            </div>
+          ))}
+        </div>
+        <div className="space-y-2 rounded-[10px] bg-muted p-4">
+          <h2 className="text-base text-foreground">Knowledge jobs</h2>
+          {data.ingestion_jobs.length === 0 ? <p className="text-sm text-muted-foreground">No ingestion jobs are recorded.</p> : null}
+          {data.ingestion_jobs.slice(0, 8).map((job) => (
+            <div key={job.id} className="flex items-center justify-between gap-3 text-sm">
+              <span className="truncate">{job.document_id}</span>
+              <span className={job.status === "failed" ? "text-destructive" : "text-muted-foreground"}>{job.status} · {job.attempts}/{job.max_attempts}</span>
+            </div>
+          ))}
+        </div>
+      </section>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
         <section className="space-y-3 rounded-[10px] bg-muted p-4">
           <h2 className="text-base text-foreground">Historical failures</h2>

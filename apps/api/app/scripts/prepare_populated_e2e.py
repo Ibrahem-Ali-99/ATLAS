@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 import sys
 
 from sqlalchemy import delete, func, select
@@ -30,10 +29,12 @@ def main() -> int:
     parser.add_argument("--cleanup", action="store_true")
     parser.add_argument("--verify", action="store_true")
     args = parser.parse_args()
+    from app.scripts.seed import SeedSettings
     from tests.bootstrap import postgres_url
 
     os.environ["ATLAS_DATABASE_URL"] = postgres_url("atlas_e2e")
     from app.core.database import SessionLocal
+    from app.scripts.populate_workspace import populate, purge
 
     db = SessionLocal()
     try:
@@ -43,22 +44,7 @@ def main() -> int:
         )
         if args.cleanup:
             if organization is not None:
-                db.commit()
-                result = subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "app.scripts.populate_workspace",
-                        "--organization-slug",
-                        args.organization_slug,
-                        "--confirm-sample-workspace",
-                        "--purge",
-                    ],
-                    check=False,
-                )
-                if result.returncode != 0:
-                    raise AppError(500, "cleanup_failed", "The sample purge command failed.")
-                db.expire_all()
+                purge(db, organization)
                 db.execute(delete(Organization).where(Organization.id == organization.id))
         elif args.verify:
             if organization is None:
@@ -115,24 +101,19 @@ def main() -> int:
                 organization = upsert_organization(
                     db, name="ATLAS Sample Workspace", slug=args.organization_slug
                 )
-            admin = db.scalar(select(User).where(User.email == "admin@example.com"))
-            if admin is None:
-                raise AppError(422, "e2e_admin_missing", "The disposable admin fixture is missing.")
-            upsert_membership(db, user=admin, organization=organization, role=MembershipRole.admin)
-            db.commit()
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "app.scripts.populate_workspace",
-                    "--organization-slug",
-                    args.organization_slug,
-                    "--confirm-sample-workspace",
-                ],
-                check=False,
+            seed_settings = SeedSettings()
+            admin = db.scalar(
+                select(User).where(User.email == str(seed_settings.seed_admin_email).lower())
             )
-            if result.returncode != 0:
-                raise AppError(500, "population_failed", "The sample population command failed.")
+            if admin is None:
+                raise AppError(
+                    422,
+                    "e2e_admin_missing",
+                    "The disposable admin fixture is missing for the configured seed identity.",
+                )
+            upsert_membership(db, user=admin, organization=organization, role=MembershipRole.admin)
+            populate(db, organization)
+            db.commit()
             print(f"e2e_population_ok slug={args.organization_slug}")
             return 0
         db.commit()

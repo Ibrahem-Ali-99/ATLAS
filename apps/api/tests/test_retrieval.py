@@ -10,7 +10,11 @@ from app.core.errors import AppError
 from app.domains.identity.models import MembershipRole
 from app.domains.knowledge import retrieval
 from app.domains.knowledge.models import Chunk, Document, DocumentStatus
-from app.domains.knowledge.service import ingest_document, resume_incomplete_documents
+from app.domains.knowledge.service import (
+    claim_ingestion_job,
+    resume_incomplete_documents,
+    run_ingestion_job,
+)
 from app.integrations.language import get_embedding_client
 from tests.ai_clients import HashEmbeddingClient
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
@@ -23,6 +27,15 @@ class _BrokenEmbedder:
         raise AppError(
             502, "embedding_failed", "The embedding provider returned an unexpected response"
         )
+
+
+def _process_one(embedder: object | None = None) -> bool:
+    worker_id = f"test-worker-{uuid.uuid4()}"
+    job = claim_ingestion_job(worker_id)
+    if job is None:
+        return False
+    run_ingestion_job(job, worker_id, embedder)  # type: ignore[arg-type]
+    return True
 
 
 @pytest.fixture
@@ -87,6 +100,9 @@ def test_retrieval_positive_negative_ambiguous_and_recovery(
         "The office storage closet holds paper and spare chairs.",
     )
     upload("cafeteria-menu.txt", "The cafeteria menu lists soup and bread.")
+    assert _process_one(HashEmbeddingClient())
+    assert _process_one(HashEmbeddingClient())
+    assert _process_one(HashEmbeddingClient())
 
     def titles(query: str) -> list[str]:
         found = embedded_client.get(
@@ -116,6 +132,7 @@ def test_retrieval_positive_negative_ambiguous_and_recovery(
     document.status = DocumentStatus.processing
     db.commit()
     assert resume_incomplete_documents(HashEmbeddingClient()) == 1
+    assert _process_one(HashEmbeddingClient())
     db.expire_all()
     resumed = db.get(Document, uuid.UUID(harbor_id))
     assert resumed is not None
@@ -129,10 +146,20 @@ def test_retrieval_positive_negative_ambiguous_and_recovery(
     resumed.error_message = None
     db.commit()
     assert resume_incomplete_documents(HashEmbeddingClient()) == 1
+    assert _process_one(HashEmbeddingClient())
     chunks = embedded_client.get(f"/api/v1/organizations/{org}/documents/{harbor_id}/chunks")
     assert len(chunks.json()["items"]) == 1
 
-    ingest_document(uuid.UUID(office_id), _BrokenEmbedder())
+    office = db.get(Document, uuid.UUID(office_id))
+    assert office is not None
+    office.status = DocumentStatus.pending
+    office.error_message = None
+    db.commit()
+    assert resume_incomplete_documents(HashEmbeddingClient()) == 1
+    office_worker = f"test-worker-{uuid.uuid4()}"
+    office_job = claim_ingestion_job(office_worker)
+    assert office_job is not None
+    run_ingestion_job(office_job, office_worker, _BrokenEmbedder())
     db.expire_all()
     office = db.get(Document, uuid.UUID(office_id))
     assert office is not None

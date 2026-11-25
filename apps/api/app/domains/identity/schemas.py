@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -48,6 +49,60 @@ class OrganizationAccessResponse(BaseModel):
     organization_id: uuid.UUID
     role: MembershipRole
     access: Literal["member", "admin"]
+
+
+class OrganizationUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class TeamMemberOut(BaseModel):
+    membership_id: uuid.UUID
+    user_id: uuid.UUID
+    email: EmailStr
+    full_name: str
+    role: MembershipRole
+    joined_at: datetime
+    is_active: bool
+
+
+class RoleUpdate(BaseModel):
+    role: MembershipRole
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class InvitationCreate(BaseModel):
+    email: EmailStr
+
+
+class InvitationCreated(BaseModel):
+    id: uuid.UUID
+    email: EmailStr
+    role: Literal["staff"]
+    expires_at: datetime
+    token: str
+
+
+class InvitationStatusOut(BaseModel):
+    id: uuid.UUID
+    email: EmailStr
+    role: Literal["staff"]
+    expires_at: datetime
+    accepted_at: datetime | None
+    created_at: datetime
+
+
+class InvitationAccept(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+    full_name: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=8, max_length=128)
 
 
 class HealthResponse(BaseModel):

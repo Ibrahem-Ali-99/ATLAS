@@ -1,9 +1,11 @@
 """Administrator APIs for organization-scoped integration configuration."""
+# ruff: noqa: E501
 
 import json
 import uuid
 from datetime import UTC, datetime
 
+import httpx
 from fastapi import APIRouter
 from sqlalchemy import select
 
@@ -60,11 +62,13 @@ def create_email_domain(
 
 @router.get("/email-domains", response_model=list[EmailDomainOut])
 def list_email_domains(admin: Admin, db: DbSession) -> list[EmailDomainVerification]:
-    return list(db.scalars(
-        select(EmailDomainVerification)
-        .where(EmailDomainVerification.organization_id == admin.organization.id)
-        .order_by(EmailDomainVerification.domain)
-    ).all())
+    return list(
+        db.scalars(
+            select(EmailDomainVerification)
+            .where(EmailDomainVerification.organization_id == admin.organization.id)
+            .order_by(EmailDomainVerification.domain)
+        ).all()
+    )
 
 
 @router.get("/email-domains/{domain_id}", response_model=EmailDomainOut)
@@ -315,6 +319,43 @@ def verify(
             )
             if not result.verified:
                 raise AppError(502, "smtp_verification_failed", result.detail)
+        elif integration_type == IntegrationType.whatsapp:
+            credentials = open_integration_secret(record.encrypted_credentials or "")
+            try:
+                credential_data = json.loads(credentials)
+            except json.JSONDecodeError as exc:
+                raise AppError(
+                    422, "whatsapp_credentials_invalid", "WhatsApp credentials are invalid"
+                ) from exc
+            token = (
+                credential_data.get("access_token") if isinstance(credential_data, dict) else None
+            )
+            phone_id = record.config.get("phone_number_id")
+            if (
+                not isinstance(token, str)
+                or not token
+                or not isinstance(phone_id, str)
+                or not phone_id
+            ):
+                raise AppError(
+                    422,
+                    "whatsapp_configuration_incomplete",
+                    "WhatsApp phone number ID and access token are required",
+                )
+            try:
+                response = httpx.get(
+                    f"https://graph.facebook.com/v21.0/{phone_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10.0,
+                )
+            except httpx.TimeoutException as exc:
+                raise AppError(
+                    504, "whatsapp_provider_timeout", "WhatsApp connection test timed out"
+                ) from exc
+            if response.status_code >= 400:
+                raise AppError(
+                    502, "whatsapp_provider_error", "WhatsApp rejected the connection test"
+                )
         else:
             raise AppError(
                 422, "verification_unsupported", "This integration has no provider test."

@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
+import { signInAsSeedAdmin, signInAsSeedStaff } from "./auth";
 
 const artifactDir = path.resolve(process.env.ATLAS_E2E_ARTIFACT_DIR ?? path.resolve(process.cwd(), "../../var/automations-integrations-browser"));
 
@@ -10,25 +11,11 @@ async function shot(page: import("@playwright/test").Page, name: string): Promis
   await page.screenshot({ path: path.join(artifactDir, name), fullPage: true });
 }
 
-async function signIn(page: import("@playwright/test").Page, email = "admin@example.com", password = "change-me-admin") {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  const loginResponse = page.waitForResponse(
-    (response) => response.url().endsWith("/api/v1/auth/login") && response.request().method() === "POST",
-  );
-  await page.getByRole("button", { name: "Sign in" }).click();
-  const response = await loginResponse;
-  expect(response.status(), "login response status").toBe(200);
-  await expect(page).toHaveURL(/\/overview$/);
-  await expect(page.getByRole("heading", { name: "Operations overview", level: 1 })).toBeVisible();
-}
-
 test("admin can inspect persisted integrations and automation activity", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
-  await signIn(page);
+  await signInAsSeedAdmin(page);
   await page.goto("/integrations");
   await expect(page.getByRole("heading", { name: "Integrations", level: 1 })).toBeVisible();
   await expect(page.getByText("Administrator access", { exact: true })).toBeVisible();
@@ -88,7 +75,7 @@ test("admin can inspect persisted integrations and automation activity", async (
 });
 
 test("staff sees integrations read-only and mobile navigation remains usable", async ({ page }) => {
-  await signIn(page, "staff@example.com", "change-me-staff");
+  await signInAsSeedStaff(page);
   await page.goto("/integrations");
   await expect(page.getByRole("heading", { name: "Integrations", level: 1 })).toBeVisible();
   await expect(page.getByText("Read only", { exact: true })).toBeVisible();

@@ -11,6 +11,8 @@ from sqlalchemy import select
 from app.core.database import SessionLocal
 from app.domains.automation.intents import dispatch_intent
 from app.domains.automation.models import ExecutionIntent, IntentStatus
+from app.domains.automation.workflows import dispatch_scheduled
+from app.domains.observability.workers import touch
 
 logger = structlog.get_logger(__name__)
 _stdlib_logger = logging.getLogger(__name__)
@@ -23,6 +25,9 @@ def run_once() -> int:
     """
     session = SessionLocal()
     try:
+        worker_id = "automation-process"
+        touch(session, worker_id, "automation", status="idle")
+        dispatch_scheduled(session)
         pending = list(
             session.execute(
                 select(ExecutionIntent.id, ExecutionIntent.organization_id).where(
@@ -39,7 +44,20 @@ def run_once() -> int:
             processed += 1
         if processed:
             logger.info("automation_worker_processed", count=processed)
+            touch(session, worker_id, "automation", status="idle", success=True)
         return processed
+    except Exception as exc:
+        try:
+            touch(
+                session,
+                "automation-process",
+                "automation",
+                status="error",
+                error=type(exc).__name__,
+            )
+        except Exception:
+            session.rollback()
+        raise
     finally:
         session.close()
 

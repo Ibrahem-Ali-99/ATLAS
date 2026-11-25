@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { signInAsSeedAdmin } from "./auth";
 
 const artifactDir = path.resolve(process.env.ATLAS_E2E_ARTIFACT_DIR ?? path.resolve(process.cwd(), "../../var/overview-analytics-browser"));
 
@@ -26,7 +27,16 @@ async function metric(page: import("@playwright/test").Page, label: string): Pro
   return value;
 }
 
-async function waitForAnalytics(page: import("@playwright/test").Page): Promise<void> {
+async function waitForAnalytics(page: import("@playwright/test").Page, networkFailures: string[]): Promise<void> {
+  // Fail with the actual API/network error rather than a misleading missing-metric timeout.
+  await expect.poll(async () => {
+    const alert = page.getByRole("main").getByRole("alert");
+    if (await alert.count()) {
+      const message = (await alert.first().textContent())?.trim() ?? "Unknown Analytics error";
+      throw new Error(`Analytics could not load: ${message}\nNetwork diagnostics:\n${networkFailures.join("\n") || "No recorded request failures"}`);
+    }
+    return await page.getByTestId("analytics-metric-active-companies").isVisible();
+  }, { message: "Analytics should render its metrics or report a real API error" }).toBe(true);
   await expect(page.getByTestId("analytics-metric-active-companies")).toBeVisible();
   await expect(page.getByTestId("analytics-metric-leads")).toBeVisible();
   await expect(page.getByTestId("analytics-metric-open-inquiries")).toBeVisible();
@@ -39,19 +49,11 @@ async function assertWorkspace(page: import("@playwright/test").Page): Promise<v
 async function openOverview(page: import("@playwright/test").Page): Promise<void> {
   await page.goto("/overview");
   await expect(page).toHaveURL(/\/overview$/);
-  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await expect(page.getByTestId("overview-workspace")).toBeVisible();
   await assertWorkspace(page);
   await expect(page.getByTestId("overview-kpi-companies")).toBeVisible();
-  await expect(page.getByTestId("overview-kpi-active-leads")).toBeVisible();
-  await expect(page.getByTestId("overview-kpi-open-inquiries")).toBeVisible();
-}
-
-async function signIn(page: import("@playwright/test").Page): Promise<void> {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("admin@example.com");
-  await page.getByLabel("Password").fill("change-me-admin");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await expect(page.getByTestId("overview-kpi-active-opportunities")).toBeVisible();
+  await expect(page.getByTestId("overview-kpi-customer-requests")).toBeVisible();
 }
 
 async function allRecords(page: import("@playwright/test").Page): Promise<void> {
@@ -69,22 +71,36 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   const lead = `Metrics Lead ${stamp}`;
   const inquiry = `Metrics Inquiry ${stamp}`;
 
-  await signIn(page);
+  const networkFailures: string[] = [];
+  page.on("requestfailed", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/")) {
+      networkFailures.push(`FAILED ${request.method()} ${url.origin}${url.pathname}: ${request.failure()?.errorText ?? "unknown"}`);
+    }
+  });
+  page.on("response", (response) => {
+    const url = new URL(response.url());
+    if (url.pathname.startsWith("/api/") && !response.ok()) {
+      networkFailures.push(`HTTP ${response.status()} ${response.request().method()} ${url.origin}${url.pathname}`);
+    }
+  });
+
+  await signInAsSeedAdmin(page);
   await page.goto("/analytics");
   await assertWorkspace(page);
-  await waitForAnalytics(page);
+  await waitForAnalytics(page, networkFailures);
   await allRecords(page);
   const companiesBefore = await metric(page, "Active companies");
   const leadsBefore = await metric(page, "Leads");
   const inquiriesBefore = await metric(page, "Open inquiries");
   console.log(JSON.stringify({ metricsBefore: { companies: companiesBefore, leads: leadsBefore, openInquiries: inquiriesBefore } }));
   await openOverview(page);
-  const activeLeadsBefore = await metric(page, "Active leads");
+  const activeLeadsBefore = await metric(page, "Active opportunities");
   console.log(JSON.stringify({ activeLeadsBefore }));
   await allRecords(page);
   await expect(page.getByRole("link", { name: /Companies/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Recent customer activity" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Lead pipeline" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Customer activity" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pipeline overview" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Open inquiries" })).toBeVisible();
   await screenshot(page, "overview-before.png");
 
@@ -96,7 +112,7 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
 
   await page.getByRole("tab", { name: "Leads" }).click();
   await page.getByRole("button", { name: "New lead" }).click();
-  await page.getByLabel("Title").fill(lead);
+  await page.locator("#lead-create-title").fill(lead);
   await page.getByLabel("Company").selectOption({ label: company });
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("button", { name: lead })).toBeVisible();
@@ -112,13 +128,13 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   await openOverview(page);
   await allRecords(page);
   await expect.poll(() => metric(page, "Companies")).toBe(companiesBefore + 1);
-  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore + 1);
-  await expect.poll(() => metric(page, "Open inquiries")).toBe(inquiriesBefore + 1);
+  await expect.poll(() => metric(page, "Active opportunities")).toBe(activeLeadsBefore + 1);
+  await expect.poll(() => metric(page, "Customer requests")).toBe(inquiriesBefore + 1);
   console.log(JSON.stringify({ metricsAfterCreate: { companies: companiesBefore + 1, totalLeads: leadsBefore + 1, activeLeads: activeLeadsBefore + 1, openInquiries: inquiriesBefore + 1 } }));
 
   await page.goto("/analytics");
   await assertWorkspace(page);
-  await waitForAnalytics(page);
+  await waitForAnalytics(page, networkFailures);
   await allRecords(page);
   await expect(page.getByRole("heading", { name: "Lead pipeline" })).toBeVisible();
   await expect(page.getByText("new", { exact: true })).toBeVisible();
@@ -131,7 +147,7 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
 
   await page.goto("/analytics");
   await assertWorkspace(page);
-  await waitForAnalytics(page);
+  await waitForAnalytics(page, networkFailures);
   await allRecords(page);
   const pipeline = page.locator("section").filter({ has: page.getByRole("heading", { name: "Lead pipeline" }) });
   await expect(pipeline.getByText("qualified", { exact: true })).toBeVisible();
@@ -145,7 +161,7 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   await expect(page.getByRole("button", { name: company })).toBeVisible();
   await openOverview(page);
   await allRecords(page);
-  await page.getByRole("link", { name: "Active leads" }).click();
+  await page.getByRole("link", { name: "Active opportunities" }).click();
   await expect(page).toHaveURL(/\/crm\?tab=leads/);
   await page.getByLabel("Search leads").fill(lead);
   await expect(page.getByRole("button", { name: lead })).toBeVisible();
@@ -155,21 +171,21 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   await page.getByRole("button", { name: "Confirm archive" }).click();
   await openOverview(page);
   await allRecords(page);
-  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore);
+  await expect.poll(() => metric(page, "Active opportunities")).toBe(activeLeadsBefore);
   console.log(JSON.stringify({ metricsAfterArchive: { activeLeads: activeLeadsBefore } }));
-  await page.getByRole("link", { name: "Active leads" }).click();
+  await page.getByRole("link", { name: "Active opportunities" }).click();
   await page.getByLabel("Show archived").check();
   await page.getByLabel("Search leads").fill(lead);
   await page.getByRole("button", { name: lead }).click();
   await page.getByRole("button", { name: "Restore" }).click();
 
   await openOverview(page);
-  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore + 1);
+  await expect.poll(() => metric(page, "Active opportunities")).toBe(activeLeadsBefore + 1);
   await page.reload();
   await expect(page).toHaveURL(/\/overview$/);
-  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
-  await expect(page.getByTestId("overview-kpi-active-leads")).toBeVisible();
-  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore + 1);
+  await expect(page.getByTestId("overview-workspace")).toBeVisible();
+  await expect(page.getByTestId("overview-kpi-active-opportunities")).toBeVisible();
+  await expect.poll(() => metric(page, "Active opportunities")).toBe(activeLeadsBefore + 1);
   console.log(JSON.stringify({ metricsAfterRestore: { activeLeads: activeLeadsBefore + 1 } }));
   await screenshot(page, "overview-after-restore.png");
 

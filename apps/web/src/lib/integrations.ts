@@ -1,6 +1,6 @@
 import { apiFetch } from "@/lib/api";
 
-export type IntegrationType = "chat" | "embedding" | "n8n" | "email";
+export type IntegrationType = "chat" | "embedding" | "n8n" | "email" | "whatsapp";
 export type IntegrationStatus = "configured" | "disabled" | "verification_failed";
 
 export type IntegrationMetadata = {

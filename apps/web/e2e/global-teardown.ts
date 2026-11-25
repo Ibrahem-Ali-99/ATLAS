@@ -23,7 +23,8 @@ function stopRecordedProcess(pid: number): Promise<void> {
 }
 
 export default async function globalTeardown(): Promise<void> {
-  const pidFile = path.resolve(process.cwd(), "../../var/e2e-api.pid");
+  const apiPort = process.env.ATLAS_E2E_API_PORT ?? "8011";
+  const pidFile = path.resolve(process.cwd(), `../../var/e2e-api-${apiPort}.pid`);
   try {
     const pid = Number(readFileSync(pidFile, "utf8"));
     if (!Number.isFinite(pid) || pid <= 0) {

@@ -1,14 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { signInAsSeedAdmin } from "./auth";
 
 test("approved email is delivered once and visible in Email Activity", async ({ page, request }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("admin@example.com");
-  await page.getByLabel("Password").fill("change-me-admin");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await signInAsSeedAdmin(page);
 
   const stamp = Date.now();
   const subject = `Email acceptance ${stamp}`;

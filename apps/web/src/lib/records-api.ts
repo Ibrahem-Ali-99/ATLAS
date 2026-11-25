@@ -204,12 +204,28 @@ export function uploadDocument(organizationId: string, file: File, origin: Docum
   return apiFetch(organizationPath(organizationId, "/documents"), { method: "POST", body });
 }
 
+export function getDocumentJob(organizationId: string, documentId: string): Promise<{ document_id: string; status: string; error_message?: string | null }> {
+  return apiFetch(organizationPath(organizationId, `/documents/${documentId}/job`));
+}
+
 export function documentChunks(organizationId: string, documentId: string): Promise<{ items: ChunkHit[] }> {
   return apiFetch(organizationPath(organizationId, `/documents/${documentId}/chunks`));
 }
 
 export function searchDocuments(organizationId: string, q: string): Promise<{ items: ChunkHit[] }> {
   return apiFetch(organizationPath(organizationId, `/documents/search${queryString({ q })}`));
+}
+
+export function createKnowledgeEvaluation(organizationId: string, question: string, expectedEvidence: string[], scenario = "grounded") {
+  return apiFetch<{ id: string; question: string }>(organizationPath(organizationId, "/knowledge/evaluations/questions"), { method: "POST", body: JSON.stringify({ question, expected_evidence: expectedEvidence, scenario, expected_behavior: scenario === "grounded" ? "answer" : "fallback" }) });
+}
+
+export function runKnowledgeEvaluation(organizationId: string, questionId: string) {
+  return apiFetch<{ evidence_match: boolean; answer_grounded: boolean | null; case_result: Record<string, unknown>; retrieved_sources: { document_title: string; score: number }[]; failure_reason: string | null }>(organizationPath(organizationId, `/knowledge/evaluations/questions/${questionId}/run`), { method: "POST" });
+}
+
+export function compareKnowledgeEvaluations(organizationId: string) {
+  return apiFetch<{ current: Record<string, unknown> | null; previous: Record<string, unknown> | null; regressions: unknown[]; improvements: unknown[] }>(organizationPath(organizationId, "/knowledge/evaluations/compare"));
 }
 
 export function reindexDocument(organizationId: string, documentId: string): Promise<KnowledgeDocument> {

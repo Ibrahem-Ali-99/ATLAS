@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import type { FormEvent } from "react";
 
 import { ProviderNotice } from "@/components/provider-notice";
 import { MembershipTable } from "@/components/membership-table";
@@ -14,6 +15,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { sessionQueryOptions } from "@/lib/api";
 import { getAutomations } from "@/lib/automations";
 import { useWorkspace } from "@/lib/use-workspace";
+import { createInvitation, listInvitations, type InvitationStatus } from "@/lib/invitations";
+import { listTeam, removeMember, updateMemberRole, updateOrganization, type TeamMember } from "@/lib/organization";
 import {
   getIntegrations,
   getEmailDomains,
@@ -26,6 +29,7 @@ import {
   type IntegrationMetadata,
   type IntegrationType,
 } from "@/lib/integrations";
+import { changeBilling, getBilling, getBillingPlans, openBillingPortal } from "@/lib/billing";
 
 export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?: boolean }) {
   const session = useQuery(sessionQueryOptions);
@@ -46,6 +50,7 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
   });
   const [signOutOpen, setSignOutOpen] = useState(false);
   const user = session.data?.user;
+  const team = useQuery({ queryKey: ["team", organizationId], queryFn: () => listTeam(organizationId ?? ""), enabled: Boolean(organizationId && !integrationsOnly) });
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
@@ -70,6 +75,10 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
         />
       ) : null}
       {!integrationsOnly ? <>
+      {organizationId ? <BillingCard organizationId={organizationId} isAdmin={isAdmin} /> : null}
+      {organizationId && isAdmin ? <OrganizationCard organizationId={organizationId} initialName={session.data?.memberships.find((m) => m.organization_id === organizationId)?.organization_name ?? ""} onSaved={() => void queryClient.invalidateQueries({ queryKey: ["session"] })} /> : null}
+      {organizationId && isAdmin ? <InviteMemberCard organizationId={organizationId} /> : null}
+      {organizationId ? <TeamCard organizationId={organizationId} isAdmin={isAdmin} members={team.data ?? []} onChanged={() => void queryClient.invalidateQueries({ queryKey: ["team", organizationId] })} /> : null}
       <section className="rounded-[10px] bg-muted p-4">
         <h2 className="text-base text-foreground">Account</h2>
         <p className="mt-1 text-sm text-muted-foreground">Read-only fields returned by the session.</p>
@@ -145,6 +154,71 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
   );
 }
 
+function BillingCard({ organizationId, isAdmin }: { organizationId: string; isAdmin: boolean }) {
+  const queryClient = useQueryClient();
+  const billing = useQuery({ queryKey: ["billing", organizationId], queryFn: () => getBilling(organizationId) });
+  const plans = useQuery({ queryKey: ["billing-plans", organizationId], queryFn: () => getBillingPlans(organizationId) });
+  const [selected, setSelected] = useState("free");
+  const [interval, setInterval] = useState("monthly");
+  const [message, setMessage] = useState("");
+  const save = useMutation({ mutationFn: () => changeBilling(organizationId, selected, interval), onSuccess: () => { setMessage("Subscription updated in sandbox mode."); void queryClient.invalidateQueries({ queryKey: ["billing", organizationId] }); }, onError: (error) => setMessage(error instanceof Error ? error.message : "Billing update failed.") });
+  if (billing.isPending) return <section className="rounded-[10px] bg-muted p-4"><Skeleton className="h-20 w-full" /></section>;
+  const current = billing.data?.subscription;
+  return <section className="rounded-[10px] bg-muted p-4" aria-labelledby="billing-heading">
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 id="billing-heading" className="text-base text-foreground">Billing</h2><p className="mt-1 text-sm text-muted-foreground">Sandbox billing is active. Card details are handled only by the payment provider.</p></div><Badge variant="secondary">{current?.status ?? "Unavailable"}</Badge></div>
+    <div className="mt-4 grid gap-3 sm:grid-cols-4 text-sm"><div><span className="text-muted-foreground">Plan</span><p className="font-medium">{current?.plan_code}</p></div><div><span className="text-muted-foreground">Seats</span><p className="font-medium">{billing.data?.usage.seats} / {billing.data?.plan.seats}</p></div><div><span className="text-muted-foreground">AI requests</span><p className="font-medium">{billing.data?.usage.ai_requests} / {billing.data?.plan.ai_requests}</p></div><div><span className="text-muted-foreground">Billing period</span><p className="font-medium">{current?.current_period_end ? new Date(current.current_period_end).toLocaleDateString() : "Not set"}</p></div></div>
+    {isAdmin ? <div className="mt-4 flex flex-wrap gap-2"><select aria-label="Billing plan" value={selected} onChange={(e) => setSelected(e.target.value)}>{(plans.data ?? []).map((plan) => <option key={plan.code} value={plan.code}>{plan.name}</option>)}</select><select aria-label="Billing interval" value={interval} onChange={(e) => setInterval(e.target.value)}><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select><Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>Choose plan</Button><Button size="sm" variant="outline" onClick={async () => { const result = await openBillingPortal(organizationId); window.location.href = result.portal_url; }}>Manage billing</Button></div> : null}
+    {message ? <p className="mt-3 text-xs text-muted-foreground" role="status">{message}</p> : null}
+  </section>;
+}
+
+function OrganizationCard({ organizationId, initialName, onSaved }: { organizationId: string; initialName: string; onSaved: () => void }) {
+  const [name, setName] = useState(initialName);
+  const [message, setMessage] = useState("");
+  const save = useMutation({ mutationFn: () => updateOrganization(organizationId, name), onSuccess: () => { setMessage("Organization details saved."); onSaved(); }, onError: (e) => setMessage(e instanceof Error ? e.message : "Could not save organization.") });
+  return <section className="rounded-[10px] bg-muted p-4"><h2 className="text-base text-foreground">Organization</h2><label className="mt-4 grid gap-2 text-sm"><span className="font-medium">Workspace name</span><Input value={name} onChange={(e) => setName(e.target.value)} disabled={save.isPending} /></label><Button className="mt-3" size="sm" onClick={() => save.mutate()} disabled={!name.trim() || save.isPending}>Save organization</Button>{message ? <p className="mt-2 text-xs text-muted-foreground" role="status">{message}</p> : null}</section>;
+}
+
+function TeamCard({ organizationId, isAdmin, members, onChanged }: { organizationId: string; isAdmin: boolean; members: TeamMember[]; onChanged: () => void }) {
+  const [message, setMessage] = useState("");
+  return <section className="rounded-[10px] bg-muted p-4"><h2 className="text-base text-foreground">Team</h2><div className="mt-4 space-y-2">{members.map((member) => <div key={member.membership_id} className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-secondary p-3 text-sm"><div><p className="font-medium">{member.full_name}</p><p className="text-muted-foreground">{member.email} · joined {new Date(member.joined_at).toLocaleDateString()}</p></div><div className="flex items-center gap-2"><select aria-label={`Role for ${member.email}`} value={member.role} disabled={!isAdmin} onChange={async (e) => { try { await updateMemberRole(organizationId, member.membership_id, e.target.value as TeamMember["role"]); onChanged(); } catch (err) { setMessage(err instanceof Error ? err.message : "Could not update role."); } }}><option value="admin">Admin</option><option value="staff">Staff</option></select>{isAdmin ? <Button size="sm" variant="ghost" onClick={async () => { if (!window.confirm("Remove this member?")) return; try { await removeMember(organizationId, member.membership_id); onChanged(); } catch (err) { setMessage(err instanceof Error ? err.message : "Could not remove member."); } }}>Remove</Button> : null}</div></div>)}</div>{message ? <p className="mt-2 text-xs text-destructive" role="alert">{message}</p> : null}</section>;
+}
+
+function InviteMemberCard({ organizationId }: { organizationId: string }) {
+  const [email, setEmail] = useState("");
+  const [token, setToken] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [pending, setPending] = useState(false);
+  const invitations = useQuery({ queryKey: ["invitations", organizationId], queryFn: () => listInvitations(organizationId) });
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    setToken(null);
+    try {
+      const invitation = await createInvitation(organizationId, email.trim());
+      setToken(invitation.token);
+      setEmail("");
+      void invitations.refetch();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught : new Error("Invitation could not be created."));
+    } finally {
+      setPending(false);
+    }
+  }
+  return <section className="rounded-[10px] bg-muted p-4" aria-labelledby="invite-member-title">
+    <h2 id="invite-member-title" className="text-base text-foreground">Invite a teammate</h2>
+    <p className="mt-1 text-sm text-muted-foreground">Creates a staff invitation. The secure token is shown once because outbound email is not enabled.</p>
+    <form className="mt-4 flex flex-col gap-2 sm:flex-row" onSubmit={submit}>
+      <Input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="teammate@company.com" aria-label="Teammate email" />
+      <Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create invitation"}</Button>
+    </form>
+    {error ? <div className="mt-3"><RequestError error={error} /></div> : null}
+    {token ? <div className="mt-3 rounded-md border border-warning/40 bg-background p-3 text-xs"><p className="font-medium text-warning">Copy this token now. It will not be shown again.</p><code className="mt-2 block break-all text-muted-foreground">{token}</code></div> : null}
+    {invitations.data?.length ? <div className="mt-4 space-y-2 text-sm"><h3 className="font-medium">Invitation status</h3>{invitations.data.map((item: InvitationStatus) => <div key={item.id} className="flex justify-between gap-3 text-muted-foreground"><span>{item.email}</span><span>{item.accepted_at ? "Accepted" : new Date(item.expires_at) <= new Date() ? "Expired" : "Pending"}</span></div>)}</div> : null}
+  </section>;
+}
+
 function IntegrationSettings({
   organizationId,
   isAdmin,
@@ -182,6 +256,7 @@ function IntegrationSettings({
           <option value="all">All categories</option>
           <option value="ai">AI models</option>
           <option value="email">Email</option>
+          <option value="messaging">Messaging</option>
           <option value="automation">Automation</option>
           <option value="infrastructure">Infrastructure</option>
         </select>
@@ -194,11 +269,22 @@ function IntegrationSettings({
           {matches("n8n automation", "automation") ? <N8nCard record={byType.get("n8n")} /> : null}
           {matches("MCP retrieval", "infrastructure") ? <McpCard /> : null}
           {matches("Email SMTP Resend", "email") ? <EmailSettingsCard organizationId={organizationId} isAdmin={isAdmin} record={byType.get("email")} onChanged={onChanged} /> : null}
-          {!matches("Language model Groq OpenAI", "ai") && !matches("Embeddings Ollama OpenAI", "ai") && !matches("n8n automation", "automation") && !matches("MCP retrieval", "infrastructure") && !matches("Email SMTP Resend", "email") ? <p className="rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground lg:col-span-3">No integrations match this filter.</p> : null}
+          {matches("WhatsApp Meta Cloud", "messaging") ? <WhatsAppSettingsCard organizationId={organizationId} isAdmin={isAdmin} record={byType.get("whatsapp")} onChanged={onChanged} /> : null}
+          {!matches("Language model Groq OpenAI", "ai") && !matches("Embeddings Ollama OpenAI", "ai") && !matches("n8n automation", "automation") && !matches("MCP retrieval", "infrastructure") && !matches("Email SMTP Resend", "email") && !matches("WhatsApp Meta Cloud", "messaging") ? <p className="rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground lg:col-span-3">No integrations match this filter.</p> : null}
         </div>
       )}
     </section>
   );
+}
+
+function WhatsAppSettingsCard({ organizationId, isAdmin, record, onChanged }: { organizationId: string; isAdmin: boolean; record?: IntegrationMetadata; onChanged: () => void }) {
+  const [businessAccountId, setBusinessAccountId] = useState(String(record?.config.business_account_id ?? ""));
+  const [phoneNumberId, setPhoneNumberId] = useState(String(record?.config.phone_number_id ?? ""));
+  const [token, setToken] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+  const save = useMutation({ mutationFn: () => saveIntegration(organizationId, "whatsapp", { provider: "meta", config: { business_account_id: businessAccountId, phone_number_id: phoneNumberId }, ...(token ? { credentials: JSON.stringify({ access_token: token }) } : {}), ...(record ? { expected_version: record.credential_version } : {}) }), onSuccess: () => { setToken(""); setMessage("Saved. WhatsApp outbound remains approval-gated."); onChanged(); }, onError: (err) => setMessage(err instanceof Error ? err.message : "Could not save WhatsApp settings.") });
+  const verify = useMutation({ mutationFn: () => verifyIntegration(organizationId, "whatsapp"), onSuccess: (result) => { setMessage(result.detail); onChanged(); }, onError: () => setMessage("WhatsApp connection test failed.") });
+  return <div className="rounded-[10px] border border-border bg-background p-4 lg:col-span-3"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-medium">WhatsApp Business Cloud</h3><p className="mt-1 text-xs text-muted-foreground">Meta Cloud API configuration. Access tokens remain encrypted and masked.</p></div><Badge variant="secondary">{record?.status ?? "Not configured"}</Badge></div><div className="mt-4 grid gap-3 md:grid-cols-2"><label className="grid gap-1 text-sm"><span>Business Account ID</span><Input disabled={!isAdmin} value={businessAccountId} onChange={(e) => setBusinessAccountId(e.target.value)} /></label><label className="grid gap-1 text-sm"><span>Phone number ID</span><Input disabled={!isAdmin} value={phoneNumberId} onChange={(e) => setPhoneNumberId(e.target.value)} /></label></div>{isAdmin ? <div className="mt-3 flex flex-wrap items-end gap-3"><label className="grid min-w-[280px] flex-1 gap-1 text-sm"><span>{record?.has_credentials ? "Replace access token" : "Access token"}</span><Input type="password" autoComplete="new-password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={record?.has_credentials ? "Leave blank to keep current token" : "Paste token"} /></label><Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>Save WhatsApp settings</Button>{record ? <Button size="sm" variant="outline" onClick={() => verify.mutate()} disabled={verify.isPending}>Test connection</Button> : null}</div> : null}{message ? <p role="status" className="mt-3 text-xs text-muted-foreground">{message}</p> : null}</div>;
 }
 
 function EmailSettingsCard({

@@ -33,13 +33,13 @@ from app.domains.automation.models import (
     WorkflowRun,
     WorkflowStatus,
 )
-from app.domains.automation.signatures import sign_webhook
+from app.domains.automation.signatures import open_webhook_secret, sign_webhook
 from app.domains.automation.workflows import (
     complete_lead_callback,
     recover_workflows,
     stage_lead_created,
 )
-from app.domains.crm.service import create_inquiry, create_lead
+from app.domains.crm.service import create_company, create_contact, create_inquiry, create_lead
 from app.domains.identity.models import MembershipRole, Organization, User
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
 from tests.helpers import login
@@ -225,8 +225,9 @@ def test_webhook_secret_is_sealed_and_absent_from_reads(client: TestClient, db: 
     atlas = make_organization(db, "Atlas Demo", "atlas-demo")
     make_membership(db, admin, atlas, MembershipRole.admin)
     key, secret = create_webhook_key(db, atlas.id)
-    assert key.secret.startswith("enc:v1:")
+    assert key.secret.startswith("enc:v2:")
     assert secret not in key.secret
+    assert open_webhook_secret(key.secret) == secret
     ada = login(client, "ada@example.com", PASSWORD)
     snapshot = client.get(f"/api/v1/organizations/{atlas.id}/automations")
     assert snapshot.status_code == 200
@@ -517,6 +518,16 @@ def _email_approval(
     admin = make_user(db, email)
     atlas = make_organization(db, "Atlas Demo", slug)
     make_membership(db, admin, atlas, MembershipRole.admin)
+    company = create_company(db, atlas.id, {"name": "Harbor Logistics"})
+    contact = create_contact(
+        db,
+        atlas.id,
+        {
+            "full_name": "Ada Contact",
+            "email": email,
+            "company_id": company.id,
+        },
+    )
     inquiry = create_inquiry(db, atlas.id, {"subject": "Rates", "body": "Bonded storage"})
     run = AgentRun(
         organization_id=atlas.id,
@@ -535,7 +546,9 @@ def _email_approval(
         action_type=ActionType.prepare_customer_response,
         payload={
             "body": "We can discuss bonded storage.",
-            "to": "inbox@localhost",
+            "to": email,
+            "contact_id": str(contact.id),
+            "recipient_snapshot": email,
             "subject": "Bonded storage",
         },
         position=0,
@@ -597,7 +610,11 @@ def _lead(db: Session, approval: Approval) -> object:
         db,
         approval.organization_id,
         approval.requested_by,
-        {"title": "Harbor", "status": "new"},
+        {
+            "title": "Harbor",
+            "status": "new",
+            "contact_id": approval.payload.get("contact_id"),
+        },
     )
     approval.payload = {**approval.payload, "lead_id": str(lead.id)}
     approval.payload_hash = __import__(

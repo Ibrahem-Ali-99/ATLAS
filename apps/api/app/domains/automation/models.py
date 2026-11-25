@@ -46,6 +46,68 @@ class WorkflowStatus(enum.StrEnum):
     not_configured = "not_configured"
 
 
+class WorkflowDefinition(Base):
+    __tablename__ = "workflow_definitions"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "slug", name="uq_workflow_definitions_org_slug"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slug: Mapped[str] = mapped_column(String(80), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    active: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    definition: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class WorkflowTask(Base):
+    __tablename__ = "workflow_tasks"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=True
+    )
+    lead_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True
+    )
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True
+    )
+    opportunity_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("opportunities.id", ondelete="SET NULL"), nullable=True
+    )
+    assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="open")
+    priority: Mapped[str] = mapped_column(String(16), nullable=False, default="normal")
+    source: Mapped[str] = mapped_column(String(24), nullable=False, default="workflow")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class AttemptOutcome(enum.StrEnum):
     started = "started"
     succeeded = "succeeded"
@@ -225,6 +287,9 @@ class EmailMessage(Base):
     )
     lead_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("inbox_conversations.id", ondelete="SET NULL"), nullable=True, index=True
     )
     intent_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("execution_intents.id", ondelete="CASCADE"), nullable=False

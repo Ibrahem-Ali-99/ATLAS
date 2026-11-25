@@ -45,6 +45,10 @@ class Conversation(Base):
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
+    needs_human_review: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default="false"
+    )
+    escalation_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -88,3 +92,22 @@ class MessageSource(Base):
     record_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ConversationSummary(Base):
+    __tablename__ = "conversation_summaries"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    through_message_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
+    )
+    message_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

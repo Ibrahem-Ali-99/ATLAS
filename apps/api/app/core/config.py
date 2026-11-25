@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # Empty defaults keep the type checker aligned with BaseSettings while the
     # validators still fail closed when required environment values are absent.
     secret_key: str = ""
+    # Credential encryption is independently rotatable from the session key.
+    # ``credential_encryption_keys`` accepts comma-separated ``key_id=value``
+    # entries; the first entry is used for new seals.
+    credential_encryption_keys: str = ""
     database_url: str = ""
     cors_origins: str = "http://127.0.0.1:3000,http://localhost:3000"
     cookie_secure: bool = False
@@ -69,6 +73,7 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     embedding_timeout_seconds: float = Field(default=60, ge=1, le=180)
     max_cosine_distance: float = Field(default=0.55, ge=0, le=2)
+    rag_vector_only_max_distance: float = Field(default=0.45, ge=0, le=2)
     max_upload_bytes: int = Field(default=10_485_760, ge=1, le=52_428_800)
     storage_dir: str = ""
     approval_ttl_hours: int = Field(default=24, ge=1, le=168)
@@ -96,6 +101,12 @@ class Settings(BaseSettings):
     llm_output_usd_per_million: float | None = None
     # Empty uses the active virtualenv interpreter. An explicit path is checked at startup.
     mcp_python: str = ""
+    billing_provider: Literal["sandbox", "stripe"] = "sandbox"
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_ids: str = ""
+    billing_public_url: str = ""
+    inbox_webhook_secret: str = ""
 
     @field_validator("database_url")
     @classmethod
@@ -150,6 +161,8 @@ class Settings(BaseSettings):
             raise ValueError("ATLAS_SECRET_KEY must be at least 32 characters")
         if self.environment == "production" and _placeholder_secret(self.secret_key):
             raise ValueError("ATLAS_SECRET_KEY placeholder is not allowed in production")
+        if self.environment == "production" and not self.credential_encryption_keys.strip():
+            raise ValueError("ATLAS_CREDENTIAL_ENCRYPTION_KEYS is required in production")
         if self.environment == "production" and not self.cookie_secure:
             raise ValueError("ATLAS_COOKIE_SECURE must be true in production")
         if self.email_mode == "live" and not self.email_live_enabled:

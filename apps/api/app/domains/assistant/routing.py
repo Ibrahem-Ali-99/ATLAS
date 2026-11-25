@@ -102,7 +102,8 @@ CAPABILITY_ANSWER = "\n".join(
         "",
         "For company facts, I check the organization’s records and say when evidence is missing.",
         "",
-        "I do not change records, send email, or book meetings from chat. Those actions require an Agent Run; an admin must approve and execute them.",
+        "I do not change records, send email, or book meetings from chat. "
+        "Those actions require an Agent Run; an admin must approve and execute them.",
     ]
 )
 

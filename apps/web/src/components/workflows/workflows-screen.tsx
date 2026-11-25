@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cancelBooking, getAutomations, type AutomationSnapshot, type WorkflowRun } from "@/lib/automations";
 import type { DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
+import { createWorkflowDefinition, createWorkflowTask, deleteWorkflowDefinition, listWorkflowDefinitions, listWorkflowTasks, updateWorkflowTask, workflowAction } from "@/lib/workflow-definitions";
 
 export function WorkflowsScreen() {
   const workspace = useWorkspace();
@@ -87,13 +88,16 @@ function WorkflowsBody({
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <header>
-        <h1 className="text-[31px] leading-none text-foreground">Automations</h1>
+        <h1 className="text-3xl font-semibold leading-tight text-foreground">Workflows</h1>
         <p className="mt-3 max-w-4xl text-sm text-muted-foreground">
-          Installed business processes, observable outcomes and safe recovery actions.
+          Read-only workflow topology and observable execution outcomes.
         </p>
         <p className="mt-2 max-w-4xl text-xs leading-5 text-subtle">{configurationCopy(data)}</p>
         <DataScopeControl value={scope} onChange={onScope} />
       </header>
+      <WorkflowTopology data={data} />
+      {isAdmin ? <WorkflowBuilder /> : null}
+      <WorkflowTaskList />
       <nav className="flex flex-wrap gap-2 border-b border-border pb-3" aria-label="Automation workspace views">
         {([ ["overview", "Overview"], ["approvals", "Approvals"], ["history", "Execution history"], ["email", "Email activity"] ] as const).map(([id, label]) => (
           <button key={id} type="button" className={`rounded-md px-3 py-2 text-sm ${view === id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`} aria-pressed={view === id} onClick={() => setView(id)}>{label}</button>
@@ -220,6 +224,68 @@ function WorkflowsBody({
       ) : null}
     </div>
   );
+}
+
+function WorkflowBuilder() {
+  const workspace = useWorkspace();
+  const id = workspace.organizationId ?? "";
+  const queryClient = useQueryClient();
+  const definitions = useQuery({ queryKey: ["workflow-definitions", id], queryFn: () => listWorkflowDefinitions(id), enabled: Boolean(id) });
+  const [name, setName] = useState("");
+  const [trigger, setTrigger] = useState("lead_created");
+  const [action, setAction] = useState("update_lead");
+  const [message, setMessage] = useState("");
+  const create = useMutation({ mutationFn: () => createWorkflowDefinition(id, { name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "workflow", definition: { trigger, actions: [{ type: action }] } }), onSuccess: () => { setName(""); setMessage("Workflow saved as a draft."); void queryClient.invalidateQueries({ queryKey: ["workflow-definitions", id] }); }, onError: (e) => setMessage(e instanceof Error ? e.message : "Workflow could not be saved.") });
+  return <section className="rounded-xl border border-border bg-card p-5" aria-label="Workflow builder" data-testid="workflow-builder"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-base font-semibold text-foreground">Workflow builder</h2><p className="mt-1 text-sm text-muted-foreground">Create a validated draft from a trigger and action. Activation remains administrator-controlled.</p></div><span className="text-xs text-muted-foreground">{definitions.data?.length ?? 0} saved</span></div><div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto_auto]" ><input aria-label="Workflow name" className="h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Follow up new leads" value={name} onChange={(e) => setName(e.target.value)} /><select aria-label="Workflow trigger" value={trigger} onChange={(e) => setTrigger(e.target.value)}><option value="lead_created">Lead created</option><option value="lead_status_changed">Lead status changed</option><option value="schedule">Scheduled</option></select><select aria-label="Workflow action" value={action} onChange={(e) => setAction(e.target.value)}><option value="update_lead">Update CRM lead</option><option value="create_task">Create task</option><option value="prepare_follow_up">Prepare follow-up for approval</option></select><Button size="sm" onClick={() => create.mutate()} disabled={!name.trim() || create.isPending}>Create draft</Button></div>{message ? <p className="mt-3 text-xs text-muted-foreground" role="status">{message}</p> : null}<div className="mt-4 space-y-2">{(definitions.data ?? []).map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted p-3 text-sm"><span><strong>{item.name}</strong><span className="ml-2 text-muted-foreground">v{item.version} · {item.active ? "Active" : "Draft"}</span></span><div className="flex gap-2">{item.active ? <Button size="sm" variant="outline" onClick={() => void workflowAction(id, item.id, "pause").then(() => queryClient.invalidateQueries({ queryKey: ["workflow-definitions", id] }))}>Pause</Button> : <Button size="sm" onClick={() => void workflowAction(id, item.id, "activate").then(() => queryClient.invalidateQueries({ queryKey: ["workflow-definitions", id] }))}>Activate</Button>}<Button size="sm" variant="ghost" onClick={() => void workflowAction(id, item.id, "duplicate").then(() => queryClient.invalidateQueries({ queryKey: ["workflow-definitions", id] }))}>Duplicate</Button><Button size="sm" variant="ghost" onClick={() => { if (window.confirm("Delete this workflow?")) void deleteWorkflowDefinition(id, item.id).then(() => queryClient.invalidateQueries({ queryKey: ["workflow-definitions", id] })); }}>Delete</Button></div></div>)}</div></section>;
+}
+
+function WorkflowTaskList() {
+  const { organizationId } = useWorkspace();
+  const tasks = useQuery({ queryKey: ["workflow-tasks", organizationId], queryFn: () => listWorkflowTasks(organizationId ?? ""), enabled: Boolean(organizationId) });
+  const queryClient = useQueryClient();
+  const [title, setTitle] = useState("");
+  const create = useMutation({ mutationFn: () => createWorkflowTask(organizationId ?? "", { title }), onSuccess: () => { setTitle(""); void queryClient.invalidateQueries({ queryKey: ["workflow-tasks", organizationId] }); } });
+  return <section className="rounded-xl border border-border bg-card p-5" aria-label="Workflow tasks"><div className="flex items-center justify-between"><h2 className="text-base font-semibold text-foreground">Tasks</h2><span className="text-xs text-muted-foreground">{tasks.data?.length ?? 0}</span></div><div className="mt-3 flex gap-2"><input aria-label="New task title" className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm" placeholder="Add a follow-up task" value={title} onChange={(e) => setTitle(e.target.value)} /><Button size="sm" onClick={() => create.mutate()} disabled={!title.trim() || create.isPending}>Add task</Button></div>{tasks.isError ? <RequestError error={tasks.error} /> : null}{tasks.isPending ? <Skeleton className="mt-3 h-12 w-full" /> : null}{tasks.data?.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">No tasks yet.</p> : <div className="mt-3 space-y-2">{tasks.data?.map((task) => <article key={task.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted p-3 text-sm"><div><p className="font-medium text-foreground">{task.title}</p><p className="text-xs text-muted-foreground">{task.source === "manual" ? "Manual task" : "Workflow task"}{task.priority ? ` · ${task.priority}` : ""}{task.lead_id ? ` · Lead ${task.lead_id.slice(0, 8)}` : ""}</p></div><select aria-label={`Task status for ${task.title}`} value={task.status} onChange={(e) => void updateWorkflowTask(organizationId ?? "", task.id, e.target.value).then(() => queryClient.invalidateQueries({ queryKey: ["workflow-tasks", organizationId] }))}><option value="open">To Do</option><option value="in_progress">In Progress</option><option value="completed">Completed</option></select></article>)}</div>}</section>;
+}
+
+function WorkflowTopology({ data }: { data: AutomationSnapshot }) {
+  return (
+    <section className="rounded-xl border border-border bg-card p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)]" aria-label="Workflow topology" data-testid="workflow-topology">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Workflow topology</h2>
+          <p className="mt-1 text-sm text-muted-foreground">These connected stages reflect the workflows currently exposed by ATLAS. Editing definitions is not enabled in this environment.</p>
+        </div>
+        <span className="rounded-full border border-border bg-muted px-2.5 py-1 text-xs text-subtle">Read only</span>
+      </div>
+      <div className="relative mt-5 grid gap-3 md:grid-cols-3 md:items-center md:gap-8">
+        <svg className="pointer-events-none absolute inset-x-[16%] top-1/2 hidden h-8 w-[68%] -translate-y-1/2 md:block" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M0 5 H100" fill="none" stroke="currentColor" strokeDasharray="2 2" strokeWidth="0.7" className="text-primary/60" />
+          <path d="M33 2 L37 5 L33 8 M63 2 L67 5 L63 8" fill="none" stroke="currentColor" strokeWidth="0.7" className="text-primary" />
+        </svg>
+        {[
+          ["trigger", "CRM event", "Lead created"],
+          ["process", "AI processing", "Lead intake"],
+          ["outcome", "Human review", "Approval or execution"],
+        ].map(([key, eyebrow, label]) => (
+          <div key={key} className="contents">
+            <div className="rounded-lg border border-border bg-muted p-4" data-testid={`workflow-node-${key}`}>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-primary">{eyebrow}</p>
+              <p className="mt-2 text-sm font-medium text-foreground">{label}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{nodeDetail(data, key)}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function nodeDetail(data: AutomationSnapshot, key: string): string {
+  if (key === "trigger") return `${data.runs.length} recorded run${data.runs.length === 1 ? "" : "s"}`;
+  if (key === "process") return `${data.automations.length} configured process${data.automations.length === 1 ? "" : "es"}`;
+  const approvals = data.automations.reduce((total, item) => total + item.awaiting_review, 0);
+  return `${approvals} approval${approvals === 1 ? "" : "s"} requiring review`;
 }
 
 function EmailActivitySection({ emails }: { emails: AutomationSnapshot["emails"] }) {

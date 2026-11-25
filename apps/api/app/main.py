@@ -57,6 +57,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.error("checkpoint_setup_failed")
     worker_stop: threading.Event | None = None
     worker_thread: threading.Thread | None = None
+    knowledge_worker_thread: threading.Thread | None = None
     worker_enabled = (
         settings.environment != "test"
         or os.environ.get("ATLAS_E2E_PROVIDER_TRANSPORT") == "1"
@@ -68,11 +69,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
         worker_stop = threading.Event()
         worker_thread = start(worker_stop)
+        from app.domains.knowledge.worker import start as start_knowledge
+        knowledge_worker_thread = start_knowledge(worker_stop)
     yield
     if worker_stop is not None and worker_thread is not None:
         from app.domains.automation.worker import stop
 
         stop(worker_stop, worker_thread)
+        if knowledge_worker_thread is not None:
+            knowledge_worker_thread.join(timeout=5)
     else:
         logger.info("automation_worker_stopped", enabled=False)
     logger.info("shutdown")

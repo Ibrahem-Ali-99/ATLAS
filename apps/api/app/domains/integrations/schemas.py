@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import uuid
 from typing import Any
 
@@ -10,6 +11,7 @@ SUPPORTED_PROVIDERS: dict[IntegrationType, frozenset[str]] = {
     IntegrationType.embedding: frozenset({"ollama", "openai"}),
     IntegrationType.n8n: frozenset({"n8n"}),
     IntegrationType.email: frozenset({"smtp"}),
+    IntegrationType.whatsapp: frozenset({"meta"}),
 }
 
 
@@ -29,6 +31,17 @@ class IntegrationInput(BaseModel):
             raise ValueError(
                 f"Provider {self.provider!r} is not supported for {self.integration_type.value}"
             )
+        if self.integration_type == IntegrationType.whatsapp:
+            if (
+                not isinstance(self.config.get("phone_number_id"), str)
+                or not self.config["phone_number_id"].strip()
+            ):
+                raise ValueError("WhatsApp phone number ID is required")
+            if (
+                not isinstance(self.config.get("business_account_id"), str)
+                or not self.config["business_account_id"].strip()
+            ):
+                raise ValueError("WhatsApp Business Account ID is required")
         if self.integration_type == IntegrationType.email:
             host = self.config.get("host")
             port = self.config.get("port")

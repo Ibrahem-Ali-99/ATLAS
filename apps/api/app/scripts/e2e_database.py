@@ -37,6 +37,7 @@ def main() -> None:
         db.execute(
             text(
                 "TRUNCATE TABLE message_sources, messages, conversations, chunks, documents, "
+                "ingestion_jobs, "
                 "lead_predictions, evaluation_runs, operation_traces, model_versions, "
                 "email_messages, calendar_bookings, execution_attempts, execution_intents, "
                 "workflow_runs, webhook_events, webhook_keys, integration_configs, "
@@ -46,10 +47,24 @@ def main() -> None:
             )
         )
         db.commit()
-        seed_identity(db, SeedSettings())
+        seed_settings = SeedSettings()
+        seed_identity(db, seed_settings)
         atlas = db.scalar(select(Organization).where(Organization.slug == "northwind"))
-        admin = db.scalar(select(User).where(User.email == "admin@example.com"))
-        assert atlas is not None and admin is not None
+        admin = db.scalar(
+            select(User).where(User.email == str(seed_settings.seed_admin_email).lower())
+        )
+        if atlas is None or admin is None:
+            organization_slugs = list(
+                db.scalars(select(Organization.slug).order_by(Organization.slug))
+            )
+            user_emails = list(db.scalars(select(User.email).order_by(User.email)))
+            raise RuntimeError(
+                "Disposable identity seed did not create the required fixture: "
+                f"northwind_present={atlas is not None}, "
+                f"admin_email_present={admin is not None}, "
+                f"expected_admin={seed_settings.seed_admin_email}, "
+                f"organizations={organization_slugs}, users={user_emails}"
+            )
         fixture = db.scalar(
             select(Document).where(
                 Document.organization_id == atlas.id,

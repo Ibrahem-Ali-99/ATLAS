@@ -50,7 +50,10 @@ class User(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
     memberships: Mapped[list["Membership"]] = relationship(back_populates="user")
@@ -74,16 +77,23 @@ class Organization(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
-    memberships: Mapped[list["Membership"]] = relationship(back_populates="organization")
+    memberships: Mapped[list["Membership"]] = relationship(
+        back_populates="organization"
+    )
 
 
 class Membership(Base):
     __tablename__ = "memberships"
     __table_args__ = (
-        UniqueConstraint("user_id", "organization_id", name="uq_memberships_user_organization"),
+        UniqueConstraint(
+            "user_id", "organization_id", name="uq_memberships_user_organization"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -91,7 +101,10 @@ class Membership(Base):
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     role: Mapped[MembershipRole] = mapped_column(ROLE_TYPE, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -110,10 +123,33 @@ class UserSession(Base):
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     csrf_token: Mapped[str] = mapped_column(String(128), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

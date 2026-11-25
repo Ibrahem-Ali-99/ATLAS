@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -15,7 +16,8 @@ from app.domains.automation.models import (
     WorkflowStatus,
 )
 from app.domains.crm.models import Inquiry
-from app.domains.observability.models import OperationTrace
+from app.domains.knowledge.models import IngestionJob
+from app.domains.observability.models import OperationTrace, WorkerHeartbeat
 from app.domains.provenance.origin import DataScope, scope_clause
 
 _HINTS = {
@@ -80,6 +82,9 @@ def diagnostics(
         or 0
     )
     costs = [trace.cost_usd for trace in traces if trace.cost_usd is not None]
+    now = datetime.now(UTC)
+    workers = list(db.scalars(select(WorkerHeartbeat).order_by(WorkerHeartbeat.worker_kind)))
+    ingestion = list(db.scalars(select(IngestionJob).where(IngestionJob.organization_id == organization_id).order_by(IngestionJob.updated_at.desc()).limit(50)))
     return {
         "scope": scope.value,
         "hint_notice": "Hints name a recorded error code. They are not a root-cause finding.",
@@ -118,6 +123,31 @@ def diagnostics(
             "Cost is unavailable unless token prices are configured "
             "and the provider reported usage."
         ),
+        "workers": [
+            {
+                "id": row.worker_id,
+                "kind": row.worker_kind,
+                "status": "stalled" if (now - row.heartbeat_at).total_seconds() > 30 else row.status,
+                "heartbeat_at": row.heartbeat_at,
+                "last_success_at": row.last_success_at,
+                "processed_count": row.processed_count,
+                "last_error_code": row.last_error_code,
+            }
+            for row in workers
+        ],
+        "ingestion_jobs": [
+            {
+                "id": row.id,
+                "document_id": row.document_id,
+                "status": row.status.value,
+                "attempts": row.attempts,
+                "max_attempts": row.max_attempts,
+                "error_code": row.error_message,
+                "next_attempt_at": row.next_attempt_at,
+                "updated_at": row.updated_at,
+            }
+            for row in ingestion
+        ],
     }
 
 

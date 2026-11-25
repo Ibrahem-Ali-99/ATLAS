@@ -1,0 +1,18 @@
+function Set-AtlasE2EEnvironment {
+  $env:POSTGRES_HOST = "127.0.0.1"
+  $env:ATLAS_E2E_POSTGRES_HOST = "127.0.0.1"
+  $env:POSTGRES_PORT = "5434"
+  $env:SEED_ADMIN_EMAIL = "admin@example.com"
+  $env:SEED_ADMIN_PASSWORD = "change-me-admin"
+  $env:SEED_ADMIN_NAME = "Avery Admin"
+  $env:SEED_STAFF_EMAIL = "staff@example.com"
+  $env:SEED_STAFF_PASSWORD = "change-me-staff"
+  $env:SEED_STAFF_NAME = "Sam Staff"
+  $env:SEED_OUTSIDER_EMAIL = "outsider@example.org"
+  $env:SEED_OUTSIDER_PASSWORD = "change-me-outsider"
+  $env:SEED_OUTSIDER_NAME = "Olivia Outsider"
+  $env:ATLAS_E2E_PRODUCTION = "1"
+  $env:ATLAS_E2E_API_PORT = "8011"
+  $env:ATLAS_E2E_WEB_PORT = "3011"
+  $env:NEXT_PUBLIC_API_URL = "http://127.0.0.1:8011"
+}

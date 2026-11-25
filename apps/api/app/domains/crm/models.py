@@ -156,3 +156,50 @@ class Interaction(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class PipelineStage(Base):
+    __tablename__ = "pipeline_stages"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    key: Mapped[str] = mapped_column(String(40), nullable=False)
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    position: Mapped[int] = mapped_column(nullable=False)
+    probability: Mapped[float | None] = mapped_column(nullable=True)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True, server_default="true")
+
+
+class Opportunity(Base):
+    __tablename__ = "opportunities"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    value: Mapped[float | None] = mapped_column(nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    expected_close_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    probability: Mapped[float | None] = mapped_column(nullable=True)
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("companies.id", ondelete="SET NULL")
+    )
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("contacts.id", ondelete="SET NULL")
+    )
+    lead_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("leads.id", ondelete="SET NULL")
+    )
+    stage: Mapped[str] = mapped_column(String(40), nullable=False, default="new")
+    loss_reason: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )

@@ -1,9 +1,12 @@
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.domains.identity.models import MembershipRole
+from app.domains.knowledge.service import claim_ingestion_job, run_ingestion_job
 from app.integrations.language import get_embedding_client
 from tests.ai_clients import HashEmbeddingClient
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
@@ -15,6 +18,13 @@ from tests.test_crm import _csrf, _org
 def embedded_client(client: TestClient) -> TestClient:
     client.app.dependency_overrides[get_embedding_client] = lambda: HashEmbeddingClient()
     return client
+
+
+def _process_one() -> None:
+    worker_id = f"test-worker-{uuid.uuid4()}"
+    job = claim_ingestion_job(worker_id)
+    assert job is not None
+    run_ingestion_job(job, worker_id, HashEmbeddingClient())
 
 
 def test_upload_indexes_text_and_rejects_invalid_files(
@@ -42,6 +52,7 @@ def test_upload_indexes_text_and_rejects_invalid_files(
     )
     assert uploaded.status_code == 201, uploaded.text
     document_id = uploaded.json()["id"]
+    _process_one()
     ready = embedded_client.get(f"/api/v1/organizations/{org}/documents/{document_id}")
     assert ready.status_code == 200
     assert ready.json()["status"] == "ready"

@@ -19,7 +19,7 @@ from app.domains.approvals.service import (
     execute_decisions,
 )
 from app.domains.crm.models import Interaction, Lead
-from app.domains.crm.service import create_inquiry
+from app.domains.crm.service import create_contact, create_inquiry
 from app.domains.identity.models import MembershipRole, Organization
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
 from tests.helpers import login
@@ -44,6 +44,11 @@ def _pending(db: Session) -> Approval:
     admin = make_user(db, "ada@example.com")
     atlas = make_organization(db, "Atlas Demo", "atlas-demo")
     make_membership(db, admin, atlas, MembershipRole.admin)
+    contact = create_contact(
+        db,
+        atlas.id,
+        {"full_name": "Ada Contact", "email": "ada@example.com"},
+    )
     inquiry = create_inquiry(db, atlas.id, {"subject": "Rates", "body": "Bonded storage"})
     run = AgentRun(
         organization_id=atlas.id,
@@ -54,13 +59,15 @@ def _pending(db: Session) -> Approval:
     db.add(run)
     db.commit()
     db.refresh(run)
+    payload = _proposal()
+    payload["contact_id"] = str(contact.id)
     return create_approval(
         db,
         organization_id=atlas.id,
         run_id=run.id,
         requested_by=admin.id,
         action_type=ActionType.create_lead,
-        payload=_proposal(),
+        payload=payload,
         position=0,
     )
 
@@ -245,6 +252,15 @@ def test_crash_before_commit_leaves_the_approval_and_crm_unchanged(db: Session) 
 def test_interaction_crash_does_not_commit_the_history_row(db: Session) -> None:
     approval = _approved(db)
     lead_id = execute_approved(db, approval.organization_id, approval.id)["lead_id"]
+    lead = db.get(Lead, uuid.UUID(str(lead_id)))
+    assert lead is not None
+    contact = create_contact(
+        db,
+        approval.organization_id,
+        {"full_name": "Ada Contact", "email": "ada@example.com"},
+    )
+    lead.contact_id = contact.id
+    db.commit()
     response = create_approval(
         db,
         organization_id=approval.organization_id,
@@ -253,7 +269,9 @@ def test_interaction_crash_does_not_commit_the_history_row(db: Session) -> None:
         action_type=ActionType.prepare_customer_response,
         payload={
             "lead_id": lead_id,
-            "to": "inbox@localhost",
+            "to": contact.email,
+            "contact_id": str(contact.id),
+            "recipient_snapshot": contact.email,
             "subject": "Bonded storage",
             "body": "We can discuss bonded storage.",
         },

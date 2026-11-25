@@ -1,0 +1,3 @@
+﻿ATLAS Test Company provides AI-powered customer support.
+Our support hours are Monday through Friday, 9 AM to 5 PM.
+Our standard response time is within 24 hours.

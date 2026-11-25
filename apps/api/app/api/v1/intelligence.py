@@ -1,15 +1,18 @@
 import uuid
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from app.core.errors import AppError
 from app.domains.analytics.service import snapshot
 from app.domains.crm import service as crm
 from app.domains.evaluation.service import list_evaluations, start_evaluation
 from app.domains.identity.dependencies import CsrfAdmin, CsrfMember, DbSession, Member
+from app.domains.identity.models import Membership
 from app.domains.ml.inference import latest_model, latest_prediction, score_lead, start_training
 from app.domains.ml.models import LeadPrediction, ModelVersion
 from app.domains.monitoring.service import diagnostics, trace_run
@@ -37,9 +40,43 @@ class PredictionOut(BaseModel):
 
 @router.get("/analytics")
 def get_analytics(
-    member: Member, db: DbSession, scope: DataScope = DataScope.operational
+    member: Member,
+    db: DbSession,
+    scope: DataScope = DataScope.operational,
+    period: str = "30d",
+    start_date: date | None = None,
+    end_date: date | None = None,
+    owner_user_id: uuid.UUID | None = None,
+    channel: str | None = None,
 ) -> dict[str, Any]:
-    return snapshot(db, member.organization.id, scope)
+    if period not in {"7d", "30d", "90d", "custom"}:
+        raise AppError(422, "invalid_analytics_period", "Unsupported analytics period")
+    if period == "custom" and (start_date is None or end_date is None or start_date > end_date):
+        raise AppError(422, "invalid_analytics_dates", "Custom analytics dates are invalid")
+    if channel is not None and channel not in {"email", "whatsapp", "webchat", "website", "sms"}:
+        raise AppError(422, "invalid_analytics_channel", "Unsupported conversation channel")
+    if (
+        owner_user_id is not None
+        and db.scalar(
+            select(Membership.id).where(
+                Membership.organization_id == member.organization.id,
+                Membership.user_id == owner_user_id,
+            )
+        )
+        is None
+    ):
+        raise AppError(404, "owner_not_found", "Opportunity owner is not in this organization")
+    days = 30 if period == "custom" else int(period[:-1])
+    return snapshot(
+        db,
+        member.organization.id,
+        scope,
+        days=days,
+        start_date=start_date,
+        end_date=end_date,
+        owner_user_id=owner_user_id,
+        channel=channel,
+    )
 
 
 @router.get("/ml/model")

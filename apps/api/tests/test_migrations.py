@@ -95,12 +95,17 @@ def test_migrations_upgrade_downgrade_and_reupgrade() -> None:
         "lead_predictions",
         "operation_traces",
         "evaluation_runs",
+        "ingestion_jobs",
     } <= tables
     with engine.connect() as connection:
         vector_installed = connection.execute(
             text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
         ).scalar()
+        ingestion_enum = connection.execute(
+            text("SELECT 1 FROM pg_type WHERE typname = 'ingestion_job_status'")
+        ).scalar()
     assert vector_installed == 1
+    assert ingestion_enum == 1
     engine.dispose()
 
     command.downgrade(config, "base")

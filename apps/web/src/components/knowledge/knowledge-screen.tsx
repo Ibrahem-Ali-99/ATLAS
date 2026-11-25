@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { ConfirmButton } from "@/components/confirm-button";
-import { ProviderNotice } from "@/components/provider-notice";
 import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,10 +11,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   deleteDocument,
+  createKnowledgeEvaluation,
+  compareKnowledgeEvaluations,
   documentChunks,
   listDocuments,
   reindexDocument,
   searchDocuments,
+  runKnowledgeEvaluation,
   uploadDocument,
 } from "@/lib/records-api";
 import { documentOriginLabel, documentOrigins, type DocumentOrigin, type DocumentStatus, type KnowledgeDocument } from "@/lib/records";
@@ -64,6 +66,10 @@ function KnowledgeWorkspace({
   const [search, setSearch] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [origin, setOrigin] = useState<DocumentOrigin>("operational");
+  const [evaluationQuestion, setEvaluationQuestion] = useState("");
+  const [evaluationEvidence, setEvaluationEvidence] = useState("");
+  const [evaluationMode, setEvaluationMode] = useState("grounded");
+  const [evaluation, setEvaluation] = useState<{ evidence_match: boolean; answer_grounded: boolean | null; case_result: Record<string, unknown>; retrieved_sources: { document_title: string; score: number }[]; failure_reason: string | null } | null>(null);
   const documents = useQuery({
     queryKey: ["documents", organizationId],
     queryFn: () => listDocuments(organizationId, { pageSize: 50 }),
@@ -86,6 +92,8 @@ function KnowledgeWorkspace({
     queryFn: () => searchDocuments(organizationId, submitted),
     enabled: submitted.length >= 2,
   });
+  const runEvaluation = useMutation({ mutationFn: async () => { const question = await createKnowledgeEvaluation(organizationId, evaluationQuestion, evaluationEvidence.split(",").map((item) => item.trim()).filter(Boolean), evaluationMode); return runKnowledgeEvaluation(organizationId, question.id); }, onSuccess: setEvaluation });
+  const comparison = useQuery({ queryKey: ["knowledge-evaluation-comparison", organizationId], queryFn: () => compareKnowledgeEvaluations(organizationId) });
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
@@ -95,7 +103,20 @@ function KnowledgeWorkspace({
           Uploaded documents, indexing status, and retrieved evidence for {organizationName}.
         </p>
       </header>
-      <ProviderNotice organizationId={organizationId} detail />
+      <section className="rounded-[10px] bg-muted p-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium">AI quality evaluation</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Run safe, non-sending checks against this organization’s evidence.</p>
+          </div>
+          <select aria-label="Evaluation mode" value={evaluationMode} onChange={(event) => setEvaluationMode(event.target.value)} className="h-10 rounded-[10px] bg-secondary px-3 text-sm">
+            <option value="grounded">Retrieval / grounded</option>
+            <option value="missing_knowledge">Missing knowledge</option>
+            <option value="human_handoff">Human handoff</option>
+            <option value="low_confidence">Low confidence</option>
+          </select>
+        </div>
+      </section>
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
       <div className="flex flex-col gap-4">
       <section className="rounded-[10px] bg-muted p-4">
@@ -198,11 +219,23 @@ function KnowledgeWorkspace({
               <p className="font-medium">
                 {hit.document_title}
                 {hit.page_number !== null ? ` · page ${hit.page_number}` : ""}
+                <span className="ml-2 text-xs text-muted-foreground">score {hit.score.toFixed(4)}</span>
               </p>
               <p className="mt-2 whitespace-pre-wrap leading-6 text-muted-foreground">{hit.content}</p>
             </li>
           ))}
         </ul>
+        <div className="mt-6 border-t border-border pt-4">
+          <h3 className="text-sm font-medium">Retrieval evaluation</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Run an organization-scoped evidence check against indexed documents.</p>
+          <div className="mt-3 grid gap-2">
+            <Input aria-label="Evaluation question" placeholder="Question to evaluate" value={evaluationQuestion} onChange={(event) => setEvaluationQuestion(event.target.value)} />
+            <Input aria-label="Expected evidence" placeholder="Expected evidence terms, comma separated" value={evaluationEvidence} onChange={(event) => setEvaluationEvidence(event.target.value)} />
+            <Button onClick={() => runEvaluation.mutate()} disabled={!evaluationQuestion.trim() || runEvaluation.isPending}>{runEvaluation.isPending ? "Evaluating…" : "Run evaluation"}</Button>
+          </div>
+          {evaluation ? <div className="mt-3 rounded-md bg-secondary p-3 text-sm"><p className={evaluation.answer_grounded ? "text-success" : "text-warning"}>{evaluation.answer_grounded ? "Evaluation passed." : evaluation.failure_reason ?? "Evaluation requires review."}</p><p className="mt-1 text-xs text-muted-foreground">Mode: {String(evaluation.case_result.scenario ?? evaluationMode)} · side effects: {String(evaluation.case_result.side_effects ?? "none")}</p>{evaluation.retrieved_sources.length ? <p className="mt-1 text-xs text-muted-foreground">Sources: {evaluation.retrieved_sources.map((source) => `${source.document_title} (${source.score.toFixed(4)})`).join(", ")}</p> : null}</div> : null}
+          {comparison.data ? <p className="mt-3 text-xs text-muted-foreground">Historical comparison: {comparison.data.regressions.length} regressions, {comparison.data.improvements.length} improvements.</p> : null}
+        </div>
       </section>
       {selected ? (
         <ChunkList organizationId={organizationId} document={selected} />

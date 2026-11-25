@@ -77,6 +77,10 @@ function ApprovalsBody({
   const approvals = useQuery({
     queryKey: ["approvals", organizationId, status, page],
     queryFn: () => listApprovals(organizationId, { status, page }),
+    refetchInterval: (query) => {
+      const selected = query.state.data?.items.find((item) => item.id === selectedId);
+      return selected?.status === "executing" ? 1000 : false;
+    },
   });
   const automations = useQuery({
     queryKey: ["automations", organizationId],
@@ -102,6 +106,10 @@ function ApprovalsBody({
     },
     onSuccess: async (_approval, decision) => {
       onNote("");
+      // Keep the decided proposal visible and selected. The default Pending
+      // filter would otherwise remove it from the loaded list immediately,
+      // unmounting the detail panel before the operator can execute it.
+      onStatus("");
       onNotice(
         decision === "approve"
           ? "Approved. Execute writes the stored payload. Nothing is sent until then."
@@ -133,7 +141,11 @@ function ApprovalsBody({
     },
     onSuccess: async (approval) => {
       executeGuard.current = false;
-      onNotice("Executed. The stored result is on this approval.");
+      onNotice(
+        approval.status === "executing"
+          ? "Queued. The sandbox worker is processing the stored result."
+          : "Executed. The stored result is on this approval.",
+      );
       await queryClient.invalidateQueries({ queryKey: ["approvals", organizationId] });
       await queryClient.invalidateQueries({ queryKey: ["agent-runs", organizationId] });
       await queryClient.invalidateQueries({ queryKey: ["automations", organizationId] });

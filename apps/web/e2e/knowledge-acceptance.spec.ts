@@ -1,15 +1,12 @@
 import { expect, test } from "@playwright/test";
+import { signInAsSeedAdmin } from "./auth";
 
 test("Knowledge upload, indexing, search, inspection, and removal", async ({ page }) => {
   const stamp = Date.now().toString();
   const title = `Knowledge acceptance ${stamp}`;
   const token = `warehouse-policy-${stamp}`;
 
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("admin@example.com");
-  await page.getByLabel("Password").fill("change-me-admin");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Operations overview" })).toBeVisible();
+  await signInAsSeedAdmin(page);
 
   await page.goto("/knowledge");
   await expect(page.getByRole("heading", { name: "Company knowledge" })).toBeVisible();

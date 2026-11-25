@@ -45,7 +45,7 @@ export function ContactsPanel({ organizationId, selectedId: requestedId, onNavig
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [includeArchived, setIncludeArchived] = useState(false);
+  const [includeArchived, setIncludeArchived] = useState(Boolean(requestedId));
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
   const contacts = useQuery({
@@ -75,9 +75,9 @@ export function ContactsPanel({ organizationId, selectedId: requestedId, onNavig
     companies.data?.items.find((company) => company.id === companyId)?.name ?? "—";
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
-      <section className="rounded-[10px] bg-muted">
-        <div className="flex flex-col gap-3 p-4 sm:flex-row">
+    <div className={selected ? "grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.8fr)]" : "min-w-0"}>
+      <section className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_18px_60px_rgba(0,0,0,0.16)]">
+        <div className="flex flex-col gap-3 border-b border-border/80 bg-card/80 p-4 sm:flex-row">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search contacts" aria-label="Search contacts" />
           <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} /> Show archived</label>
           <Button type="button" onClick={() => setOpen(true)}>New contact</Button>
@@ -100,7 +100,7 @@ export function ContactsPanel({ organizationId, selectedId: requestedId, onNavig
               {contacts.data.items.map((contact) => (
                 <TableRow key={contact.id} className={contact.id === selectedId ? "bg-accent/40" : undefined}>
                   <TableCell>
-                    <button type="button" className="text-left font-medium" onClick={() => setSelectedId(contact.id)}>
+                    <button type="button" className="text-left font-medium" onClick={() => onNavigate({ tab: "contacts", id: contact.id })}>
                       {contact.full_name}
                     </button>
                   </TableCell>
@@ -223,7 +223,7 @@ function ContactEditor({
   const remove = useMutation({ mutationFn: () => deleteContact(organizationId, contact.id), onSuccess: onDeleted });
   const restore = useMutation({ mutationFn: () => restoreContact(organizationId, contact.id), onSuccess: onDeleted });
   return (
-    <aside className="rounded-[10px] bg-muted p-6">
+    <aside className="rounded-[10px] bg-muted p-6" data-testid="crm-detail-contacts" data-record-id={contact.id} data-archived={contact.archived_at ? "true" : "false"}>
       <h2 className="text-base font-semibold">{contact.full_name}</h2>
       <div className="mt-3 border-t border-border pt-3 text-sm"><h3 className="font-medium">Related records</h3><div className="mt-2 grid gap-1">
         {contact.company_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "companies", id: contact.company_id! })}>{companies.find((item) => item.id === contact.company_id)?.name ?? "Company"}</button> : null}

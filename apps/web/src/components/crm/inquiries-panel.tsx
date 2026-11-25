@@ -44,7 +44,7 @@ export function InquiriesPanel({ organizationId, selectedId: requestedId, onNavi
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [includeArchived, setIncludeArchived] = useState(false);
+  const [includeArchived, setIncludeArchived] = useState(Boolean(requestedId));
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
   const inquiries = useQuery({
@@ -71,9 +71,9 @@ export function InquiriesPanel({ organizationId, selectedId: requestedId, onNavi
   const selected = inquiries.data?.items.find((item) => item.id === selectedId) ?? null;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.8fr)]">
-      <section className="rounded-[10px] bg-muted">
-        <div className="flex flex-col gap-3 p-4 sm:flex-row">
+    <div className={selected ? "grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.8fr)]" : "min-w-0"}>
+      <section className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_18px_60px_rgba(0,0,0,0.16)]">
+        <div className="flex flex-col gap-3 border-b border-border/80 bg-card/80 p-4 sm:flex-row">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search inquiries" aria-label="Search inquiries" />
           <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} /> Show archived</label>
           <Button type="button" onClick={() => setOpen(true)}>New inquiry</Button>
@@ -95,7 +95,7 @@ export function InquiriesPanel({ organizationId, selectedId: requestedId, onNavi
               {inquiries.data.items.map((inquiry) => (
                 <TableRow key={inquiry.id} className={inquiry.id === selectedId ? "bg-accent/40" : undefined}>
                   <TableCell>
-                    <button type="button" className="text-left font-medium" onClick={() => setSelectedId(inquiry.id)}>{inquiry.subject}</button>
+                    <button type="button" className="text-left font-medium" onClick={() => onNavigate({ tab: "inquiries", id: inquiry.id })}>{inquiry.subject}</button>
                   </TableCell>
                   <TableCell>{new Date(inquiry.created_at).toLocaleDateString()}</TableCell>
                 </TableRow>
@@ -212,7 +212,7 @@ function InquiryEditor({
   const remove = useMutation({ mutationFn: () => deleteInquiry(organizationId, inquiry.id), onSuccess: onDeleted });
   const restore = useMutation({ mutationFn: () => restoreInquiry(organizationId, inquiry.id), onSuccess: onDeleted });
   return (
-    <aside className="rounded-[10px] bg-muted p-6">
+    <aside className="rounded-[10px] bg-muted p-6" data-testid="crm-detail-inquiries" data-record-id={inquiry.id} data-archived={inquiry.archived_at ? "true" : "false"}>
       <h2 className="text-base font-semibold">{inquiry.subject}</h2>
       <div className="mt-3 border-t border-border pt-3 text-sm"><h3 className="font-medium">Related records</h3><div className="mt-2 grid gap-1">
         {inquiry.company_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "companies", id: inquiry.company_id! })}>{companies.find((item) => item.id === inquiry.company_id)?.name ?? "Company"}</button> : null}

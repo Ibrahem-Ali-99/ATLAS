@@ -1,11 +1,13 @@
+# ruff: noqa: E501
 import hashlib
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.errors import AppError
 from app.domains.agents.models import AgentEvent, AgentRun, RunStatus
 from app.domains.approvals.models import ActionType, Approval, ApprovalStatus
@@ -19,10 +21,12 @@ from app.domains.automation.models import (
     IntentStatus,
 )
 from app.domains.crm import service as crm
-from app.domains.crm.models import Contact, InteractionKind
+from app.domains.crm.models import Contact, InteractionKind, Lead
+from app.domains.inbox.models import InboxMessage
 from app.integrations.calendar import Slot, calendar_adapter
 from app.integrations.email import OutboundEmail, normalize_recipient, send_email
 from app.integrations.outcomes import DeliveryFailed, OutcomeUncertain
+from app.integrations.whatsapp import send_whatsapp_text
 
 _MAX_ATTEMPTS = 2
 
@@ -214,41 +218,112 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
     if not isinstance(body, str) or not body.strip():
         raise AppError(409, "approval_invalid", "The action payload no longer matches the approval")
     if intent.action_type == ActionType.prepare_customer_response:
+        lead = db.scalar(
+            select(Lead).where(
+                Lead.id == lead_id,
+                Lead.organization_id == intent.organization_id,
+            )
+        )
+        if lead is None:
+            raise AppError(404, "not_found", "Resource not found")
         recipient = payload.get("to")
         if not isinstance(recipient, str):
             raise AppError(422, "invalid_recipient", "The approved action has no recipient")
         raw_contact_id = payload.get("contact_id")
-        contact_id = _uuid(raw_contact_id) if raw_contact_id else None
+        if not raw_contact_id:
+            raise AppError(409, "recipient_not_owned", "The approved action has no CRM contact")
+        contact_id = _uuid(raw_contact_id)
         snapshot = payload.get("recipient_snapshot")
-        if contact_id is not None:
-            contact = db.scalar(
-                select(Contact).where(
-                    Contact.id == contact_id,
-                    Contact.organization_id == intent.organization_id,
-                )
+        contact = db.scalar(
+            select(Contact).where(
+                Contact.id == contact_id,
+                Contact.organization_id == intent.organization_id,
             )
-            if contact is None or not contact.email:
+        )
+        channel = str(payload.get("channel", "email"))
+        if contact is None:
+            raise AppError(
+                422,
+                "invalid_recipient",
+                "The approved recipient is not an organization contact",
+            )
+        contact_value = contact.email if channel == "email" else contact.phone
+        if not contact_value:
+            raise AppError(
+                422,
+                "invalid_recipient",
+                "The approved contact has no channel address",
+            )
+        if lead.contact_id != contact.id:
+            raise AppError(409, "recipient_not_owned", "The recipient is not linked to this lead")
+        if not isinstance(snapshot, str) or normalize_recipient(snapshot) != normalize_recipient(
+            contact_value
+        ):
+            raise AppError(
+                409,
+                "recipient_changed",
+                "The approved recipient changed; review the action again",
+            )
+        if normalize_recipient(recipient) != normalize_recipient(snapshot):
+            raise AppError(
+                409,
+                "recipient_changed",
+                "The approved recipient changed; review the action again",
+            )
+        recipient = contact_value
+        if get_settings().email_mode == "live":
+            from app.integrations.email_delivery_policy import live_delivery_eligibility
+
+            eligibility = live_delivery_eligibility(
+                db,
+                intent,
+                current_recipient=recipient,
+            )
+            if not eligibility.eligible:
                 raise AppError(
-                    422,
-                    "invalid_recipient",
-                    "The approved recipient is not an organization contact",
+                    503,
+                    "live_delivery_ineligible",
+                    eligibility.reason or "Live delivery is not eligible",
                 )
-            if not isinstance(snapshot, str) or normalize_recipient(
-                snapshot
-            ) != normalize_recipient(contact.email):
-                raise AppError(
-                    409,
-                    "recipient_changed",
-                    "The approved recipient changed; review the action again",
-                )
-            if normalize_recipient(recipient) != normalize_recipient(snapshot):
-                raise AppError(
-                    409,
-                    "recipient_changed",
-                    "The approved recipient changed; review the action again",
-                )
-            recipient = contact.email
         subject = payload.get("subject")
+        if channel == "whatsapp":
+            last_inbound = payload.get("last_inbound_at")
+            template_name = payload.get("template_name")
+            if isinstance(last_inbound, str):
+                try:
+                    inbound_at = datetime.fromisoformat(last_inbound)
+                except ValueError as exc:
+                    raise AppError(
+                        409, "approval_invalid", "The WhatsApp conversation timestamp is invalid"
+                    ) from exc
+                if inbound_at.tzinfo is None:
+                    inbound_at = inbound_at.replace(tzinfo=UTC)
+                if datetime.now(UTC) - inbound_at > timedelta(hours=24) and not isinstance(
+                    template_name, str
+                ):
+                    raise AppError(
+                        409,
+                        "whatsapp_template_required",
+                        "A WhatsApp template is required outside the customer-service window",
+                    )
+            provider_message_id = send_whatsapp_text(
+                db,
+                intent.organization_id,
+                recipient,
+                body.strip()[:4000],
+                template_name=template_name if isinstance(template_name, str) else None,
+                template_language=str(payload.get("template_language", "en_US")),
+            )
+            return {
+                "kind": "whatsapp",
+                "lead_id": str(lead_id),
+                "conversation_id": payload.get("conversation_id"),
+                "recipient": recipient.strip(),
+                "subject": "",
+                "body": body.strip()[:4000],
+                "message_id": provider_message_id,
+                "email_mode": "whatsapp",
+            }
         receipt = send_email(
             OutboundEmail(
                 recipient=recipient,
@@ -264,6 +339,7 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
         return {
             "kind": "email",
             "lead_id": str(lead_id),
+            "conversation_id": payload.get("conversation_id"),
             "recipient": recipient.strip(),
             "subject": subject.strip()[:200]
             if isinstance(subject, str) and subject.strip()
@@ -366,7 +442,7 @@ def _record_success(db: Session, intent: ExecutionIntent, plan: dict[str, Any]) 
         raise AppError(404, "not_found", "Resource not found")
     lead_id = uuid.UUID(str(plan["lead_id"]))
     author = approval.decided_by or approval.requested_by
-    if plan["kind"] == "email":
+    if plan["kind"] in {"email", "whatsapp"}:
         interaction = crm.add_interaction(
             db,
             intent.organization_id,
@@ -378,6 +454,9 @@ def _record_success(db: Session, intent: ExecutionIntent, plan: dict[str, Any]) 
         email = EmailMessage(
             organization_id=intent.organization_id,
             lead_id=lead_id,
+            conversation_id=_uuid(plan.get("conversation_id"))
+            if plan.get("conversation_id")
+            else None,
             intent_id=intent.id,
             recipient=str(plan["recipient"]),
             subject=str(plan["subject"]),
@@ -390,6 +469,28 @@ def _record_success(db: Session, intent: ExecutionIntent, plan: dict[str, Any]) 
         )
         db.add(email)
         db.flush()
+        conversation_id = (
+            _uuid(plan.get("conversation_id")) if plan.get("conversation_id") else None
+        )
+        if conversation_id is not None and not db.scalar(
+            select(InboxMessage.id).where(
+                InboxMessage.organization_id == intent.organization_id,
+                InboxMessage.provider_message_id == str(plan["message_id"]),
+            )
+        ):
+            db.add(
+                InboxMessage(
+                    organization_id=intent.organization_id,
+                    conversation_id=conversation_id,
+                    sender="ATLAS",
+                    recipient=str(plan["recipient"]),
+                    body=str(plan["body"]),
+                    direction="outbound",
+                    channel="whatsapp" if plan["kind"] == "whatsapp" else "email",
+                    delivery_status="sent",
+                    provider_message_id=str(plan["message_id"]),
+                )
+            )
         intent.external_id = str(plan["message_id"])
         return {
             "lead_id": str(lead_id),

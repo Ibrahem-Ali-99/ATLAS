@@ -56,6 +56,11 @@ export type AnalyticsSnapshot = {
   calendar: { booked: number; cancelled: number; providers: string[]; notice: string };
   recent_interactions: RecentInteraction[];
   recent_agent_activity: RecentAgentActivity[];
+  sales?: { opportunities_total: number; by_stage: { stage: string; count: number; value: number }[]; stage_trend: { day: string; stage: string; currency: string; count: number; value: number }[]; won: { count: number; value: number }; lost: { count: number; value: number }; tasks_completed: number; tasks_overdue: number; win_rate: number | null; average_won_value: number | null; currencies: { currency: string; count: number; value: number }[]; lead_to_opportunity: { eligible_leads: number; converted_leads: number; rate: number | null; definition: string } };
+  support?: { by_channel: { channel: string; status: string; count: number }[]; handoffs: number; volume_trend: { day: string; channel: string; count: number }[]; average_first_response_seconds: number | null; first_response_sample_size: number };
+  ai?: { requests: number; failed: number; failure_rate: number | null; trend: { day: string; status: string; count: number }[] };
+  evaluation?: { executed: number; passed: number; pass_rate: number | null };
+  workflow_performance?: { total: number; successful: number; failed: number; pending: number; running: number; success_rate: number | null; denominator: number; trend: { day: string; status: string; count: number }[] };
 };
 
 export type LeadPrediction = {
@@ -103,6 +108,8 @@ export type Diagnostics = {
   duration_buckets: { bucket: string; count: number }[];
   cost_usd: number | null;
   cost_notice: string;
+  workers: { id: string; kind: string; status: string; heartbeat_at: string; last_success_at: string | null; processed_count: number; last_error_code: string | null }[];
+  ingestion_jobs: { id: string; document_id: string; status: string; attempts: number; max_attempts: number; error_code: string | null; next_attempt_at: string; updated_at: string }[];
 };
 
 export type EvaluationItem = {
@@ -124,8 +131,14 @@ export type EvaluationItem = {
 export function getAnalytics(
   organizationId: string,
   scope: DataScope = "operational",
+  filters: { period?: string; startDate?: string; endDate?: string; ownerUserId?: string; channel?: string } = {},
 ): Promise<AnalyticsSnapshot> {
-  return apiFetch(organizationPath(organizationId, `/analytics?scope=${scope}`));
+  const query = new URLSearchParams({ scope, period: filters.period ?? "30d" });
+  if (filters.startDate) query.set("start_date", filters.startDate);
+  if (filters.endDate) query.set("end_date", filters.endDate);
+  if (filters.ownerUserId) query.set("owner_user_id", filters.ownerUserId);
+  if (filters.channel) query.set("channel", filters.channel);
+  return apiFetch(organizationPath(organizationId, `/analytics?${query.toString()}`));
 }
 
 export function scoreLead(organizationId: string, leadId: string): Promise<LeadPrediction> {

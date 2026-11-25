@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { signInAsSeedAdmin } from "./auth";
 
 const artifactDir = path.resolve(process.env.ATLAS_E2E_ARTIFACT_DIR ?? path.resolve(process.cwd(), "../../var/crm-browser-acceptance"));
 
@@ -16,11 +17,7 @@ test("CRM lifecycle persists relationships and recoverable archives", async ({ p
   const lead = `Browser Lead ${stamp}`;
   const inquiry = `Browser Inquiry ${stamp}`;
 
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("admin@example.com");
-  await page.getByLabel("Password").fill("change-me-admin");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Operations overview" })).toBeVisible();
+  await signInAsSeedAdmin(page);
 
   await page.getByRole("link", { name: "CRM", exact: true }).click();
   await page.getByRole("button", { name: "New company" }).click();
@@ -38,9 +35,9 @@ test("CRM lifecycle persists relationships and recoverable archives", async ({ p
 
   await page.getByRole("tab", { name: "Leads" }).click();
   await page.getByRole("button", { name: "New lead" }).click();
-  await page.getByLabel("Title").fill(lead);
+  await page.locator("#lead-create-title").fill(lead);
   await page.getByLabel("Company").selectOption({ label: company });
-  await page.getByLabel("Contact").selectOption({ label: contact });
+  await page.locator("#lead-create-contact").selectOption({ label: contact });
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("button", { name: lead })).toBeVisible();
   await page.getByLabel("Status", { exact: true }).selectOption("qualified");
@@ -57,27 +54,57 @@ test("CRM lifecycle persists relationships and recoverable archives", async ({ p
   await expect(page.getByRole("button", { name: inquiry })).toBeVisible();
 
   for (const tabName of ["Companies", "Contacts", "Leads", "Inquiries"]) {
+    const tabId = tabName.toLowerCase();
+    const recordName = tabName === "Companies" ? company : tabName === "Contacts" ? contact : tabName === "Leads" ? lead : inquiry;
     await page.getByRole("tab", { name: tabName }).click();
     await page.getByLabel("Show archived").check();
     await page.getByLabel("Search " + tabName.toLowerCase()).fill(
-      tabName === "Companies" ? company : tabName === "Contacts" ? contact : tabName === "Leads" ? lead : inquiry,
+      recordName,
     );
-    const record = page.getByRole("button", { name: tabName === "Companies" ? company : tabName === "Contacts" ? contact : tabName === "Leads" ? lead : inquiry });
+    const record = page.getByRole("button", { name: recordName, exact: true });
     await record.click();
     await page.getByRole("button", { name: "Archive" }).click();
-    await page.getByRole("button", { name: "Confirm archive" }).click();
-    await page.reload();
-    await page.getByRole("link", { name: "CRM", exact: true }).click();
-    await page.getByRole("tab", { name: tabName }).click();
-    await page.getByLabel("Show archived").uncheck();
-    await page.getByLabel("Search " + tabName.toLowerCase()).fill(
-      tabName === "Companies" ? company : tabName === "Contacts" ? contact : tabName === "Leads" ? lead : inquiry,
+    const [archiveResponse] = await Promise.all([
+      page.waitForResponse(
+        (response) => response.request().method() === "DELETE" && response.url().includes(`/${tabId}/`) && response.ok(),
+      ),
+      page.getByRole("button", { name: "Confirm archive" }).click(),
+    ]);
+    expect(archiveResponse.ok()).toBe(true);
+    await page.goto(`/crm?tab=${tabId}`);
+    await expect(page.getByRole("tab", { name: tabName, exact: true })).toHaveAttribute("aria-selected", "true");
+    const hiddenList = page.waitForResponse(
+      (response) => response.request().method() === "GET" && response.url().includes(`/${tabId}`) && response.url().includes("q=") && response.ok(),
     );
-    await expect(record).toHaveCount(0);
-    await page.getByLabel("Show archived").check();
-    await page.getByRole("button", { name: tabName === "Companies" ? company : tabName === "Contacts" ? contact : tabName === "Leads" ? lead : inquiry }).click();
-    await page.getByRole("button", { name: "Restore" }).click();
     await page.getByLabel("Show archived").uncheck();
+    await page.getByLabel("Search " + tabName.toLowerCase()).fill(recordName);
+    await hiddenList;
+    await expect(record).toHaveCount(0);
+    const archivedList = page.waitForResponse(
+      (response) => response.request().method() === "GET" && response.url().includes(`/${tabId}`) && response.url().includes("include_archived=true") && response.ok(),
+    );
+    await page.getByLabel("Show archived").check();
+    await page.getByLabel("Search " + tabName.toLowerCase()).fill(recordName);
+    await archivedList;
+    await expect(record).toBeVisible();
+    await record.click();
+    const detail = page.getByTestId(`crm-detail-${tabId}`);
+    await expect(detail, `${tabName} archived record detail did not open`).toBeVisible();
+    const selectedId = new URL(page.url()).searchParams.get("id");
+    expect(selectedId, `${tabName} selection id is missing`).toBeTruthy();
+    await expect(detail, `${tabName} detail selected a different record`).toHaveAttribute("data-record-id", selectedId ?? "");
+    await expect(detail, `${tabName} record is not archived in the detail response`).toHaveAttribute("data-archived", "true");
+    await expect(detail.getByRole("heading", { name: recordName, exact: true })).toBeVisible();
+    const [restoreResponse] = await Promise.all([
+      page.waitForResponse(
+        (response) => response.request().method() === "POST" && response.url().includes(`/restore`) && response.ok(),
+      ),
+      page.getByRole("button", { name: "Restore", exact: true }).click(),
+    ]);
+    expect(restoreResponse.ok()).toBe(true);
+    await page.getByLabel("Show archived").uncheck();
+    await page.getByLabel("Search " + tabName.toLowerCase()).fill(recordName);
+    await expect(record).toBeVisible();
   }
 
   await page.reload();
@@ -91,10 +118,7 @@ test("CRM lifecycle persists relationships and recoverable archives", async ({ p
 
 test("CRM remains usable on a narrow viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("admin@example.com");
-  await page.getByLabel("Password").fill("change-me-admin");
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await signInAsSeedAdmin(page);
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("link", { name: "CRM", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Customer records" })).toBeVisible();

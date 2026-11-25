@@ -4,6 +4,7 @@ import path from "node:path";
 import { expect, test, type Page, type Response } from "@playwright/test";
 
 import { isStaleChunkError } from "../src/lib/chunk-error";
+import { signInAsSeedAdmin, signInAsSeedOutsider, signInAsSeedStaff } from "./auth";
 
 test("a missing JavaScript chunk is recognized as a stale bundle", () => {
   expect(
@@ -60,12 +61,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   page.on("pageerror", (error) => {
     pageErrors.push(error.message);
   });
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("admin@example.com");
-  await page.getByLabel("Password").fill("change-me-admin");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Operations overview" })).toBeVisible();
+  await signInAsSeedAdmin(page);
   await shot(page, "01-overview.png");
 
   await page.getByRole("link", { name: "CRM", exact: true }).click();
@@ -314,11 +310,7 @@ test("narrow viewport opens every page without a missing chunk", async ({ page }
   page.on("pageerror", (error) => {
     pageErrors.push(error.message);
   });
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("admin@example.com");
-  await page.getByLabel("Password").fill("change-me-admin");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await signInAsSeedAdmin(page);
   await shot(page, "12-overview-mobile.png");
   const pages: [string, string][] = [
     ["CRM", "/crm"],
@@ -364,11 +356,7 @@ test("narrow viewport opens every page without a missing chunk", async ({ page }
 });
 
 test("staff can use CRM and another organization cannot see Harbor records", async ({ page }) => {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("staff@example.com");
-  await page.getByLabel("Password").fill("change-me-staff");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await signInAsSeedStaff(page);
   await page.goto("/crm");
   await expect(page.getByRole("heading", { name: "Customer records" })).toBeVisible();
   await expect(page.getByRole("button", { name: "New company" })).toBeVisible();
@@ -377,10 +365,7 @@ test("staff can use CRM and another organization cannot see Harbor records", asy
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
 
-  await page.getByLabel("Email").fill("outsider@example.org");
-  await page.getByLabel("Password").fill("change-me-outsider");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await signInAsSeedOutsider(page);
   await page.goto("/crm");
   await page.getByLabel("Search companies").fill("Harbor");
   await expect(page.getByRole("cell", { name: "Harbor & Co." })).toHaveCount(0);

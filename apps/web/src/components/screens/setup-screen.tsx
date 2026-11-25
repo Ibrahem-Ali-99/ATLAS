@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import { ProviderNotice, getProviderStatus } from "@/components/provider-notice";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAutomations } from "@/lib/automations";
-import { listCompanies, listDocuments, listInquiries, listLeads } from "@/lib/records-api";
+import { getDocumentJob, listCompanies, listDocuments, listInquiries, listLeads, uploadDocument } from "@/lib/records-api";
 import { useWorkspace } from "@/lib/use-workspace";
+import { getOnboarding, saveAgentConfiguration, saveOnboarding, testOnboardingAssistant } from "@/lib/onboarding";
 
 type State = "ready" | "attention" | "not_configured" | "verified";
 
@@ -22,6 +24,8 @@ const stateCopy: Record<State, { label: string; className: string }> = {
 export function SetupScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
+  const queryClient = useQueryClient();
+  const onboarding = useQuery({ queryKey: ["onboarding", organizationId], queryFn: () => getOnboarding(organizationId ?? ""), enabled: Boolean(organizationId) });
   const provider = useQuery({
     queryKey: ["provider-status", organizationId],
     queryFn: () => getProviderStatus(organizationId ?? ""),
@@ -54,6 +58,8 @@ export function SetupScreen() {
   });
 
   if (!organizationId) return null;
+  const setup = onboarding.data?.setup;
+  const agent = onboarding.data?.agent;
 
   const providerReady = Boolean(provider.data?.llm_ready && provider.data.embedding_ready);
   const knowledgeReady = Boolean(documents.data?.items.some((item) => item.status === "ready"));
@@ -84,6 +90,8 @@ export function SetupScreen() {
         </p>
       </header>
       <ProviderNotice organizationId={organizationId} detail />
+      <OnboardingForms organizationId={organizationId} initialName={workspace.organizationName ?? "Organization"} setup={setup} agent={agent} onSaved={() => void queryClient.invalidateQueries({ queryKey: ["onboarding", organizationId] })} />
+      <KnowledgeOnboarding organizationId={organizationId} />
       <section className="rounded-[10px] bg-muted p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -123,4 +131,29 @@ export function SetupScreen() {
       <p className="text-xs leading-5 text-subtle">Provider credentials are operator-managed and restart-sensitive in this deployment. ATLAS does not offer a misleading in-browser save button for them.</p>
     </div>
   );
+}
+
+function OnboardingForms({ organizationId, initialName, setup, agent, onSaved }: { organizationId: string; initialName: string; setup?: { business_description: string | null; industry: string | null; timezone: string; language: string; completed: boolean }; agent?: { assistant_name: string; purpose: string; tone: string; response_language: string; business_instructions: string }; onSaved: () => void }) {
+  const [name, setName] = useState(initialName);
+  const [description, setDescription] = useState("");
+  const [assistantName, setAssistantName] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [industry, setIndustry] = useState("");
+  const [timezone, setTimezone] = useState("UTC");
+  const [language, setLanguage] = useState("en");
+  const [question, setQuestion] = useState("What should I know about our customer workspace?");
+  const [testResult, setTestResult] = useState("");
+  const [message, setMessage] = useState("");
+  useEffect(() => { if (setup && agent) { setDescription(setup.business_description ?? ""); setIndustry(setup.industry ?? ""); setTimezone(setup.timezone); setLanguage(setup.language); setAssistantName(agent.assistant_name); setInstructions(agent.business_instructions); } }, [setup, agent]);
+  const save = useMutation({ mutationFn: async () => { await saveOnboarding(organizationId, { name: name || "Organization", business_description: description, industry, timezone, language, completed: true }); return saveAgentConfiguration(organizationId, { assistant_name: assistantName || "ATLAS Assistant", purpose: agent?.purpose ?? "Help the team understand and act on customer information.", tone: agent?.tone ?? "professional", response_language: agent?.response_language ?? language, business_instructions: instructions }); }, onSuccess: () => { setMessage("Setup saved."); onSaved(); }, onError: (error) => setMessage(error instanceof Error ? error.message : "Setup could not be saved.") });
+  const assistantTest = useMutation({ mutationFn: () => testOnboardingAssistant(organizationId, question), onSuccess: (result) => setTestResult(`${result.message}${result.sources.length ? ` Sources: ${result.sources.map((source) => source.title ?? source.document_title ?? "workspace evidence").join(", ")}` : " No knowledge sources were used."}`), onError: (error) => setTestResult(error instanceof Error ? error.message : "Assistant test failed.") });
+  return <section className="rounded-[10px] bg-muted p-5" aria-label="Organization onboarding"><div className="grid gap-4 lg:grid-cols-2"><div><h2 className="text-lg text-foreground">Organization profile</h2><label className="mt-3 grid gap-2 text-sm"><span>Business description</span><textarea className="min-h-24 rounded-md border border-input bg-background p-3" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What does your team help customers with?" /></label><label className="mt-3 grid gap-2 text-sm"><span>Industry</span><input className="h-10 rounded-md border border-input bg-background px-3" value={industry} onChange={(e) => setIndustry(e.target.value)} /></label><label className="mt-3 grid gap-2 text-sm"><span>Timezone</span><input className="h-10 rounded-md border border-input bg-background px-3" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Africa/Cairo" /></label><label className="mt-3 grid gap-2 text-sm"><span>Preferred language</span><select className="h-10 rounded-md border border-input bg-background px-3" value={language} onChange={(e) => setLanguage(e.target.value)}><option value="en">English</option><option value="ar">Arabic</option><option value="fr">French</option></select></label></div><div><h2 className="text-lg text-foreground">Assistant configuration</h2><label className="mt-3 grid gap-2 text-sm"><span>Assistant name</span><input className="h-10 rounded-md border border-input bg-background px-3" value={assistantName} onChange={(e) => setAssistantName(e.target.value)} /></label><label className="mt-3 grid gap-2 text-sm"><span>Business instructions</span><textarea className="min-h-24 rounded-md border border-input bg-background p-3" value={instructions} onChange={(e) => setInstructions(e.target.value)} placeholder="Useful context and preferences; safety rules remain enforced." /></label><h3 className="mt-5 text-base text-foreground">Test your assistant</h3><input className="mt-3 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={question} onChange={(e) => setQuestion(e.target.value)} /><Button className="mt-3" variant="outline" onClick={() => assistantTest.mutate()} disabled={assistantTest.isPending}>Run assistant test</Button>{testResult ? <p className="mt-3 whitespace-pre-wrap text-sm text-muted-foreground" role="status">{testResult}</p> : null}</div></div><div className="mt-4 flex items-center gap-3"><Button onClick={() => save.mutate()} disabled={save.isPending}>Save setup</Button>{message ? <span className="text-sm text-muted-foreground" role="status">{message}</span> : null}</div></section>;
+}
+
+function KnowledgeOnboarding({ organizationId }: { organizationId: string }) {
+  const [job, setJob] = useState<{ document_id: string; status: string; error_message?: string | null } | null>(null);
+  const [message, setMessage] = useState("");
+  const upload = useMutation({ mutationFn: (file: File) => uploadDocument(organizationId, file), onSuccess: (document) => { setMessage("Document uploaded. Processing has started."); setJob({ document_id: document.id, status: document.status }); }, onError: (error) => setMessage(error instanceof Error ? error.message : "Document upload failed.") });
+  useEffect(() => { if (!job || !["queued", "running", "retrying"].includes(job.status)) return; const timer = window.setInterval(() => { void getDocumentJob(organizationId, job.document_id).then(setJob).catch(() => undefined); }, 2000); return () => window.clearInterval(timer); }, [job, organizationId]);
+  return <section className="rounded-[10px] bg-muted p-5" aria-label="Knowledge setup"><h2 className="text-lg text-foreground">Add optional knowledge</h2><p className="mt-1 text-sm text-muted-foreground">Upload a PDF or TXT file to ground the Assistant. You can finish setup without a document.</p><label className="mt-4 block text-sm"><span className="sr-only">Choose knowledge document</span><input type="file" accept="application/pdf,text/plain" onChange={(event) => { const file = event.target.files?.[0]; if (file) upload.mutate(file); }} disabled={upload.isPending} /></label>{message ? <p className="mt-3 text-sm text-muted-foreground" role="status">{message}</p> : null}{job ? <div className="mt-3 rounded-md border border-border p-3 text-sm"><p>Ingestion status: <strong>{job.status}</strong></p>{job.error_message ? <p className="mt-1 text-destructive">{job.error_message}</p> : null}{job.status === "failed" ? <Link className="mt-2 inline-block text-primary" href="/knowledge">Open Knowledge to recover →</Link> : null}</div> : null}</section>;
 }

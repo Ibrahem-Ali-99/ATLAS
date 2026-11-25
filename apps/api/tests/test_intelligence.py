@@ -9,6 +9,7 @@ from app.domains.analytics.service import snapshot
 from app.domains.crm.models import Lead, LeadStatus
 from app.domains.evaluation.service import run_evaluation
 from app.domains.identity.models import MembershipRole
+from app.domains.inbox.models import InboxConversation
 from app.domains.ml.dataset import FEATURES, generate_leads, matrix
 from app.domains.ml.training import publish_model, train_lead_model
 from app.domains.observability.models import OperationTrace
@@ -126,6 +127,17 @@ def test_analytics_defines_empty_and_conversion(client: TestClient, db: Session)
     filled = snapshot(db, uuid.UUID(org))
     assert filled["leads_total"] == 2
     assert filled["conversion"]["rate"] == 0.5
+    db.add(
+        InboxConversation(
+            organization_id=atlas.id,
+            subject="Support question",
+            channel="webchat",
+        )
+    )
+    db.commit()
+    support = snapshot(db, atlas.id)
+    assert support["support"]["volume_trend"]
+    assert support["support"]["volume_trend"][0]["channel"] == "webchat"
     outsider_session = login(client, "metrics-out@example.org", PASSWORD)
     foreign = client.get(f"/api/v1/organizations/{_org(outsider_session)}/analytics")
     assert foreign.json()["leads_total"] == 0

@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
+import { signInAsSeedAdmin } from "./auth";
 
 const slug = `sample-e2e-${process.pid}-${Date.now()}`;
 const artifactDir = path.resolve(
@@ -55,11 +56,7 @@ test("populated workspace supports connected CRM operations", async ({ page }) =
     });
   });
 
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("admin@example.com");
-  await page.getByLabel("Password").fill("change-me-admin");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Operations overview" })).toBeVisible();
+  await signInAsSeedAdmin(page);
   authenticated = true;
   await page.getByLabel("Organization").selectOption({ label: "ATLAS Sample Workspace" });
   await expect(page.locator("#organization-selector option:checked")).toHaveText("ATLAS Sample Workspace");
@@ -144,10 +141,7 @@ test("populated workspace supports connected CRM operations", async ({ page }) =
 
 test("populated workspace remains usable on mobile", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/login");
-  await page.getByLabel("Email").fill("admin@example.com");
-  await page.getByLabel("Password").fill("change-me-admin");
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await signInAsSeedAdmin(page);
   await page.getByLabel("Organization").selectOption({ label: "ATLAS Sample Workspace" });
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("link", { name: "CRM", exact: true }).click();

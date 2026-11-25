@@ -14,14 +14,24 @@ from app.domains.identity.login_limit import (
     note_login_success,
 )
 from app.domains.identity.models import User
-from app.domains.identity.schemas import AuthResponse, LoginRequest, membership_out, user_out
+from app.domains.identity.schemas import (
+    AuthResponse,
+    LoginRequest,
+    PasswordResetConfirm,
+    PasswordResetRequest,
+    membership_out,
+    user_out,
+)
 from app.domains.identity.service import (
     authenticate,
+    create_password_reset,
     list_memberships,
     normalize_email,
+    reset_password,
     revoke_session,
     start_session,
 )
+from app.integrations.email import OutboundEmail, send_email
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/auth")
@@ -67,3 +77,27 @@ def logout(db: DbSession, session: CsrfSession) -> Response:
 @router.get("/me", response_model=AuthResponse)
 def me(db: DbSession, user: CurrentUser, session: CurrentSession) -> AuthResponse:
     return _auth_response(db, user, session.csrf_token)
+
+
+@router.post("/forgot-password", status_code=202)
+def forgot_password(body: PasswordResetRequest, db: DbSession) -> dict[str, str]:
+    token = create_password_reset(db, str(body.email))
+    if token:
+        try:
+            send_email(
+                OutboundEmail(
+                    recipient=str(body.email),
+                    subject="Reset your ATLAS password",
+                    body=f"Use this one-time reset token in the ATLAS password reset form: {token}",
+                    idempotency_key=f"password-reset:{token}",
+                )
+            )
+        except Exception:
+            logger.warning("password_reset_delivery_failed", error_code="delivery_failed")
+    return {"detail": "If the account exists, reset instructions have been sent."}
+
+
+@router.post("/reset-password", status_code=204)
+def confirm_password_reset(body: PasswordResetConfirm, db: DbSession) -> Response:
+    reset_password(db, body.token, body.password)
+    return Response(status_code=204)

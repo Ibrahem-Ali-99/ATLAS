@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -5,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import AppError
 from app.domains.assistant.service import conversation_title
 from app.domains.identity.models import MembershipRole
+from app.domains.knowledge.service import claim_ingestion_job, run_ingestion_job
 from app.integrations.language import get_chat_client, get_embedding_client
 from tests.ai_clients import GroundedChatClient, HashEmbeddingClient
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
@@ -17,6 +20,13 @@ def grounded_client(client: TestClient) -> TestClient:
     client.app.dependency_overrides[get_embedding_client] = lambda: HashEmbeddingClient()
     client.app.dependency_overrides[get_chat_client] = lambda: GroundedChatClient()
     return client
+
+
+def _process_ingestion() -> None:
+    worker_id = f"assistant-test-worker-{uuid.uuid4()}"
+    job = claim_ingestion_job(worker_id)
+    assert job is not None
+    run_ingestion_job(job, worker_id, HashEmbeddingClient())
 
 
 def test_assistant_cites_documents_and_crm_and_refuses_other_organizations(
@@ -62,6 +72,7 @@ def test_assistant_cites_documents_and_crm_and_refuses_other_organizations(
     )
     assert uploaded.status_code == 201, uploaded.text
     assert uploaded.json()["status"] == "pending" or uploaded.json()["status"] == "ready"
+    _process_ingestion()
     document = grounded_client.get(f"/api/v1/organizations/{org}/documents/{uploaded.json()['id']}")
     assert document.json()["status"] == "ready"
 

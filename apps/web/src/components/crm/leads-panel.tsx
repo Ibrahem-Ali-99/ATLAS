@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -18,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
+import { startAgentRun } from "@/lib/agent-api";
 import { getLeadPrediction, scoreLead } from "@/lib/intelligence";
 import {
   addInteraction,
@@ -59,7 +61,7 @@ export function LeadsPanel({ organizationId, selectedId: requestedId, initialSta
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<LeadStatus | "">(initialStatus);
   const [page, setPage] = useState(1);
-  const [includeArchived, setIncludeArchived] = useState(false);
+  const [includeArchived, setIncludeArchived] = useState(Boolean(requestedId));
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
   const leads = useQuery({
@@ -131,7 +133,7 @@ export function LeadsPanel({ organizationId, selectedId: requestedId, initialSta
               {leads.data.items.map((lead) => (
                 <TableRow key={lead.id} className={lead.id === selectedId ? "bg-accent/40" : undefined}>
                   <TableCell>
-                    <button type="button" className="text-left font-medium" onClick={() => setSelectedId(lead.id)}>{lead.title}</button>
+                    <button type="button" className="text-left font-medium" onClick={() => onNavigate({ tab: "leads", id: lead.id })}>{lead.title}</button>
                   </TableCell>
                   <TableCell><Badge variant="secondary">{lead.status}</Badge></TableCell>
                   <TableCell>{lead.source ?? "—"}</TableCell>
@@ -250,6 +252,7 @@ function LeadDetail({
   onChanged: () => void;
   onDeleted: () => void;
 }) {
+  const router = useRouter();
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -288,9 +291,14 @@ function LeadDetail({
       void history.refetch();
     },
   });
+  const linkedInquiry = inquiries.find((item) => item.lead_id === lead.id);
+  const followUp = useMutation({
+    mutationFn: () => startAgentRun(organizationId, linkedInquiry?.id ?? ""),
+    onSuccess: (result) => router.push(`/agent-runs?run=${result.run.id}`),
+  });
 
   return (
-    <aside className="min-w-0 space-y-5 rounded-lg border border-border bg-card p-5 shadow-sm">
+    <aside className="min-w-0 space-y-5 rounded-lg border border-border bg-card p-5 shadow-sm" data-testid="crm-detail-leads" data-record-id={lead.id} data-archived={lead.archived_at ? "true" : "false"}>
       <div>
         <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Lead detail</p><h2 className="mt-1 break-words text-lg font-semibold">{lead.title}</h2></div><Badge variant="secondary">{lead.status}</Badge></div>
       </div>
@@ -305,8 +313,12 @@ function LeadDetail({
       {remove.isError ? <RequestError error={remove.error} /> : null}
       <div className="flex gap-2">
         <Button type="submit" form="lead-edit" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
+        <Button type="button" variant="outline" disabled={!linkedInquiry || !lead.contact_id || followUp.isPending} onClick={() => followUp.mutate()} title={!linkedInquiry ? "Add an inquiry to this lead before drafting a follow-up" : undefined}>
+          {followUp.isPending ? "Drafting…" : "Draft follow-up"}
+        </Button>
         {lead.archived_at ? <Button type="button" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button> : <ConfirmButton label="Archive" confirmLabel="Confirm archive" pendingLabel="Archiving…" pending={remove.isPending} onConfirm={() => remove.mutate()} />}
       </div>
+      {followUp.isError ? <RequestError error={followUp.error} /> : null}
       <LeadScore organizationId={organizationId} leadId={lead.id} />
       <div className="border-t border-border pt-4">
         <h3 className="text-sm font-medium">Interaction history</h3>

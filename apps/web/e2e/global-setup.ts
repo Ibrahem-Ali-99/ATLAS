@@ -4,11 +4,11 @@ import path from "node:path";
 
 const apiRoot = path.resolve(process.cwd(), "../api");
 const repoRoot = path.resolve(process.cwd(), "../..");
-const pidFile = path.join(repoRoot, "var", "e2e-api.pid");
+const apiPort = Number(process.env.ATLAS_E2E_API_PORT ?? "8011");
+const pidFile = path.join(repoRoot, "var", `e2e-api-${apiPort}.pid`);
 const mailpitFile = path.join(repoRoot, "var", "e2e-mailpit.name");
 const mailpitHttpFile = path.join(repoRoot, "var", "e2e-mailpit.http-port");
-const logFile = path.join(repoRoot, "var", "e2e-api.log");
-const apiPort = Number(process.env.ATLAS_E2E_API_PORT ?? "8011");
+const logFile = path.join(repoRoot, "var", `e2e-api-${apiPort}.log`);
 const mailpitName = `atlas-e2e-mailpit-${process.pid}`;
 let mailpitPort = 0;
 
@@ -40,7 +40,7 @@ async function waitForHealth(url: string, api: ChildProcess): Promise<void> {
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw new Error("The e2e API did not become ready");
+  throw new Error(`The e2e API did not become ready at ${url}; see ${logFile}`);
 }
 
 function spawnApi(): Promise<ChildProcess> {
@@ -124,17 +124,40 @@ export default async function globalSetup(): Promise<void> {
   stopPreviousApi();
   mkdirSync(path.dirname(logFile), { recursive: true });
   writeFileSync(logFile, "e2e API startup\n", "utf8");
+  const e2eEnvironment = {
+    ...process.env,
+    // Docker's published port is a host IPv4 endpoint on Windows. Avoid the
+    // localhost IPv6-first resolution path during disposable database setup.
+    POSTGRES_HOST: process.env.ATLAS_E2E_POSTGRES_HOST ?? process.env.POSTGRES_HOST ?? "127.0.0.1",
+    ATLAS_E2E_POSTGRES_HOST: process.env.ATLAS_E2E_POSTGRES_HOST ?? process.env.POSTGRES_HOST ?? "127.0.0.1",
+  };
+  process.env.POSTGRES_HOST = e2eEnvironment.POSTGRES_HOST;
+  process.env.ATLAS_E2E_POSTGRES_HOST = e2eEnvironment.ATLAS_E2E_POSTGRES_HOST;
   const prepare = spawn(projectPython(), ["-m", "app.scripts.e2e_database"], {
     cwd: apiRoot,
     stdio: "inherit",
-    env: process.env,
+    env: e2eEnvironment,
   });
   const code = await new Promise<number>((resolve) => {
-    prepare.once("error", () => resolve(1));
-    prepare.once("exit", (status) => resolve(status ?? 1));
+    const timer = setTimeout(() => {
+      if (process.platform === "win32" && prepare.pid) {
+        execFileSync("taskkill", ["/PID", String(prepare.pid), "/T", "/F"], { stdio: "ignore" });
+      } else {
+        prepare.kill();
+      }
+      resolve(124);
+    }, 120_000);
+    prepare.once("error", () => {
+      clearTimeout(timer);
+      resolve(1);
+    });
+    prepare.once("exit", (status) => {
+      clearTimeout(timer);
+      resolve(status ?? 1);
+    });
   });
   if (code !== 0) {
-    throw new Error("The e2e database was not prepared");
+    throw new Error(`The e2e database was not prepared (exit ${code}); verify PostgreSQL readiness and inspect the setup output.`);
   }
   if (mailpitRequired()) {
     await startMailpit();

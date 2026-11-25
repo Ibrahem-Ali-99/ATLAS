@@ -13,6 +13,7 @@ from app.domains.agents.schemas import (
     StartRun,
 )
 from app.domains.approvals.schemas import ApprovalOut
+from app.domains.billing.service import enforce_limit
 from app.domains.crm import service as crm
 from app.domains.identity.dependencies import CsrfMember, DbSession, Member
 from app.domains.provenance.origin import DataScope
@@ -76,6 +77,7 @@ def list_runs(
 
 @router.post("/agent-runs", response_model=AgentRunDetail, status_code=201)
 def start_run(body: StartRun, member: CsrfMember, db: DbSession, chat: ChatDep) -> AgentRunDetail:
+    enforce_limit(db, member.organization.id, "ai_requests")
     run = service.start_run(db, member.organization.id, member.user.id, body.inquiry_id, chat)
     inquiry = crm.get_inquiry(db, member.organization.id, run.inquiry_id)
     return _detail(db, member.organization.id, run.id, inquiry.subject)

@@ -38,6 +38,20 @@ class OperationTrace(Base):
     detail: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 
+class WorkerHeartbeat(Base):
+    __tablename__ = "worker_heartbeats"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    worker_id: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    worker_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="idle")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class EvaluationRun(Base):
     __tablename__ = "evaluation_runs"
 

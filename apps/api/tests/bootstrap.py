@@ -34,7 +34,11 @@ def _load_postgres_defaults() -> None:
 def postgres_url(database: str) -> str:
     user = quote_plus(os.environ.get("POSTGRES_USER", "atlas"))
     password = quote_plus(os.environ.get("POSTGRES_PASSWORD", "atlas"))
-    host = os.environ.get("POSTGRES_HOST", "localhost")
+    # Use IPv4 explicitly for disposable Windows/Docker runs. ``localhost`` can
+    # resolve to an unreachable IPv6 listener before trying the mapped port.
+    host = os.environ.get("ATLAS_E2E_POSTGRES_HOST") or os.environ.get(
+        "POSTGRES_HOST", "127.0.0.1"
+    )
     port = os.environ.get("POSTGRES_PORT", "5432")
     return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
 
@@ -72,7 +76,15 @@ os.environ["ATLAS_N8N_LEAD_WEBHOOK_URL"] = ""
 def ensure_database(name: str) -> None:
     if name not in {"atlas_test", "atlas_migration_test", "atlas_e2e"}:
         raise RuntimeError(f"Refusing to create unexpected database {name}")
-    admin = create_engine(ADMIN_DATABASE_URL, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
+    admin = create_engine(
+        ADMIN_DATABASE_URL,
+        isolation_level="AUTOCOMMIT",
+        pool_pre_ping=True,
+        connect_args={
+            "connect_timeout": 5,
+            "options": "-c lock_timeout=5000 -c statement_timeout=30000",
+        },
+    )
     try:
         with admin.connect() as connection:
             exists = connection.execute(

@@ -25,6 +25,7 @@ class IntegrationType(enum.StrEnum):
     embedding = "embedding"
     n8n = "n8n"
     email = "email"
+    whatsapp = "whatsapp"
 
 
 class IntegrationStatus(enum.StrEnum):

@@ -18,6 +18,7 @@ from app.domains.approvals import models as approval_models  # noqa: F401
 from app.domains.assistant import models as assistant_models  # noqa: F401
 from app.domains.crm import models as crm_models  # noqa: F401
 from app.domains.identity import models  # noqa: F401
+from app.domains.identity import invitation_models  # noqa: F401
 from app.domains.integrations import models as integration_models  # noqa: F401
 from app.domains.knowledge import models as knowledge_models  # noqa: F401
 from app.domains.ml import models as ml_models  # noqa: F401
