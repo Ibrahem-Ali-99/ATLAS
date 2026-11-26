@@ -77,7 +77,7 @@ def customer_profile(
             {
                 "id": item.id,
                 "subject": item.subject,
-                "channel": item.channel.value,
+                "channel": item.channel if isinstance(item.channel, str) else item.channel.value,
                 "status": item.status.value,
                 "updated_at": item.updated_at,
             }

@@ -28,6 +28,7 @@ from app.scripts.portfolio_demo import (
 
 ROOT = Path(__file__).resolve().parents[4]
 DOCUMENT = ROOT / "docs" / "portfolio-demonstration.md"
+REHEARSAL = ROOT / "docs" / "portfolio-rehearsal.md"
 PUBLIC_CATALOG = ROOT / "apps" / "web" / "src" / "lib" / "public-catalog.ts"
 PUBLIC_SITE = ROOT / "apps" / "web" / "src" / "lib" / "public-site.ts"
 PUBLIC_DEMO = ROOT / "apps" / "web" / "src" / "app" / "(public)" / "demo" / "page.tsx"
@@ -87,6 +88,7 @@ def main() -> int:
     _require_prepared_scene(document, failures)
     _require_product_behavior(document, failures)
     _require_document_stays_offline(document, failures)
+    _require_rehearsal(failures)
     return _finish(failures)
 
 
@@ -330,6 +332,23 @@ def _require_product_behavior(document: str, failures: list[str]) -> None:
         failures.append("Workflow preview no longer says that nothing was saved")
     if "old passages" not in document.casefold() and "old passage" not in document.casefold():
         failures.append("Document no longer says replacement removes the old passages")
+
+
+def _require_rehearsal(failures: list[str]) -> None:
+    rehearsal = _read(REHEARSAL, failures)
+    if rehearsal is None:
+        return
+    for phrase in (
+        "## Acceptance",
+        "## Reset",
+        "## Release blockers",
+        "atlas_portfolio",
+        "Sandbox billing",
+        "That time is already booked",
+        "Thursday afternoon",
+    ):
+        if phrase not in rehearsal:
+            failures.append(f"Rehearsal record is missing {phrase!r}")
 
 
 def _require_document_stays_offline(document: str, failures: list[str]) -> None:
