@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -11,12 +11,15 @@ from app.domains.approvals.models import Approval, ApprovalStatus
 from app.domains.automation.models import (
     CalendarBooking,
     EmailMessage,
+    EmailStatus,
     ExecutionAttempt,
     WorkflowRun,
     WorkflowStatus,
 )
 from app.domains.crm.models import Inquiry
-from app.domains.knowledge.models import IngestionJob
+from app.domains.integrations.calendar_models import GoogleCalendarConnection
+from app.domains.integrations.models import IntegrationConfig
+from app.domains.knowledge.models import Document, DocumentStatus, IngestionJob, IngestionJobStatus
 from app.domains.observability.models import OperationTrace, WorkerHeartbeat
 from app.domains.provenance.origin import DataScope, scope_clause
 
@@ -31,6 +34,11 @@ _HINTS = {
 
 
 _FRESH_SECONDS = 45
+_RECENT = timedelta(hours=24)
+_ACTIVITY_NOTICE = (
+    "Current health is the latest stored state. Incidents are earlier records "
+    "and are not still running."
+)
 
 
 def diagnostics(
@@ -147,6 +155,7 @@ def diagnostics(
         ),
         "platform_visible": include_platform,
         "workers": _present_workers(workers, now) if include_platform else [],
+        "activity": _activity(db, organization_id, scope, now),
         "ingestion_jobs": [
             {
                 "id": row.id,
@@ -161,6 +170,329 @@ def diagnostics(
             for row in ingestion
         ],
     }
+
+
+def _activity(
+    db: Session,
+    organization_id: uuid.UUID,
+    scope: DataScope,
+    now: datetime,
+) -> dict[str, Any]:
+    cutoff = now - _RECENT
+    assistant_rows = list(
+        db.scalars(
+            select(OperationTrace)
+            .where(
+                OperationTrace.organization_id == organization_id,
+                OperationTrace.operation == "assistant_response",
+            )
+            .order_by(OperationTrace.started_at.desc())
+            .limit(50)
+        )
+    )
+    recent = [row for row in assistant_rows if _aware(row.started_at) >= cutoff]
+    earlier_errors = [
+        row for row in assistant_rows if _aware(row.started_at) < cutoff and row.status == "failed"
+    ]
+    if not recent:
+        assistant_status = "quiet"
+    elif recent[0].status == "failed":
+        assistant_status = "errors"
+    else:
+        assistant_status = "available"
+    recent_errors = [row for row in recent if row.status == "failed"]
+    documents = _count_map(
+        db.execute(
+            select(Document.status, func.count())
+            .where(
+                Document.organization_id == organization_id,
+                Document.archived_at.is_(None),
+            )
+            .group_by(Document.status)
+        ).all()
+    )
+    jobs = list(
+        db.scalars(
+            select(IngestionJob)
+            .where(IngestionJob.organization_id == organization_id)
+            .order_by(IngestionJob.updated_at.desc())
+            .limit(50)
+        )
+    )
+    workflow_counts = _count_map(
+        db.execute(
+            select(WorkflowRun.status, func.count())
+            .where(*_scoped(WorkflowRun, organization_id, scope))
+            .group_by(WorkflowRun.status)
+        ).all()
+    )
+    email_counts = _count_map(
+        db.execute(
+            select(EmailMessage.status, func.count())
+            .where(*_scoped(EmailMessage, organization_id, scope))
+            .group_by(EmailMessage.status)
+        ).all()
+    )
+    pending = list(
+        db.scalars(
+            select(Approval)
+            .where(
+                *_scoped(Approval, organization_id, scope),
+                Approval.status == ApprovalStatus.pending,
+            )
+            .order_by(Approval.created_at.asc())
+            .limit(50)
+        )
+    )
+    delayed = [item for item in pending if now - _aware(item.created_at) >= _RECENT]
+    oldest = None
+    if pending:
+        oldest = round((now - _aware(pending[0].created_at)).total_seconds() / 3600, 1)
+    connections, incidents = _integration_health(db, organization_id, now)
+    return {
+        "notice": _ACTIVITY_NOTICE,
+        "assistant": {
+            "status": assistant_status,
+            "recent_replies": len(recent),
+            "recent_errors": len(recent_errors),
+            "last_error_code": None if not recent_errors else recent_errors[0].error_code,
+            "earlier_errors": len(earlier_errors),
+        },
+        "knowledge": {
+            "ready": documents.get(DocumentStatus.ready.value, 0),
+            "indexing": documents.get(DocumentStatus.pending.value, 0)
+            + documents.get(DocumentStatus.processing.value, 0),
+            "failed": documents.get(DocumentStatus.failed.value, 0),
+            "retrying": sum(
+                1
+                for job in jobs
+                if job.status
+                in {
+                    IngestionJobStatus.queued,
+                    IngestionJobStatus.running,
+                    IngestionJobStatus.retrying,
+                }
+            ),
+        },
+        "workflows": {
+            "running": workflow_counts.get(WorkflowStatus.pending.value, 0)
+            + workflow_counts.get(WorkflowStatus.dispatching.value, 0)
+            + workflow_counts.get(WorkflowStatus.accepted.value, 0),
+            "needs_attention": workflow_counts.get(WorkflowStatus.needs_attention.value, 0),
+            "failed": workflow_counts.get(WorkflowStatus.failed.value, 0),
+            "completed": workflow_counts.get(WorkflowStatus.completed.value, 0),
+        },
+        "integrations": connections,
+        "connection_incidents": incidents,
+        "delivery": {
+            "sent": email_counts.get(EmailStatus.sent.value, 0),
+            "failed": email_counts.get(EmailStatus.failed.value, 0),
+            "needs_attention": email_counts.get(EmailStatus.needs_attention.value, 0),
+        },
+        "approvals": {
+            "pending": len(pending),
+            "delayed": len(delayed),
+            "oldest_pending_hours": oldest,
+        },
+        "recoverable": _recoverable(
+            jobs, workflow_counts, pending_attention=_attention_rows(db, organization_id, scope)
+        ),
+    }
+
+
+def _integration_health(
+    db: Session, organization_id: uuid.UUID, now: datetime
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    cutoff = now - _RECENT
+    traces = list(
+        db.scalars(
+            select(OperationTrace)
+            .where(
+                OperationTrace.organization_id == organization_id,
+                OperationTrace.status == "failed",
+                OperationTrace.provider.is_not(None),
+            )
+            .order_by(OperationTrace.started_at.desc())
+            .limit(40)
+        )
+    )
+    recent_errors: dict[str, str | None] = {}
+    incidents: list[dict[str, Any]] = []
+    for trace in traces:
+        provider = trace.provider or ""
+        if _aware(trace.started_at) >= cutoff:
+            recent_errors.setdefault(provider, trace.error_code)
+            continue
+        if len(incidents) < 10:
+            incidents.append(
+                {
+                    "provider": provider,
+                    "operation": trace.operation,
+                    "error_code": trace.error_code,
+                    "at": trace.started_at,
+                }
+            )
+    configs = list(
+        db.scalars(
+            select(IntegrationConfig)
+            .where(IntegrationConfig.organization_id == organization_id)
+            .order_by(IntegrationConfig.integration_type)
+        )
+    )
+    rows = [
+        _connection_row(
+            item.integration_type.value,
+            item.provider,
+            item.status.value,
+            item.verified_at,
+            item.verification_detail,
+            recent_errors.get(item.provider),
+        )
+        for item in configs
+    ]
+    calendar = db.get(GoogleCalendarConnection, organization_id)
+    if calendar is not None:
+        verified_at = calendar.connected_at if calendar.encrypted_token else None
+        stored_status = "disabled" if not calendar.encrypted_token else "configured"
+        if calendar.connection_error:
+            stored_status = "verification_failed"
+        rows.append(
+            _connection_row(
+                "calendar",
+                "google",
+                stored_status,
+                verified_at,
+                calendar.connection_error,
+                recent_errors.get("google"),
+            )
+        )
+    return rows, incidents
+
+
+def _connection_row(
+    kind: str,
+    provider: str,
+    stored_status: str,
+    verified_at: datetime | None,
+    detail: str | None,
+    recent_error: str | None,
+) -> dict[str, Any]:
+    health = _connection_health(stored_status, verified_at, detail, recent_error)
+    recovery, href = _connection_recovery(health)
+    return {
+        "type": kind,
+        "provider": provider,
+        "status": stored_status,
+        "verified": health == "connected",
+        "health": health,
+        "verified_at": verified_at,
+        "recovery": recovery,
+        "recovery_href": href,
+    }
+
+
+def _connection_health(
+    stored_status: str,
+    verified_at: datetime | None,
+    detail: str | None,
+    recent_error: str | None,
+) -> str:
+    evidence = f"{detail or ''} {recent_error or ''}".lower()
+    if _contains_any(
+        evidence, ("unauthor", "forbidden", "permission", "invalid_api", "credential")
+    ):
+        return "authentication_required"
+    if _contains_any(evidence, ("timeout", "unreachable", "unavailable")):
+        return "unavailable"
+    if stored_status == "verification_failed" or recent_error:
+        return "failed"
+    if verified_at is not None and stored_status != "disabled":
+        return "connected"
+    return "configured"
+
+
+def _contains_any(value: str, needles: tuple[str, ...]) -> bool:
+    return any(needle in value for needle in needles)
+
+
+def _connection_recovery(health: str) -> tuple[str | None, str | None]:
+    if health == "authentication_required":
+        return "Open Integrations and sign in again. This does not send a message.", "/integrations"
+    if health == "failed":
+        return (
+            "Open Integrations and run the connection test. The test does not send a message.",
+            "/integrations",
+        )
+    if health == "unavailable":
+        return (
+            "The last stored check could not reach the provider. Try the connection test later.",
+            "/integrations",
+        )
+    if health == "configured":
+        return "Saved. A successful verification is not stored yet.", "/integrations"
+    return None, None
+
+
+def _attention_rows(db: Session, organization_id: uuid.UUID, scope: DataScope) -> list[Approval]:
+    return list(
+        db.scalars(
+            select(Approval)
+            .where(
+                *_scoped(Approval, organization_id, scope),
+                Approval.status == ApprovalStatus.needs_attention,
+            )
+            .limit(20)
+        )
+    )
+
+
+def _recoverable(
+    jobs: list[IngestionJob],
+    workflow_counts: dict[Any, int],
+    *,
+    pending_attention: list[Approval],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for job in jobs:
+        retryable = job.status in {
+            IngestionJobStatus.queued,
+            IngestionJobStatus.running,
+            IngestionJobStatus.retrying,
+        } or (job.status == IngestionJobStatus.failed and job.attempts < job.max_attempts)
+        if not retryable:
+            continue
+        items.append(
+            {
+                "kind": "indexing",
+                "id": str(job.document_id),
+                "summary": f"{job.status.value} · {job.attempts}/{job.max_attempts}",
+            }
+        )
+    if workflow_counts.get(WorkflowStatus.needs_attention.value, 0):
+        items.append(
+            {
+                "kind": "workflow",
+                "id": None,
+                "summary": "A workflow run is waiting on an uncertain outcome.",
+            }
+        )
+    for approval in pending_attention:
+        items.append(
+            {
+                "kind": "approval",
+                "id": str(approval.id),
+                "summary": approval.action_type.value,
+            }
+        )
+    return items[:20]
+
+
+def _count_map(rows: list[Any]) -> dict[str, int]:
+    counted: dict[str, int] = {}
+    for status, count in rows:
+        key = status.value if hasattr(status, "value") else str(status)
+        counted[key] = int(count)
+    return counted
 
 
 def _present_workers(rows: list[WorkerHeartbeat], now: datetime) -> list[dict[str, Any]]:

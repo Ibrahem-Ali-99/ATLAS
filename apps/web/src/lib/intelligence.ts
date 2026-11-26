@@ -124,6 +124,34 @@ export type Diagnostics = {
   platform_visible?: boolean;
   workers: { id: string; kind: string; status: string; generation?: "current" | "previous"; heartbeat_at: string; last_success_at: string | null; processed_count: number; last_error_code: string | null }[];
   ingestion_jobs: { id: string; document_id: string; status: string; attempts: number; max_attempts: number; error_code: string | null; next_attempt_at: string; updated_at: string }[];
+  activity?: WorkspaceActivity;
+};
+
+export type WorkspaceActivity = {
+  notice: string;
+  assistant: {
+    status: "available" | "errors" | "quiet";
+    recent_replies: number;
+    recent_errors: number;
+    last_error_code: string | null;
+    earlier_errors: number;
+  };
+  knowledge: { ready: number; indexing: number; failed: number; retrying: number };
+  workflows: { running: number; needs_attention: number; failed: number; completed: number };
+  integrations: {
+    type: string;
+    provider: string;
+    status: string;
+    verified: boolean;
+    health?: "configured" | "connected" | "unavailable" | "authentication_required" | "failed";
+    verified_at?: string | null;
+    recovery?: string | null;
+    recovery_href?: string | null;
+  }[];
+  connection_incidents?: { provider: string; operation: string; error_code: string | null; at: string }[];
+  delivery: { sent: number; failed: number; needs_attention: number };
+  approvals: { pending: number; delayed: number; oldest_pending_hours: number | null };
+  recoverable: { kind: string; id: string | null; summary: string }[];
 };
 
 export type EvaluationItem = {

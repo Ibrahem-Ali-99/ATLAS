@@ -32,9 +32,9 @@ def organization_chat(request: Request, member: Member, db: DbSession) -> ChatCl
 ChatDep = Annotated[ChatClient, Depends(organization_chat)]
 
 
-def _run_out(run: object, subject: str) -> AgentRunOut:
+def _run_out(run: object, subject: str, model_steps: int = 0) -> AgentRunOut:
     model = AgentRunOut.model_validate(run)
-    return model.model_copy(update={"inquiry_subject": subject})
+    return model.model_copy(update={"inquiry_subject": subject, "model_steps": model_steps})
 
 
 def _detail(
@@ -44,7 +44,7 @@ def _detail(
     events = service.run_events(db, organization_id, run_id)
     approvals = service.run_approvals(db, organization_id, run_id)
     return AgentRunDetail(
-        run=_run_out(run, subject),
+        run=_run_out(run, subject, len(events)),
         events=[AgentEventOut.model_validate(item) for item in events],
         approvals=[ApprovalOut.model_validate(item) for item in approvals],
     )
@@ -71,7 +71,7 @@ def list_runs(
         page=page,
         page_size=page_size,
         total=total,
-        items=[_run_out(run, subject) for run, subject in rows],
+        items=[_run_out(run, subject, steps) for run, subject, steps in rows],
     )
 
 

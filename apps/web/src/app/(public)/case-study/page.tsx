@@ -56,45 +56,54 @@ export default function CaseStudyPage() {
 
       <Section title="Intelligent retrieval">
         <p>
-          Documents are chunked with page numbers when the extractor provides them. Embeddings are stored at 1536 or 768 dimensions, matching the configured model. Search uses cosine distance plus Postgres full text, and it only returns chunks from the caller&apos;s organization. The default maximum cosine distance is 0.55. A neighbor becomes model context when it shares a content word with the query, or when a vector-only neighbor is at or below distance 0.45. Rank alone does not put a neighbor into that context.
+          Documents are chunked at 800 characters with 100 characters of overlap, and page numbers are kept when the extractor provides them. Embeddings are stored at 1536 or 768 dimensions, matching the configured model. Search stays inside the caller&apos;s organization. The assistant default is the answerable pipeline: a hybrid candidate pool, then a second stage that keeps a passage only when the question&apos;s constraints occur together and the passage has the kind of fact being asked for. A negated mention does not count. Dense neighbors inside the 0.45 cosine gate are candidates, not answers.
         </p>
         <p>
-          A stored citation is chosen from the answer text: a row that contains a number, code, email, or distinctive word the answer states. The model does not choose the stored ids. A specific fact that appears in none of the supplied rows is replaced, in the stored message, with a sentence that the fact could not be confirmed. When retrieved rows are present, the server checks the completed draft before the client renders it. If neither documents nor CRM records match, the assistant stores a refusal and does not call the model.
+          A stored citation is chosen from the answer text: a row that contains a number, code, email, or distinctive word the answer states. The model does not choose the stored ids. <code>80000</code> and <code>80,000</code> are the same figure. A specific fact that appears in none of the supplied rows is replaced, in the stored message, with a sentence that the fact could not be confirmed. If neither documents nor CRM records qualify, the assistant stores a refusal and does not call the model.
+        </p>
+        <p>
+          Anonymous website chat and a visitor Assistant session do not call Groq or Ollama unless public inference is enabled. That switch stays off. The deterministic stand-in is the public path, not a measure of the hosted model.
         </p>
       </Section>
 
-      <Section title="Retrieval comparison">
+      <Section title="Retrieval evaluation">
         <p>
-          On {retrievalComparison.recordedOn} the hybrid path was compared with the previous reciprocal-rank path. The corpus was {retrievalComparison.documents} fictional documents and {retrievalComparison.questions} labeled questions, indexed with deterministic hash embeddings on a disposable test database. Ranked metrics use K = 5. The corpus is not the Harbor & Co. demonstration and was not written into the development database.
+          On {retrievalComparison.recordedOn} the frozen answerable pipeline was scored on two fictional corpora that are not Harbor &amp; Co. Plover Dock has {retrievalComparison.ploverQuestions} questions. Orry Beacon has {retrievalComparison.orryQuestions} and was written after the Plover scores. The rules were not changed to raise the Orry score. Both runs used hash embeddings and PostgreSQL full text on a disposable test database, and the rows were rolled back. Ranked metrics use K = 5. Generation used Groq <code>openai/gpt-oss-20b</code>.
         </p>
         <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full min-w-[28rem] text-left text-sm">
-            <caption className="sr-only">Baseline and hybrid retrieval measures</caption>
+          <table className="w-full min-w-[32rem] text-left text-sm">
+            <caption className="sr-only">Plover Dock and Orry Beacon retrieval measures</caption>
             <thead className="bg-muted text-muted-foreground">
               <tr>
                 <th scope="col" className="px-4 py-3 font-medium">Measure</th>
-                <th scope="col" className="px-4 py-3 font-medium">Baseline</th>
-                <th scope="col" className="px-4 py-3 font-medium">Hybrid</th>
+                <th scope="col" className="px-4 py-3 font-medium">Plover Dock</th>
+                <th scope="col" className="px-4 py-3 font-medium">Orry Beacon</th>
+                <th scope="col" className="px-4 py-3 font-medium">Target</th>
               </tr>
             </thead>
             <tbody>
               {retrievalComparison.rows.map((row) => (
                 <tr key={row.measure} className="border-t border-border">
                   <th scope="row" className="px-4 py-3 font-medium text-foreground">{row.measure}</th>
-                  <td className="px-4 py-3">{row.baseline}</td>
-                  <td className="px-4 py-3">{row.hybrid}</td>
+                  <td className="px-4 py-3">{row.plover}</td>
+                  <td className="px-4 py-3">{row.orry}</td>
+                  <td className="px-4 py-3">{row.target}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         <p>
-          Mean retrieval latency is the search itself on the machine that ran the comparison. It does not include a model call. The hybrid path is the default because recall, abstention, faithfulness, and citation accuracy improved on this set. Eight questions are not a production quality guarantee.
+          Recall on Plover Dock cleared 0.85. Abstention accuracy and factual correctness did not clear 0.90 and 0.85. Orry Beacon abstained on every unsupported question and its factual correctness was 0.50. Mean retrieval latency is the search itself. It does not include the Groq call. Public inference stayed off after both runs.
+        </p>
+      </Section>
+
+      <Section title="Inquiry agent">
+        <p>
+          An inquiry run is a LangGraph sequence. It loads the inquiry, classifies it with the configured chat model, then calls three read-only tools: <code>search_company_knowledge</code>, <code>find_contact</code>, and <code>get_lead</code>. Those tools do not accept an organization id and they do not write. The run stores a lead proposal, a reply draft, and an appointment request, then pauses. The model has no approval tool.
         </p>
         <p>
-          {retrievalComparison.heldOutRecorded
-            ? "The held-out evaluation is recorded with this comparison."
-            : "The held-out evaluation is not recorded on this page yet."}
+          An administrator approves or rejects each stored payload. Execute writes that payload, or does nothing if it changed. A completed row with no stored steps is a recorded booking or proposal. It is not a successful language-model execution.
         </p>
       </Section>
 
@@ -122,7 +131,7 @@ export default function CaseStudyPage() {
           A session cookie identifies the user. Organization access is loaded from memberships. Roles are admin and staff. Mutations other than login require the CSRF token issued for that server session. Retrieval, CRM, knowledge, assistant, agent, and approval routes require the membership. Approving or rejecting requires admin. Uploaded documents, retrieved passages, and model output are treated as data, not as instructions to execute.
         </p>
         <p>
-          Record origin is operational, demo, evaluation, or unknown, stored on the row. An organization is not itself one of those kinds. Analytics and several lists default to operational rows. The local seed writes new demonstration rows as demo.
+          Record origin is operational, demo, evaluation, or unknown, stored on the row. An organization is not itself one of those kinds. Analytics can be narrowed to operational rows. Agent runs, monitoring, and workflow activity open on every stored origin so a demonstration workspace stays visible, and an operator can narrow them. The local seed writes new demonstration rows as demo.
         </p>
       </Section>
 

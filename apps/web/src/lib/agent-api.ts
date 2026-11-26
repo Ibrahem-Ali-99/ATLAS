@@ -6,13 +6,51 @@ function organizationPath(organizationId: string, path: string): string {
   return `/api/v1/organizations/${organizationId}${path}`;
 }
 
+export type AssistantExecutionStep = {
+  sequence: number;
+  tool_name: string;
+  status: "succeeded" | "failed" | "recovered";
+  duration_ms: number;
+  arguments: Record<string, unknown>;
+  records: Array<Record<string, unknown>>;
+  error_message: string | null;
+  recovery: string | null;
+};
+
+export type AssistantExecution = {
+  id: string;
+  request: string;
+  status: "running" | "completed" | "failed";
+  tools: string[];
+  tokens_in: number | null;
+  tokens_out: number | null;
+  error_message: string | null;
+  started_at: string;
+  finished_at: string | null;
+  steps: AssistantExecutionStep[];
+};
+
+export type AssistantExecutionPage = {
+  items: AssistantExecution[];
+  page: number;
+  page_size: number;
+  total: number;
+};
+
+export function listAssistantExecutions(
+  organizationId: string,
+  page = 1,
+): Promise<AssistantExecutionPage> {
+  return apiFetch(organizationPath(organizationId, `/assistant-executions?page=${page}`));
+}
+
 export function listAgentRuns(
   organizationId: string,
   params: { status?: RunStatus | ""; page?: number; scope?: DataScope } = {},
 ): Promise<AgentRunPage> {
   const search = new URLSearchParams();
   search.set("page", String(params.page ?? 1));
-  search.set("scope", params.scope ?? "operational");
+  search.set("scope", params.scope ?? "all");
   if (params.status) {
     search.set("status", params.status);
   }

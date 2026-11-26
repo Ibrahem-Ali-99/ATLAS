@@ -80,7 +80,11 @@ export function isReleaseCapture(capture: ProductCapture): boolean {
 }
 
 const recordNote = "Figures in the capture are stored Harbor & Co. records.";
-const harbor = { width: 1440, height: 900, releaseReady: true, frame: "Harbor & Co." } as const;
+/**
+ * Held off the site until the redesigned workspace is captured.
+ * The files on disk are an earlier pass and are not the release set.
+ */
+const harbor = { width: 1440, height: 900, releaseReady: false, frame: "Harbor & Co." } as const;
 
 export const captures = {
   overview: {
@@ -199,8 +203,8 @@ export const captures = {
 } as const satisfies Record<string, ProductCapture>;
 
 /**
- * Product surfaces photographed at 1440×900. The assistant frame is still the
- * previous file and stays off the site until that workstream replaces it.
+ * Product surfaces to photograph at 1440×900 after the redesigned workspace
+ * is the one on screen. Earlier files stay off the site.
  */
 export const releaseShotPlan = [
   "Overview",
@@ -239,7 +243,7 @@ export const capabilities = [
   },
   {
     title: "A cited answer, or a refusal",
-    body: "Retrieval mixes vector distance and full text, then keeps a passage when it shares wording with the question. When nothing matches, the assistant stores a refusal and does not call the model.",
+    body: "The assistant searches this organization's documents and CRM, then keeps a passage only when it contains the requested fact. When nothing qualifies, it stores a refusal and does not call the model.",
   },
   {
     title: "Approval before a side effect",
@@ -361,23 +365,22 @@ export const integrations = integrationGroups.flatMap((group) =>
 export const architectureSteps = ["Browser", "Next.js", "FastAPI", "PostgreSQL"] as const;
 
 /**
- * Recorded hybrid-versus-baseline comparison on a separate fictional corpus.
- * Hash embeddings, K = 5. This is not the held-out evaluation.
+ * Measured on 26 November 2026 after the answerable pipeline was frozen.
+ * Plover Dock is the fresh set. Orry Beacon was scored later and was not
+ * used to change the rules. Neither corpus is Harbor & Co.
  */
 export const retrievalComparison = {
   recordedOn: "26 November 2026",
-  documents: 7,
-  questions: 8,
-  heldOutRecorded: false,
+  pipeline: "answerable",
+  ploverQuestions: 45,
+  orryQuestions: 26,
+  publicInference: false,
   rows: [
-    { measure: "Recall@5", baseline: "0.4167", hybrid: "1.0000" },
-    { measure: "MRR", baseline: "0.5000", hybrid: "1.0000" },
-    { measure: "nDCG@5", baseline: "0.4355", hybrid: "1.0000" },
-    { measure: "Answer relevance", baseline: "0.4167", hybrid: "0.9167" },
-    { measure: "Faithfulness", baseline: "0.5000", hybrid: "1.0000" },
-    { measure: "Citation accuracy", baseline: "0.5000", hybrid: "1.0000" },
-    { measure: "Abstention accuracy", baseline: "0.6250", hybrid: "1.0000" },
-    { measure: "Mean retrieval latency", baseline: "7.88 ms", hybrid: "9.73 ms" },
+    { measure: "Recall@5", plover: "0.9286", orry: "0.8056", target: "0.85" },
+    { measure: "Abstention accuracy", plover: "0.8000", orry: "1.0000", target: "0.90" },
+    { measure: "Factual correctness", plover: "0.7143", orry: "0.5000", target: "0.85" },
+    { measure: "Citation correctness", plover: "0.7273", orry: "0.7222", target: "—" },
+    { measure: "Mean retrieval latency", plover: "10.81 ms", orry: "11.62 ms", target: "—" },
   ],
 } as const;
 

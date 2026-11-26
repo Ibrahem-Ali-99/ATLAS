@@ -84,7 +84,7 @@ def list_runs(
     page: int,
     page_size: int,
     scope: DataScope = DataScope.operational,
-) -> tuple[list[tuple[AgentRun, str]], int]:
+) -> tuple[list[tuple[AgentRun, str, int]], int]:
     filters = [AgentRun.organization_id == organization_id]
     clause = scope_clause(AgentRun.origin, scope)
     if clause is not None:
@@ -93,15 +93,22 @@ def list_runs(
         filters.append(AgentRun.status == status)
     total = db.scalar(select(func.count()).select_from(AgentRun).where(*filters)) or 0
     offset = (page - 1) * page_size
+    step_count = (
+        select(func.count())
+        .select_from(AgentEvent)
+        .where(AgentEvent.run_id == AgentRun.id)
+        .correlate(AgentRun)
+        .scalar_subquery()
+    )
     rows = db.execute(
-        select(AgentRun, Inquiry.subject)
+        select(AgentRun, Inquiry.subject, step_count)
         .join(Inquiry, Inquiry.id == AgentRun.inquiry_id)
         .where(*filters)
         .order_by(AgentRun.started_at.desc())
         .offset(offset)
         .limit(page_size)
     ).all()
-    return [(row[0], row[1]) for row in rows], total
+    return [(row[0], row[1], int(row[2] or 0)) for row in rows], total
 
 
 def run_events(db: Session, organization_id: uuid.UUID, run_id: uuid.UUID) -> list[AgentEvent]:

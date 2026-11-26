@@ -13,7 +13,7 @@ from app.domains.crm import service as crm
 from app.domains.demo.access import organization_is_visitor
 from app.domains.evaluation.service import list_evaluations, start_evaluation
 from app.domains.identity.dependencies import CsrfAdmin, CsrfMember, DbSession, Member
-from app.domains.identity.models import Membership
+from app.domains.identity.models import Membership, MembershipRole
 from app.domains.ml.inference import latest_model, latest_prediction, score_lead, start_training
 from app.domains.ml.models import LeadPrediction, ModelVersion
 from app.domains.monitoring.service import diagnostics, trace_run
@@ -220,11 +220,14 @@ def get_evaluations(member: Member, db: DbSession) -> dict[str, Any]:
 def get_diagnostics(
     member: Member, db: DbSession, scope: DataScope = DataScope.operational
 ) -> dict[str, Any]:
+    role = member.membership.role
+    role_name = role.value if isinstance(role, MembershipRole) else str(role)
+    administrator = role_name == MembershipRole.admin.value
     return diagnostics(
         db,
         member.organization.id,
         scope,
-        include_platform=not organization_is_visitor(db, member.organization.id),
+        include_platform=administrator and not organization_is_visitor(db, member.organization.id),
     )
 
 

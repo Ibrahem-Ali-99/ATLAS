@@ -43,8 +43,8 @@ test("evaluation figures are the recorded suite results", () => {
   assert.match(evaluationEvidence.caveat, /did not send a message or create a charge/);
 });
 
-test("Harbor frames are 1440×900 and the assistant frame is not published", () => {
-  const published = [
+test("Harbor frames stay off the site until the redesigned workspace is captured", () => {
+  const held = [
     captures.overview,
     captures.crm,
     captures.inbox,
@@ -52,16 +52,15 @@ test("Harbor frames are 1440×900 and the assistant frame is not published", () 
     captures.workflows,
     captures.analytics,
     captures.integrations,
+    captures.assistant,
   ];
-  for (const capture of published) {
-    assert.equal(isReleaseCapture(capture), true, capture.src);
-    assert.equal(capture.frame, "Harbor & Co.");
+  for (const capture of held) {
+    assert.equal(capture.releaseReady, false, capture.src);
+    assert.equal(isReleaseCapture(capture), false, capture.src);
   }
-  assert.equal(captures.assistant.releaseReady, false);
-  assert.equal(isReleaseCapture(captures.assistant), false);
   assert.equal(isReleaseCapture(homepageStages.assistant), false);
-  assert.equal(isReleaseCapture(homepageStages.hero), true);
-  assert.equal(isReleaseCapture(homepageStages.automation), true);
+  assert.equal(isReleaseCapture(homepageStages.hero), false);
+  assert.equal(isReleaseCapture(homepageStages.automation), false);
   assert.deepEqual(releaseShotPlan, [
     "Overview",
     "CRM",
@@ -75,15 +74,17 @@ test("Harbor frames are 1440×900 and the assistant frame is not published", () 
   assert.deepEqual(landscapeFrame, { width: 1440, height: 900 });
 });
 
-test("the recorded retrieval comparison stays scoped to the small corpus", () => {
+test("the recorded retrieval evaluation keeps the missed targets", () => {
   assert.equal(retrievalComparison.recordedOn, "26 November 2026");
-  assert.equal(retrievalComparison.documents, 7);
-  assert.equal(retrievalComparison.questions, 8);
-  assert.equal(retrievalComparison.heldOutRecorded, false);
-  assert.equal(retrievalComparison.rows.find((row) => row.measure === "Recall@5")?.baseline, "0.4167");
-  assert.equal(retrievalComparison.rows.find((row) => row.measure === "Recall@5")?.hybrid, "1.0000");
-  assert.equal(retrievalComparison.rows.find((row) => row.measure === "Abstention accuracy")?.baseline, "0.6250");
-  assert.equal(retrievalComparison.rows.find((row) => row.measure === "Mean retrieval latency")?.hybrid, "9.73 ms");
+  assert.equal(retrievalComparison.pipeline, "answerable");
+  assert.equal(retrievalComparison.ploverQuestions, 45);
+  assert.equal(retrievalComparison.orryQuestions, 26);
+  assert.equal(retrievalComparison.publicInference, false);
+  assert.equal(retrievalComparison.rows.find((row) => row.measure === "Recall@5")?.plover, "0.9286");
+  assert.equal(retrievalComparison.rows.find((row) => row.measure === "Recall@5")?.target, "0.85");
+  assert.equal(retrievalComparison.rows.find((row) => row.measure === "Abstention accuracy")?.plover, "0.8000");
+  assert.equal(retrievalComparison.rows.find((row) => row.measure === "Factual correctness")?.orry, "0.5000");
+  assert.equal(retrievalComparison.rows.find((row) => row.measure === "Mean retrieval latency")?.orry, "11.62 ms");
 });
 
 test("public navigation still opens the demo and the case study", () => {

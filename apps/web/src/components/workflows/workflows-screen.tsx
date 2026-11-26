@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { WorkflowStudio } from "./workflow-studio";
+import { DataScopeControl } from "@/components/data-scope";
 import { RequestError } from "@/components/request-error";
+import type { DataScope } from "@/lib/provenance";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,7 +43,7 @@ function BuiltInWorkflows() {
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const scope = "operational";
+  const [scope, setScope] = useState<DataScope>("all");
   const automations = useQuery({
     queryKey: ["automations", organizationId, scope],
     queryFn: () => getAutomations(organizationId ?? "", scope),
@@ -64,6 +66,9 @@ function BuiltInWorkflows() {
     return <RequestError error={automations.error} />;
   }
   return (
+    <div className="mt-4 space-y-3">
+    <DataScopeControl value={scope} onChange={setScope} />
+    <p className="text-sm text-muted-foreground">All stored origins are shown until you narrow this list. Demonstration runs stay visible on All records.</p>
     <WorkflowsBody
       key={organizationId}
       data={automations.data}
@@ -77,6 +82,7 @@ function BuiltInWorkflows() {
       cancelError={cancel.error}
       onCancel={(bookingId) => cancel.mutate(bookingId)}
     />
+    </div>
   );
 }
 

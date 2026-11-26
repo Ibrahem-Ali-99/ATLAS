@@ -40,6 +40,7 @@ class AgentRunOut(BaseModel):
     origin: Origin
     started_at: datetime
     finished_at: datetime | None
+    model_steps: int = 0
 
 
 class AgentRunPage(BaseModel):

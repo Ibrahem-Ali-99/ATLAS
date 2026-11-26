@@ -246,7 +246,7 @@ export function HomeScreen() {
           </dl>
           <p className="mt-8 max-w-3xl text-sm leading-6 text-muted-foreground">{evaluationEvidence.caveat}</p>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">
-            The case study records a retrieval comparison on a separate fictional corpus. The held-out evaluation is not on this page yet.
+            The case study records the answerable retrieval pipeline on Plover Dock and Orry Beacon. Plover recall cleared its target. Abstention and factual correctness did not. Public inference stays off. Product images wait for the redesigned workspace.
           </p>
         </div>
       </section>

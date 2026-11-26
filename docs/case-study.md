@@ -34,9 +34,33 @@ An isolated visitor database is prepared with `app.scripts.portfolio_demo`, desc
 
 ## Intelligent retrieval
 
-Documents are chunked with page numbers when the extractor provides them. Embeddings are stored at 1536 or 768 dimensions, matching the configured model. Search uses cosine distance plus Postgres full text, and it only returns chunks from the caller's organization. The default maximum cosine distance is 0.55. A neighbor becomes model context when it shares a content word with the query, or when a vector-only neighbor is at or below distance 0.45. Rank alone does not put a neighbor into that context.
+Documents are chunked at 800 characters with 100 characters of overlap. Page numbers are kept when the extractor provides them. Embeddings are stored at 1536 or 768 dimensions, matching the configured model. Search stays inside the caller's organization.
 
-A stored citation is a row that contains a number, code, email, or distinctive word the answer states. The model does not choose the stored ids. A specific fact that appears in none of the supplied rows is replaced, in the stored message, with a sentence that the fact could not be confirmed. When retrieved rows are present, the server checks the completed draft before the client renders it. If neither documents nor CRM records match, the assistant stores a refusal and does not call the model.
+The assistant default is `answerable` in `apps/api/app/domains/knowledge/retrieval.py`. Candidate search is an AND full-text query, an OR full-text query, and vector neighbors inside the existing cosine cutoff, fused by reciprocal rank. A second stage keeps a passage only when the question's rare constraints occur together as positive mentions and the passage has the kind of fact asked for. A negated mention does not count. The 0.45 and 0.55 distance gates were not moved. Dense neighbors inside 0.45 are candidates, not answers. On local Ollama `nomic-embed-text:v1.5`, development hard negatives landed inside that gate and dense retrieval abstained on none of them. Answerability abstained on all four.
+
+A stored citation is a row that contains a number, code, email, or distinctive word the answer states. The model does not choose the stored ids. `80000` and `80,000` are the same figure. `9` and `09` are the same clock component. `19` is not accepted as `9`. A specific fact that appears in none of the supplied rows is replaced, in the stored message, with a sentence that the fact could not be confirmed. If neither documents nor CRM records qualify, the assistant stores a refusal and does not call the model.
+
+Anonymous website chat and a visitor Assistant session do not call Groq or Ollama unless `ATLAS_PUBLIC_INFERENCE_ENABLED` is true. The default is false. The deterministic stand-in is the public path, not a measure of the hosted model.
+
+## Retrieval evaluation
+
+Recorded on 26 November 2026 after the answerable stage was frozen. The questions were not edited to raise these scores. Neither corpus is Harbor & Co. Both runs used hash embeddings and PostgreSQL full text on `atlas_test`, and the rows were rolled back. Ranked metrics use K = 5. Generation used Groq `openai/gpt-oss-20b`. The detail is in [assistant-rag-evaluation.md](assistant-rag-evaluation.md).
+
+| Measure | Plover Dock | Orry Beacon | Target |
+| --- | ---: | ---: | ---: |
+| Recall@5 | 0.9286 | 0.8056 | 0.85 |
+| Abstention accuracy | 0.8000 | 1.0000 | 0.90 |
+| Factual correctness | 0.7143 | 0.5000 | 0.85 |
+| Citation correctness | 0.7273 | 0.7222 | |
+| Mean retrieval latency | 10.81 ms | 11.62 ms | |
+
+Plover Dock is 45 questions. Recall cleared the target. Abstention and factual correctness did not. Orry Beacon is 26 questions scored afterward. It abstained on every unsupported question, and its factual correctness was 0.50. Public inference stayed off after both runs. Mean retrieval latency is the search itself and does not include the Groq call.
+
+## Inquiry agent
+
+An inquiry run is a LangGraph sequence. It loads the inquiry, classifies it with the configured chat model, then calls three read-only tools: `search_company_knowledge`, `find_contact`, and `get_lead`. Those tools do not accept an organization id and they do not write. The run stores a lead proposal, a reply draft, and an appointment request, then pauses. The model has no approval tool.
+
+An administrator approves or rejects each stored payload. Execute writes that payload, or does nothing if it changed. A completed row with no stored steps is a recorded booking or proposal. It is not a successful language-model execution. Agent runs, monitoring, and workflow activity open on every stored origin so demonstration rows stay visible. An operator can narrow the list.
 
 ## Workflow execution
 
@@ -58,7 +82,7 @@ Workspace credentials are encrypted. Connection tests and disconnect are explici
 
 A session cookie identifies the user. Organization access is loaded from memberships. Roles are admin and staff. Mutations other than login require the CSRF token issued for that server session. Retrieval, CRM, knowledge, assistant, agent, and approval routes require the membership. Approving or rejecting requires admin. Uploaded documents, retrieved passages, and model output are treated as data.
 
-Record origin is operational, demo, evaluation, or unknown, stored on the row. An organization is not itself one of those kinds. Analytics and several lists default to operational rows. The local seed writes new demonstration rows as demo.
+Record origin is operational, demo, evaluation, or unknown, stored on the row. An organization is not itself one of those kinds. Analytics can be narrowed to operational rows. Agent runs, monitoring, and workflow activity open on every stored origin so a demonstration workspace stays visible, and an operator can narrow them. The local seed writes new demonstration rows as demo.
 
 ## Testing and reliability
 
@@ -88,3 +112,5 @@ A shared demo sets the public-demo flag. The process then refuses to start with 
 ## Limits
 
 Login limits and webhook limits are not shared across processes. Rotating the session secret signs everyone out and retires sealed webhook secrets. Exactly-once delivery to n8n or SMTP is not promised. Direct edits made in Google Calendar are not imported. This write-up is not a penetration test or a compliance certificate.
+
+Monitoring classifies a connection from the last stored verification and recent failed operations. It does not call the provider, send a message, create a booking, or start a payment. A fresh connection test still belongs to the integration session. Assistant executions list the stored request, tools, records, duration, and failure. They do not include the originating conversation, because that identifier is not on the execution response. A completed inquiry run with no stored model steps is labeled as a recorded row, not as a successful model execution. A new Harbor & Co. acceptance run waits until the assistant execution contract and the live connection checks are finished.

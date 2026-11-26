@@ -82,7 +82,7 @@ function organizationPath(organizationId: string, path: string): string {
 
 export function getAutomations(
   organizationId: string,
-  scope: DataScope = "operational",
+  scope: DataScope = "all",
 ): Promise<AutomationSnapshot> {
   return apiFetch(organizationPath(organizationId, `/automations?scope=${scope}`));
 }

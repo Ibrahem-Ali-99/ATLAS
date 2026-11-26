@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Bot, ChevronRight, Filter, Search } from "lucide-react";
 import { useState } from "react";
 
 import { DataScopeControl } from "@/components/data-scope";
@@ -10,13 +11,12 @@ import { Pager } from "@/components/pager";
 import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { sessionQueryOptions } from "@/lib/api";
 import { isDemoSession } from "@/lib/demo-session";
-import { getAgentRun, listAgentRuns, resumeAgentRun, startAgentRun } from "@/lib/agent-api";
+import { getAgentRun, listAgentRuns, listAssistantExecutions, resumeAgentRun, startAgentRun, type AssistantExecution } from "@/lib/agent-api";
 import { executionSummary, type AgentEvent, type AgentRunDetail, type RunStatus } from "@/lib/agent";
 import { getDiagnosticRun } from "@/lib/intelligence";
 import { listInquiries } from "@/lib/records-api";
@@ -70,8 +70,8 @@ function AgentRunsBody({
   const queryClient = useQueryClient();
   const session = useQuery(sessionQueryOptions);
   const demonstration = isDemoSession(session.data);
-  const [scope, setScope] = useState<DataScope>("operational");
-  const recordScope = demonstration ? "operational" : scope;
+  const [scope, setScope] = useState<DataScope>("all");
+  const recordScope = demonstration ? "all" : scope;
   const [page, setPage] = useState(1);
   const [inquiryQuery, setInquiryQuery] = useState("");
   const runs = useQuery({
@@ -100,21 +100,15 @@ function AgentRunsBody({
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-5">
-    <PageHeader title="Agent runs" eyebrow="Inquiry handling" actions={
+    <PageHeader title="Agent Runs" eyebrow="Agent execution history" actions={
       <Button type="button" onClick={() => onOpen(true)}>Start from inquiry</Button>
-    }>Review how an inquiry was handled and what was decided.</PageHeader>
-    <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
-      <section className="min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
+    }>Inspect agent activity, evidence, approvals, and execution results.</PageHeader>
+    <div>
+      <section className="panel operations-panel">
+        <div className="operations-toolbar">
           {demonstration ? null : <DataScopeControl value={scope} onChange={(next) => { setScope(next); setPage(1); }} />}
-          <Input
-            value={inquiryQuery}
-            onChange={(event) => setInquiryQuery(event.target.value)}
-            placeholder="Search inquiries"
-            aria-label="Search inquiries"
-          />
-          <select
-            className={selectClass}
+          <label className="module-search"><Search size={15} /><input value={inquiryQuery} onChange={(event) => setInquiryQuery(event.target.value)} placeholder="Search agent runs" aria-label="Search inquiries" /></label>
+          <label className="toolbar-select"><Filter size={14} /><select
             aria-label="Filter runs by status"
             value={status}
             onChange={(event) => {
@@ -124,10 +118,10 @@ function AgentRunsBody({
           >
             <option value="">All statuses</option>
             <option value="running">Running</option>
-            <option value="awaiting_approval">Awaiting approval</option>
+            <option value="awaiting_approval">Pending decision</option>
             <option value="completed">Completed</option>
             <option value="failed">Failed</option>
-          </select>
+          </select></label>
         </div>
         {runs.isPending ? <div className="px-4 pb-4"><Skeleton className="h-8 w-full" /></div> : null}
         {runs.isError ? <div className="px-4 pb-4"><RequestError error={runs.error} /></div> : null}
@@ -136,51 +130,53 @@ function AgentRunsBody({
           <p className="px-4 pb-6 text-sm text-muted-foreground">No agent runs match this filter.</p>
         ) : null}
         {visible.length > 0 ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Inquiry</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Started</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visible.map((run) => (
-                <TableRow key={run.id} className={run.id === selectedId ? "bg-accent/40" : undefined}>
-                  <TableCell>
-                    <button type="button" className="text-left font-medium" aria-current={run.id === selectedId || undefined} onClick={() => onSelect(run.id)}>
-                      {run.inquiry_subject}
-                    </button>
-                  </TableCell>
-                  <TableCell>
-                    <p className={`text-xs uppercase tracking-[0.12em] ${statusClass(run.status)}`}>{run.status.replaceAll("_", " ")}</p>
-                    {run.error_code ? <p className="mt-1 text-xs text-muted-foreground">{run.error_code}</p> : null}
-                  </TableCell>
-                  <TableCell>{new Date(run.started_at).toLocaleString()}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="operations-table runs-table" role="table" aria-label="Agent run history">
+            <div className="operations-row head" role="row"><span>Run</span><span>Inquiry</span><span>Status</span><span>Started</span><span>Duration</span><span>Result</span><span /></div>
+            {visible.map((run) => {
+              const presentation = presentedRun(run);
+              return (
+              <button key={run.id} type="button" role="row" className="operations-row" aria-current={run.id === selectedId || undefined} onClick={() => onSelect(run.id)}>
+                <span className="operation-primary"><span className="operation-icon"><Bot size={15} /></span><span><strong>{run.inquiry_subject}</strong><small>{presentation.label}</small></span></span>
+                <span>{run.inquiry_subject}</span>
+                <span><span className={presentation.tone}>{presentation.label}</span></span>
+                <span>{new Date(run.started_at).toLocaleDateString()}</span>
+                <span>{runDuration(run.started_at, run.finished_at, run.status)}</span>
+                <span>{run.error_code ? "Needs attention" : "Recorded"}</span>
+                <ChevronRight size={15} />
+              </button>
+              );
+            })}
+          </div>
         ) : null}
         {runs.data ? (
           <Pager page={runs.data.page} pageSize={runs.data.page_size} total={runs.data.total} onPage={setPage} />
         ) : null}
       </section>
-      <section aria-label="Run details" className="min-w-0 rounded-lg border border-border bg-card p-5 shadow-sm">
-        {selectedId ? <Button className="mb-3" size="sm" variant="outline" onClick={() => onSelect(null)}>Close run details</Button> : null}
-        {detail.isPending && selectedId ? <Skeleton className="h-32 w-full" /> : null}
-        {detail.isError ? <RequestError error={detail.error} /> : null}
-        {!selectedId ? <p className="text-sm text-muted-foreground">Select a run to inspect its steps.</p> : null}
-        {detail.data ? (
-          <RunDetail
-            organizationId={organizationId}
-            detail={detail.data}
-            pending={resume.isPending}
-            error={resume.error}
-            onResume={() => resume.mutate(detail.data.run.id)}
-          />
-        ) : null}
-      </section>
+      {selectedId ? <button type="button" className="drawer-backdrop" aria-label="Close run details" onClick={() => onSelect(null)} /> : null}
+      {selectedId ? (
+        <aside className="drawer operations-drawer run-drawer" aria-label="Run details">
+          <div className="drawer-header">
+            <div>
+              <h2>{detail.data?.run.inquiry_subject ?? "Agent run"}</h2>
+              <p>{detail.data ? presentedRun(detail.data.run).label : "Loading run"}</p>
+            </div>
+            <Button size="icon" variant="ghost" aria-label="Close run details" onClick={() => onSelect(null)}>×</Button>
+          </div>
+          <div className="drawer-content">
+            {detail.isPending ? <Skeleton className="h-32 w-full" /> : null}
+            {detail.isError ? <RequestError error={detail.error} /> : null}
+            {detail.data ? (
+              <RunDetail
+                organizationId={organizationId}
+                detail={detail.data}
+                pending={resume.isPending}
+                error={resume.error}
+                onResume={() => resume.mutate(detail.data.run.id)}
+              />
+            ) : null}
+          </div>
+        </aside>
+      ) : null}
       <StartDialog
         organizationId={organizationId}
         open={open}
@@ -191,8 +187,154 @@ function AgentRunsBody({
         }}
       />
     </div>
+    <AssistantExecutions organizationId={organizationId} />
     </div>
   );
+}
+
+function AssistantExecutions({ organizationId }: { organizationId: string }) {
+  const admin = useWorkspace().role === "admin";
+  const [selected, setSelected] = useState<string | null>(null);
+  const [status, setStatus] = useState<"" | "running" | "completed" | "failed">("");
+  const runs = useQuery({
+    queryKey: ["assistant-executions", organizationId],
+    queryFn: () => listAssistantExecutions(organizationId),
+  });
+  const items = (runs.data?.items ?? []).filter((item) => status === "" || item.status === status);
+  const current = items.find((item) => item.id === selected) ?? null;
+  return (
+    <section className="rounded-lg border border-border bg-card p-5 shadow-sm" aria-label="Assistant executions">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Assistant executions</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Stored tool calls, the records they returned, and whether a person still has to approve an action. The stored execution does not include the originating conversation.
+          </p>
+        </div>
+        <select className={selectClass} aria-label="Filter assistant executions" value={status} onChange={(event) => setStatus(event.target.value as "" | "running" | "completed" | "failed")}>
+          <option value="">All outcomes</option>
+          <option value="running">Pending</option>
+          <option value="completed">Successful</option>
+          <option value="failed">Failed</option>
+        </select>
+      </div>
+      {runs.isPending ? <Skeleton className="mt-4 h-8 w-full" /> : null}
+      {runs.isError ? <div className="mt-4"><RequestError error={runs.error} /></div> : null}
+      {runs.data && items.length === 0 ? (
+        <p className="mt-4 text-sm text-muted-foreground">{status ? "No executions match this outcome." : "No assistant executions are stored yet."}</p>
+      ) : null}
+      {items.length > 0 ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Request</TableHead>
+              <TableHead>Tools</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Duration</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell>
+                  <button type="button" className="text-left font-medium" aria-current={item.id === selected || undefined} onClick={() => setSelected(item.id)}>
+                    {item.request}
+                  </button>
+                </TableCell>
+                <TableCell>{item.tools.length > 0 ? item.tools.join(", ") : "No tool selected"}</TableCell>
+                <TableCell className={statusClass(item.status === "running" ? "pending" : item.status)}>{item.status === "running" ? "Pending" : item.status}</TableCell>
+                <TableCell>{runDuration(item.started_at, item.finished_at, item.status === "running" ? "running" : "completed")}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      ) : null}
+      {current ? <ExecutionDetail execution={current} admin={admin} /> : null}
+    </section>
+  );
+}
+
+function ExecutionDetail({ execution, admin }: { execution: AssistantExecution; admin: boolean }) {
+  return (
+    <div className="mt-4 space-y-3">
+      <p className="text-sm font-medium">{execution.request}</p>
+      {execution.error_message ? <p className="text-sm text-destructive">{execution.error_message}</p> : null}
+      {execution.steps.length === 0 ? <p className="text-sm text-muted-foreground">No tool step is stored for this request.</p> : null}
+      <ol className="space-y-2">
+        {execution.steps.map((step) => (
+          <li key={`${execution.id}-${step.sequence}`} className="rounded-md border border-border px-3 py-2 text-sm">
+            <p className="font-medium">{stepTitle(step.tool_name)} · {step.status === "succeeded" ? "Completed" : step.status === "recovered" ? "Recovered" : "Needs attention"} · {step.duration_ms} ms</p>
+            <ArgumentList arguments={step.arguments} />
+            {step.recovery ? <p className="mt-1 text-muted-foreground">{step.recovery}</p> : null}
+            {step.error_message ? <p className="mt-1 text-destructive">{step.error_message}</p> : null}
+            {step.records.length > 0 ? (
+              <ul className="mt-2 space-y-1">
+                {step.records.slice(0, 6).map((record, index) => (
+                  <li key={`${step.sequence}-${index}`}>
+                    <EvidenceLink record={record} />
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+      {admin && (execution.tokens_in !== null || execution.tokens_out !== null) ? (
+        <details className="text-sm text-muted-foreground">
+          <summary className="cursor-pointer">Administrator usage</summary>
+          <p className="mt-2">Tokens in {execution.tokens_in ?? 0}, out {execution.tokens_out ?? 0}. Model reasoning is not stored.</p>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function ArgumentList({ arguments: values }: { arguments: Record<string, unknown> }) {
+  const entries = Object.entries(values).filter((entry) => typeof entry[1] === "string" || typeof entry[1] === "number" || typeof entry[1] === "boolean");
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <p className="mt-1 text-muted-foreground">
+      {entries.map(([key, value]) => `${key}: ${String(value)}`).join(" · ")}
+    </p>
+  );
+}
+
+function EvidenceLink({ record }: { record: Record<string, unknown> }) {
+  const title = typeof record.title === "string" ? record.title : typeof record.record_type === "string" ? record.record_type : "Record";
+  const excerpt = typeof record.excerpt === "string" && record.excerpt ? ` — ${record.excerpt}` : "";
+  const href = recordHref(record);
+  return href ? <Link className="underline" href={href}>{title}</Link> : <span>{title}{excerpt}</span>;
+}
+
+function recordHref(record: Record<string, unknown>): string | null {
+  const kind = typeof record.record_type === "string" ? record.record_type : "";
+  const id = typeof record.record_id === "string" ? record.record_id : "";
+  if (kind === "approval" && id) {
+    return `/approvals?approval=${encodeURIComponent(id)}`;
+  }
+  if (kind === "document") {
+    return "/knowledge";
+  }
+  if (kind === "lead" || kind === "contact" || kind === "company" || kind === "opportunity") {
+    return "/crm";
+  }
+  return null;
+}
+
+function statusBadge(status: string): string {
+  if (status === "completed" || status === "executed" || status === "approved") return "badge badge-green";
+  if (status === "failed" || status === "needs_attention" || status === "rejected") return "badge badge-red";
+  if (status === "awaiting_approval" || status === "pending") return "badge badge-amber";
+  return "badge badge-blue";
+}
+
+function presentedRun(run: { status: RunStatus; model_steps?: number }): { label: string; tone: string } {
+  if (run.status === "completed" && (run.model_steps ?? 0) === 0) {
+    return { label: "Recorded, no model steps", tone: "badge" };
+  }
+  return { label: run.status.replaceAll("_", " "), tone: statusBadge(run.status) };
 }
 
 function statusClass(status: string): string {
@@ -291,6 +433,9 @@ function runReason(detail: AgentRunDetail): string {
   if (run.status === "awaiting_approval") {
     return `Waiting for an admin. ${pending} proposal${pending === 1 ? "" : "s"} still need a decision in Approvals. Nothing is written until Execute.`;
   }
+  if (run.status === "completed" && detail.events.length === 0) {
+    return "This run is stored as finished. No model steps were recorded, so it is not a successful language-model execution.";
+  }
   if (run.status === "completed") {
     return "The run finished. Executed proposals are listed below. Rejected proposals were not written.";
   }
@@ -308,6 +453,78 @@ function nextAction(detail: AgentRunDetail): string {
     return "Nothing else is waiting. The execution results below are the stored outcome.";
   }
   return "Resume continues a paused run. A pending proposal still has to be decided first.";
+}
+
+function runDuration(started: string, finished: string | null, status: RunStatus): string {
+  const start = new Date(started).getTime();
+  if (!Number.isFinite(start)) {
+    return "Not stored";
+  }
+  if (!finished && status !== "running" && status !== "awaiting_approval") {
+    return "End not stored";
+  }
+  const end = finished ? new Date(finished).getTime() : Date.now();
+  if (!Number.isFinite(end) || end < start) {
+    return "Not stored";
+  }
+  const seconds = Math.round((end - start) / 1000);
+  if (seconds < 60) {
+    return finished ? `${seconds}s` : `${seconds}s so far`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  const clock = rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
+  return finished ? clock : `${clock} so far`;
+}
+
+const toolSteps = new Set(["classify", "retrieve_knowledge", "lookup_customer"]);
+
+function ToolCalls({ events }: { events: AgentEvent[] }) {
+  const calls = events.filter((event) => toolSteps.has(event.step));
+  return (
+    <div>
+      <h3 className="mb-2 text-sm font-medium">Tool calls</h3>
+      {calls.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No tool call is stored for this run.</p>
+      ) : null}
+      {calls.map((event) => (
+        <p key={event.id} className="text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">{stepTitle(event.step)}</span>
+          {` · ${eventOutcome(event)}`}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function SupportingRecords({ detail }: { detail: AgentRunDetail }) {
+  const documents = detail.events.flatMap((event) => knowledgeHits(event.detail).map((hit) => hit.title));
+  const leadId = relatedLeadId(detail) ?? lookupLead(detail);
+  const titles = [...new Set(documents)];
+  return (
+    <div>
+      <h3 className="mb-2 text-sm font-medium">Supporting records</h3>
+      <p className="text-sm text-muted-foreground">
+        Inquiry: {detail.run.inquiry_subject}.{" "}
+        <Link className="underline" href="/crm?tab=inquiries">Open inquiries</Link>
+      </p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Lead: {leadId ?? "not stored on this run"}.
+      </p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Documents: {titles.length === 0 ? "none stored on the knowledge step" : titles.join(", ")}
+      </p>
+    </div>
+  );
+}
+
+function lookupLead(detail: AgentRunDetail): string | null {
+  for (const event of detail.events) {
+    if (event.step === "lookup_customer" && typeof event.detail.lead_id === "string" && event.detail.lead_id) {
+      return event.detail.lead_id;
+    }
+  }
+  return null;
 }
 
 function relatedLeadId(detail: AgentRunDetail): string | null {
@@ -382,6 +599,8 @@ function RunDetail({
           ))}
         </div>
       ) : null}
+      <ToolCalls events={detail.events} />
+      <SupportingRecords detail={detail} />
       <div>
         <h3 className="mb-2 text-sm font-medium">Timeline</h3>
         <ol className="space-y-2">

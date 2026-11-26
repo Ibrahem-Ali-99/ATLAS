@@ -40,6 +40,7 @@ export type AgentRun = {
   error_message: string | null;
   started_at: string;
   finished_at: string | null;
+  model_steps?: number;
 };
 
 export type ExecutionResult = {
