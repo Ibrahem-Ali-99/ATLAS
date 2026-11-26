@@ -37,7 +37,7 @@ The profile and workflow regression tests ran on `atlas_rehearsal_profile`, a da
 
 Groq (`openai/gpt-oss-20b`) and Ollama (`nomic-embed-text:v1.5`, 768 dimensions) were checked on a disposable database, `atlas_rehearsal_providers`, using only the fictional bonded-warehousing note. The note indexed to ready with one passage. The cold-storage question called the model, cited `bonded-warehousing-overview`, and the stored excerpt contained the note. The answer said cold storage for the third quarter is confirmed for existing customers. A question for a bank account number did not call the model, stored no citation, and did not invent digits. That database was dropped afterward. The API on port 8012 was not restarted and was not pointed at Groq.
 
-The public demo page again says Mina Patel asks about bonded warehousing, and that Northwind is the second organization. `python -m app.scripts.verify_portfolio_demonstration` passed against that working copy. The rest of the page belongs to the public website session, so this closure does not commit that file.
+The public demo page says Mina Patel asks about bonded warehousing, and that Northwind is the second organization. `python -m app.scripts.verify_portfolio_demonstration` passed.
 
 ## Reset
 
@@ -62,4 +62,3 @@ These limits are still true:
 
 - Stripe test checkout was not run. The isolated process stays on **Sandbox billing**.
 - Executing a second appointment for a slot that is already booked fails with `That time is already booked`. The presenter uses a free slot.
-- The public demo page rewrite is still uncommitted. The Mina Patel sentence is in that working copy. The public website session needs to keep it when that page is committed.
