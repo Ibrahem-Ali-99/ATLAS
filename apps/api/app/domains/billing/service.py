@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import AppError
+from app.domains.audit.models import AuditEvent
 from app.domains.audit.service import record_event
 from app.domains.automation.models import WorkflowDefinition, WorkflowRun, WorkflowStatus
 from app.domains.billing import provider
@@ -48,6 +49,25 @@ PLAN_DEFINITIONS = {
         "knowledge_storage_bytes": 1_000_000_000_000,
         "active_workflows": 200,
     },
+}
+
+# A delayed renewal webhook can arrive after the recorded period ends. Keep the
+# paid Stripe plan for this long, then use Free limits until Stripe confirms the
+# next period. Sandbox periods are not expired locally.
+STRIPE_RENEWAL_GRACE = timedelta(hours=2)
+
+_CHECKOUT_EVENTS = {
+    "checkout.session.completed",
+    "checkout.session.async_payment_succeeded",
+}
+_SUBSCRIPTION_EVENTS = {
+    "customer.subscription.created",
+    "customer.subscription.updated",
+    "customer.subscription.deleted",
+}
+_INVOICE_EVENTS = {
+    "invoice.paid",
+    "invoice.payment_failed",
 }
 
 
@@ -107,9 +127,58 @@ def get_subscription(
 
 
 def entitlement_plan_code(row: OrganizationSubscription) -> str:
-    if row.status not in {SubscriptionStatus.active, SubscriptionStatus.trialing}:
+    # Trialing, past due, canceled, and expired are not confirmed payment.
+    if row.status != SubscriptionStatus.active:
+        return "free"
+    period_end = row.current_period_end
+    if (
+        row.provider == "stripe"
+        and period_end is not None
+        and period_end <= datetime.now(UTC) - STRIPE_RENEWAL_GRACE
+    ):
         return "free"
     return row.plan_code
+
+
+def scheduled_cancellation(db: Session, organization_id: uuid.UUID) -> bool:
+    details = db.scalar(
+        select(AuditEvent.details)
+        .where(
+            AuditEvent.organization_id == organization_id,
+            AuditEvent.action == "stripe_subscription_reconciled",
+        )
+        .order_by(AuditEvent.created_at.desc())
+        .limit(1)
+    )
+    return isinstance(details, dict) and details.get("cancels_at_period_end") is True
+
+
+def billing_attention(row: OrganizationSubscription, cancels_at_period_end: bool) -> str | None:
+    if row.status == SubscriptionStatus.past_due:
+        return "payment_failed"
+    if row.status == SubscriptionStatus.canceled:
+        return "canceled"
+    if row.status == SubscriptionStatus.expired:
+        return "expired"
+    if row.status == SubscriptionStatus.trialing:
+        return "payment_unconfirmed"
+    if cancels_at_period_end:
+        return "cancels_at_period_end"
+    if entitlement_plan_code(row) != row.plan_code:
+        return "period_lapsed"
+    return None
+
+
+def checkout_available(row: OrganizationSubscription) -> bool:
+    if get_settings().billing_provider != "stripe":
+        return True
+    if row.provider != "stripe" or not row.provider_subscription_id:
+        return True
+    if row.status in {SubscriptionStatus.past_due, SubscriptionStatus.trialing}:
+        return False
+    if row.status in {SubscriptionStatus.canceled, SubscriptionStatus.expired}:
+        return True
+    return entitlement_plan_code(row) == "free" and row.plan_code != "free"
 
 
 def usage(db: Session, organization_id: uuid.UUID) -> dict[str, int]:
@@ -245,24 +314,24 @@ def change_subscription(
 
 def reconcile_provider_event(db: Session, payload: dict[str, object]) -> None:
     event_type = payload.get("type")
-    if event_type not in (
-        "checkout.session.completed",
-        "checkout.session.async_payment_succeeded",
-        "customer.subscription.created",
-        "customer.subscription.updated",
-        "customer.subscription.deleted",
+    if not isinstance(event_type, str) or event_type not in (
+        _CHECKOUT_EVENTS | _SUBSCRIPTION_EVENTS | _INVOICE_EVENTS
     ):
         return
     data = payload.get("data")
     obj = data.get("object") if isinstance(data, dict) else None
     if not isinstance(obj, dict):
         return
-    from_checkout = str(event_type).startswith("checkout.")
-    if from_checkout and obj.get("payment_status") not in ("paid", "no_payment_required"):
+    # Checkout can finish before Stripe collects payment. Leave the current plan
+    # in place until a later event retrieves an active subscription.
+    if event_type in _CHECKOUT_EVENTS and obj.get("payment_status") not in (
+        "paid",
+        "no_payment_required",
+    ):
         return
-    subscription_id = obj.get("subscription" if from_checkout else "id")
-    customer_id = obj.get("customer")
-    if not isinstance(subscription_id, str) or not isinstance(customer_id, str):
+    subscription_id = _provider_subscription_id(event_type, obj)
+    customer_id = _stripe_id(obj.get("customer"))
+    if subscription_id is None or customer_id is None:
         return
     row = db.scalar(
         select(OrganizationSubscription)
@@ -271,8 +340,11 @@ def reconcile_provider_event(db: Session, payload: dict[str, object]) -> None:
     )
     if row is None:
         return
-    if from_checkout and obj.get("client_reference_id") != str(row.organization_id):
+    reference = obj.get("client_reference_id")
+    if event_type in _CHECKOUT_EVENTS and reference != str(row.organization_id):
         return
+    # The event names the subscription. The live Stripe subscription decides the
+    # plan, period, and status, so an older event cannot restore a replaced one.
     current = provider.retrieve_subscription(subscription_id)
     if current.get("customer") != customer_id or current.get("livemode") is not False:
         raise AppError(
@@ -290,7 +362,7 @@ def reconcile_provider_event(db: Session, payload: dict[str, object]) -> None:
             SubscriptionStatus.expired,
         }:
             return
-        if current.get("status") not in {"active", "trialing"}:
+        if current.get("status") != "active":
             return
 
     provider_status = str(current.get("status", ""))
@@ -330,7 +402,15 @@ def reconcile_provider_event(db: Session, payload: dict[str, object]) -> None:
         raise AppError(
             409, "billing_period_unavailable", "The payment provider returned an invalid period"
         )
-    changed = (row.plan_code, row.billing_interval, row.status, row.provider_subscription_id)
+    cancels = _cancels_at_period_end(current)
+    previous_cancel = scheduled_cancellation(db, row.organization_id)
+    snapshot = (
+        row.plan_code,
+        row.billing_interval,
+        row.status,
+        row.provider_subscription_id,
+        previous_cancel,
+    )
     row.plan_code = code
     row.billing_interval = interval
     row.status = status
@@ -338,7 +418,7 @@ def reconcile_provider_event(db: Session, payload: dict[str, object]) -> None:
     row.provider_subscription_id = subscription_id
     row.current_period_start = datetime.fromtimestamp(period_start, UTC)
     row.current_period_end = datetime.fromtimestamp(period_end, UTC)
-    if changed != (code, interval, status, subscription_id):
+    if snapshot != (code, interval, status, subscription_id, cancels):
         record_event(
             db,
             row.organization_id,
@@ -347,5 +427,42 @@ def reconcile_provider_event(db: Session, payload: dict[str, object]) -> None:
                 "plan": code,
                 "interval": interval,
                 "status": status.value,
+                "cancels_at_period_end": cancels,
             },
         )
+
+
+def _provider_subscription_id(event_type: str, obj: dict[str, object]) -> str | None:
+    if event_type in _CHECKOUT_EVENTS:
+        return _stripe_id(obj.get("subscription"))
+    if event_type in _INVOICE_EVENTS:
+        direct = _stripe_id(obj.get("subscription"))
+        if direct is not None:
+            return direct
+        parent = obj.get("parent")
+        if not isinstance(parent, dict):
+            return None
+        details = parent.get("subscription_details")
+        if not isinstance(details, dict):
+            return None
+        return _stripe_id(details.get("subscription"))
+    if event_type in _SUBSCRIPTION_EVENTS:
+        return _stripe_id(obj.get("id"))
+    return None
+
+
+def _stripe_id(value: object) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, dict):
+        nested = value.get("id")
+        if isinstance(nested, str) and nested:
+            return nested
+    return None
+
+
+def _cancels_at_period_end(current: dict[str, object]) -> bool:
+    if current.get("cancel_at_period_end") is True:
+        return True
+    cancel_at = current.get("cancel_at")
+    return type(cancel_at) is int and cancel_at > 0

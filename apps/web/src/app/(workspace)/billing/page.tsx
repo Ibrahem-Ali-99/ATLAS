@@ -6,8 +6,9 @@ export const metadata: Metadata = { title: "Billing" };
 export const instant = false;
 
 export default async function BillingPage({ searchParams }: {
-  searchParams: Promise<{ checkout?: string | string[] }>;
+  searchParams: Promise<{ checkout?: string | string[]; portal?: string | string[] }>;
 }) {
-  const { checkout } = await searchParams;
-  return <BillingScreen checkout={checkout === "success" || checkout === "canceled" ? checkout : undefined} />;
+  const params = await searchParams;
+  const checkout = params.checkout === "success" || params.checkout === "canceled" ? params.checkout : undefined;
+  return <BillingScreen checkout={checkout} portalReturn={params.portal === "return"} />;
 }

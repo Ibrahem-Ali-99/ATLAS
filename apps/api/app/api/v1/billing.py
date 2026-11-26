@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.domains.billing.models import BillingWebhookEvent, SubscriptionPlan
+from app.domains.billing.models import BillingWebhookEvent, SubscriptionPlan, SubscriptionStatus
 from app.domains.billing.provider import (
     create_checkout_url,
     create_portal_url,
@@ -16,12 +16,15 @@ from app.domains.billing.provider import (
     verified_event,
 )
 from app.domains.billing.service import (
+    billing_attention,
     change_subscription,
+    checkout_available,
     ensure_plans,
     entitlement_plan_code,
     get_subscription,
     plan_for,
     reconcile_provider_event,
+    scheduled_cancellation,
     usage,
 )
 from app.domains.identity.dependencies import CsrfAdmin, DbSession, Member
@@ -47,16 +50,25 @@ def plans(member: Member, db: DbSession) -> list[dict[str, object]]:
 @router.get("/organizations/{organization_id}/billing")
 def status(member: Member, db: DbSession) -> dict[str, object]:
     row = get_subscription(db, member.organization.id)
-    plan = plan_for(db, entitlement_plan_code(row))
+    entitled = entitlement_plan_code(row)
+    plan = plan_for(db, entitled)
+    cancels = row.status in {
+        SubscriptionStatus.active,
+        SubscriptionStatus.trialing,
+    } and scheduled_cancellation(db, row.organization_id)
     db.commit()
     return {
         "mode": get_settings().billing_provider,
         "portal_available": row.provider == "stripe" and bool(row.provider_customer_id),
+        "checkout_available": checkout_available(row),
+        "attention": billing_attention(row, cancels),
         "subscription": {
             "plan_code": row.plan_code,
+            "entitled_plan_code": entitled,
             "billing_interval": row.billing_interval,
             "status": row.status.value,
             "provider": row.provider,
+            "cancels_at_period_end": cancels,
             "current_period_start": row.current_period_start,
             "current_period_end": row.current_period_end,
         },
