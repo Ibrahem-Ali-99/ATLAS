@@ -8,24 +8,26 @@ The running application stays in sandbox billing until these settings are loaded
 
 ATLAS has four plans. Free has no Stripe price. The paid plans require these six prices, one Stripe price id for each map key. Both intervals of a plan belong on that plan's product. All six prices must use the same currency, or the billing portal cannot switch among them.
 
-| Plan | Map key | Stripe interval | Amount and currency |
+| Plan | Map key | Stripe interval | Amount |
 | --- | --- | --- | --- |
-| Starter | `starter:monthly` | month, count 1 | Not defined by ATLAS |
-| Starter | `starter:yearly` | year, count 1 | Not defined by ATLAS |
-| Pro | `pro:monthly` | month, count 1 | Not defined by ATLAS |
-| Pro | `pro:yearly` | year, count 1 | Not defined by ATLAS |
-| Business | `business:monthly` | month, count 1 | Not defined by ATLAS |
-| Business | `business:yearly` | year, count 1 | Not defined by ATLAS |
+| Starter | `starter:monthly` | month, count 1 | USD 19.00 |
+| Starter | `starter:yearly` | year, count 1 | USD 190.00 |
+| Pro | `pro:monthly` | month, count 1 | USD 49.00 |
+| Pro | `pro:yearly` | year, count 1 | USD 490.00 |
+| Business | `business:monthly` | month, count 1 | USD 99.00 |
+| Business | `business:yearly` | year, count 1 | USD 990.00 |
 
-Checkout checks the shape of a price. It does not contain a price list. Each price must be:
+`python -m app.scripts.stripe_test_prices` reads `ATLAS_STRIPE_SECRET_KEY` from the process environment and creates or reuses these prices. It prints the price map and does not print the key. The same command with `--write-env` updates only the billing lines in `.env` and leaves every other integration setting in place. A second run reuses a test product whose metadata is `atlas_plan` plus `atlas_catalog=test`, and a price whose lookup key is `atlas_{plan}_{interval}`, when the amount, currency, and interval still match. A different amount is left untouched.
+
+Checkout checks the shape of a price. Each price must be:
 
 - A test-mode price, with `livemode` false
 - Recurring, with `interval_count` of 1
 - `month` for a monthly plan, or `year` for a yearly plan
-- A positive `unit_amount` in the shared currency
+- A positive `unit_amount` in USD
 - Without `trial_period_days`
 
-A zero-amount price or a price with a trial is rejected, because either one can mark a subscription active before a card payment. Do not invent the six amounts in the repository. Create them in the Stripe test account only after the amounts and currency are chosen.
+A zero-amount price or a price with a trial is rejected, because either one can mark a subscription active before a card payment.
 
 Use each price id in exactly one map entry. The JSON object is `ATLAS_STRIPE_PRICE_IDS`:
 
