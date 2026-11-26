@@ -1,0 +1,123 @@
+{
+  "version": "rag-v1",
+  "notice": "Fictional Marrow and Co. records. They are not a customer and they are not the demo workspace.",
+  "documents": [
+    {
+      "filename": "marrow-rate-card.txt",
+      "text": "Marrow and Co. cold storage is 18 pounds per pallet per week. The minimum term is 4 weeks. The rate code is MARROW-COLD-18."
+    },
+    {
+      "filename": "marrow-bonded-yard.txt",
+      "text": "The Marrow bonded yard at 18 Quay Lane, Bristol holds 42 pallets. The yard code is MARROW-YARD-42."
+    },
+    {
+      "filename": "marrow-service-terms.txt",
+      "text": "Marrow answers storage questions within 4 business hours. Cargo claims must be filed within 14 days."
+    },
+    {
+      "filename": "marrow-cargo-cover.txt",
+      "text": "Marrow cargo cover pays up to 250000 pounds. Cover excludes perishable spoilage and delay."
+    },
+    {
+      "filename": "marrow-account-opening.txt",
+      "text": "A new Marrow account needs a signed schedule and a deposit of 500 pounds before the first inbound pallet."
+    },
+    {
+      "filename": "pantry-menu.txt",
+      "text": "The staff pantry menu lists soup, bread, and tea. It does not describe freight."
+    },
+    {
+      "filename": "office-closet.txt",
+      "text": "The office closet holds paper, spare chairs, and printer toner."
+    }
+  ],
+  "companies": [
+    {"name": "Marrow and Co.", "industry": "cold chain logistics"},
+    {"name": "Pantry Club", "industry": "catering"}
+  ],
+  "leads": [
+    {
+      "title": "Quay Lane expansion",
+      "company": "Marrow and Co.",
+      "notes": "80 pallets inbound next month."
+    },
+    {
+      "title": "Tea order",
+      "company": "Pantry Club",
+      "notes": "Order more tea for the staff pantry."
+    }
+  ],
+  "retrieval": [
+    {
+      "id": "rate",
+      "kind": "factual",
+      "question": "What is the Marrow cold storage weekly rate?",
+      "relevant": ["marrow-rate-card"],
+      "answer_terms": ["18", "MARROW-COLD-18"]
+    },
+    {
+      "id": "yard-count",
+      "kind": "factual",
+      "question": "How many pallets does the Marrow bonded yard hold?",
+      "relevant": ["marrow-bonded-yard"],
+      "answer_terms": ["42"]
+    },
+    {
+      "id": "claims",
+      "kind": "factual",
+      "question": "How many days does Marrow allow for a cargo claim?",
+      "relevant": ["marrow-service-terms"],
+      "answer_terms": ["14"]
+    },
+    {
+      "id": "rate-and-cover",
+      "kind": "multi_document",
+      "question": "What is the Marrow cold storage rate and what does cargo cover exclude?",
+      "relevant": ["marrow-rate-card", "marrow-cargo-cover"],
+      "answer_terms": ["18", "spoilage"]
+    },
+    {
+      "id": "partial-lexical",
+      "kind": "factual",
+      "question": "What cold storage services does Marrow offer?",
+      "relevant": ["marrow-rate-card"],
+      "answer_terms": ["18"]
+    },
+    {
+      "id": "follow-up-address",
+      "kind": "follow_up",
+      "history": [["user", "What does the Marrow bonded yard hold?"]],
+      "question": "Where is it?",
+      "relevant": ["marrow-bonded-yard"],
+      "answer_terms": ["Quay"]
+    },
+    {
+      "id": "unsupported-address",
+      "kind": "unsupported",
+      "question": "What is the Marrow chief executive home address?",
+      "relevant": [],
+      "abstain": true
+    },
+    {
+      "id": "unsupported-weather",
+      "kind": "unsupported",
+      "question": "What is the weather in Bristol tomorrow?",
+      "relevant": [],
+      "abstain": true
+    }
+  ],
+  "intents": [
+    {"id": "capability", "question": "What can you help me with?", "intent": "capability"},
+    {"id": "greeting", "question": "Hello", "intent": "greeting"},
+    {"id": "documents", "question": "What documents are available?", "intent": "documents"},
+    {"id": "recall", "question": "What did we discuss earlier?", "intent": "recall", "history": true}
+  ],
+  "actions": [
+    {"id": "follow-up", "question": "Draft a follow-up for Marrow Desk", "intent": "follow_up"},
+    {"id": "appointment", "question": "Request an appointment for Marrow Desk", "intent": "appointment"},
+    {"id": "task", "question": "Create a follow-up task for Marrow Desk", "intent": "task"},
+    {"id": "send", "question": "Send the customer an email", "intent": "mutation"},
+    {"id": "delete", "question": "Please delete the Marrow Desk lead", "intent": "mutation"},
+    {"id": "summary", "question": "Summarize the lead Marrow Desk", "intent": "summary"}
+  ]
+}

@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_timeout_seconds: float = Field(default=120, ge=1, le=300)
     llm_max_output_tokens: int | None = Field(default=None, ge=1, le=32768)
+    # Anonymous website chat stays off until this is set. Workspace turns are separate.
+    public_inference_enabled: bool = False
+    public_inference_session_limit: int = Field(default=8, ge=0, le=100)
+    public_inference_global_limit: int = Field(default=200, ge=0, le=100_000)
+    public_inference_window_seconds: int = Field(default=3600, ge=60, le=86_400)
+    public_inference_max_input_chars: int = Field(default=4000, ge=200, le=20_000)
+    public_inference_max_output_tokens: int = Field(default=400, ge=32, le=2048)
+    public_inference_min_interval_seconds: float = Field(default=2, ge=0, le=60)
+    public_inference_max_concurrency: int = Field(default=2, ge=1, le=8)
     embedding_provider: Literal["openai", "ollama", "double"] = "openai"
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_api_key: str = ""

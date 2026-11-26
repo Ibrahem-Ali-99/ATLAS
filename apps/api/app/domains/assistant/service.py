@@ -16,6 +16,7 @@ from app.domains.assistant.catalog import answer_documents as read_documents
 from app.domains.assistant.catalog import answer_inquiries as read_inquiries
 from app.domains.assistant.catalog import answer_inventory as read_inventory
 from app.domains.assistant.catalog import answer_leads as read_leads
+from app.domains.assistant.context import retrieve_crm_records
 from app.domains.assistant.models import (
     Conversation,
     ConversationSummary,
@@ -30,13 +31,18 @@ from app.domains.assistant.prompts import (
     general_prompt,
     grounded_prompt,
 )
+from app.domains.assistant.rewrite import rewrite_question
 from app.domains.assistant.routing import (
+    AMBIGUOUS_ANSWER,
     CAPABILITY_ANSWER,
     CLASSIFIER_SYSTEM,
     GREETING_ANSWER,
+    INJECTION_ANSWER,
     MUTATION_ANSWER,
+    UNRELATED_ANSWER,
     Intent,
     allows_ungrounded_chat,
+    is_bare_topic,
     parse_classifier_intent,
     recall_answer,
     refers_to_earlier_record,
@@ -44,14 +50,16 @@ from app.domains.assistant.routing import (
     unsupported_without_evidence,
 )
 from app.domains.assistant.schemas import MessageOut, ReplyOut, SourceOut
-from app.domains.crm.service import search_records
 from app.domains.knowledge.attribution import attribute_answer
 from app.domains.knowledge.models import Chunk
-from app.domains.knowledge.retrieval import RetrievedChunk, search_chunks
+from app.domains.knowledge.retrieval import PRODUCTION_PIPELINE, RetrievedChunk, search_chunks
 from app.domains.onboarding.models import AgentConfiguration
 from app.integrations.language import ChatClient, EmbeddingClient
 
-NO_RECORDS = "I could not find relevant company documents or CRM records for that question."
+NO_RECORDS = (
+    "I could not find a company document or CRM record that answers that. "
+    "Name the company, the document, or the lead and I will look again."
+)
 UNTITLED = "New conversation"
 _EMBEDDING_UNAVAILABLE = {
     "embedding_unavailable",
@@ -245,6 +253,12 @@ def prepare_turn(
     titles = _recent_source_titles(db, organization_id, conversation.id, user_message.id, content)
     intent = route_question(content, has_history=bool(history))
     expand = refers_to_earlier_record(content)
+    if intent is Intent.injection:
+        return _stored_reply(db, conversation, INJECTION_ANSWER, _phases())
+    if intent is Intent.unrelated:
+        return _stored_reply(db, conversation, UNRELATED_ANSWER, _phases())
+    if intent is Intent.ambiguous and is_bare_topic(content):
+        return _stored_reply(db, conversation, AMBIGUOUS_ANSWER, _phases())
     if intent is Intent.ambiguous:
         if titles:
             intent = Intent.grounded
@@ -252,9 +266,7 @@ def prepare_turn(
         else:
             intent = _classify_ambiguous(chat, content)
     if intent in {Intent.summary, Intent.follow_up, Intent.appointment, Intent.task}:
-        read, draft = operations.prepare_operation(
-            db, organization_id, intent, content
-        )
+        read, draft = operations.prepare_operation(db, organization_id, intent, content)
         return _stored_operation(db, conversation, read, draft)
     if intent is Intent.mutation:
         return _stored_reply(db, conversation, MUTATION_ANSWER, _phases())
@@ -362,13 +374,17 @@ def _grounded_turn(
     expand: bool,
     summary: str | None = None,
 ) -> PreparedTurn:
-    query = _retrieval_query(content, history, titles, expand=expand)
+    query = rewrite_question(content, history, titles)
+    if query == content.strip():
+        query = _retrieval_query(content, history, titles, expand=expand)
     phases = _phases("searching_crm", "retrieving_documents")
-    crm_records = search_records(db, organization_id, query)
+    crm_records = retrieve_crm_records(db, organization_id, query)
     documents: list[RetrievedChunk] = []
     document_search = "empty"
     try:
-        documents = search_chunks(db, organization_id, content, embedder)
+        documents = search_chunks(
+            db, organization_id, query, embedder, pipeline=PRODUCTION_PIPELINE
+        )
         if not documents and _referenced_kind(content) == SourceKind.document.value:
             documents = _prior_document_chunks(db, organization_id, conversation.id)
         if not documents and expand:
@@ -376,7 +392,9 @@ def _grounded_turn(
             for role, text in reversed(history):
                 if role != "user" or not text.strip():
                     continue
-                documents = search_chunks(db, organization_id, text, embedder)
+                documents = search_chunks(
+                    db, organization_id, text, embedder, pipeline=PRODUCTION_PIPELINE
+                )
                 checked += 1
                 if documents or checked == 4:
                     break
@@ -487,8 +505,9 @@ def evaluate_response(
             "reason": "The user requested a human handoff",
         }
     turns = history or []
-    documents = search_chunks(db, organization_id, question, embedder)
-    crm_records = search_records(db, organization_id, question)
+    query = rewrite_question(question, turns, [])
+    documents = search_chunks(db, organization_id, query, embedder, pipeline=PRODUCTION_PIPELINE)
+    crm_records = retrieve_crm_records(db, organization_id, query)
     confidence = _evidence_confidence(documents, crm_records)
     threshold = _escalation_threshold(db, organization_id)
     if not documents and not crm_records:

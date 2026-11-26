@@ -411,7 +411,7 @@ def test_general_stream_still_sends_tokens_as_they_arrive(client: TestClient, db
     created = client.post(f"/api/v1/organizations/{org}/conversations", json={}, headers=headers)
     streamed = client.post(
         f"/api/v1/organizations/{org}/conversations/{created.json()['id']}/messages/stream",
-        json={"content": "Tell me a joke about a warehouse."},
+        json={"content": "Please spell pallet."},
         headers=headers,
     )
     assert streamed.status_code == 200, streamed.text

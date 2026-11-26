@@ -20,6 +20,11 @@ from app.core.errors import AppError
 from app.domains.agents.models import AgentRun, RunStatus
 from app.domains.approvals.models import ActionType
 from app.domains.approvals.service import create_approval
+from app.domains.assistant.inference_guard import (
+    DETERMINISTIC_FALLBACK,
+    assess_public_inference,
+    finish_public_inference,
+)
 from app.domains.assistant.service import _configured_system
 from app.domains.audit.service import record_event
 from app.domains.automation.workflows import stage_lead_created
@@ -1525,6 +1530,15 @@ def widget_message(
         and not conversation.handoff_requested
         and conversation.status != InboxStatus.resolved
     ):
+        decision = assess_public_inference(
+            f"{widget.organization_id}:{session.id}", body.message, hold_slot=True
+        )
+        if not decision.allowed:
+            conversation.handoff_requested = True
+            conversation.handoff_reason = decision.message
+            conversation.status = InboxStatus.pending
+            db.commit()
+            return {"status": "accepted"}
         try:
             result = evaluate_inbox_draft(
                 db,
@@ -1532,7 +1546,11 @@ def widget_message(
                 conversation.id,
                 body.message,
                 get_embedding_client(db, widget.organization_id),
-                get_chat_client(db, widget.organization_id),
+                get_chat_client(
+                    db,
+                    widget.organization_id,
+                    max_output_tokens=get_settings().public_inference_max_output_tokens,
+                ),
             )
             if result["grounding"] == "grounded":
                 draft = json.loads(str(result["response"]))
@@ -1562,9 +1580,11 @@ def widget_message(
         except Exception:
             db.rollback()
             conversation.handoff_requested = True
-            conversation.handoff_reason = "AI service unavailable"
+            conversation.handoff_reason = DETERMINISTIC_FALLBACK
             conversation.status = InboxStatus.pending
             db.commit()
+        finally:
+            finish_public_inference()
     return {"status": "accepted"}
 
 

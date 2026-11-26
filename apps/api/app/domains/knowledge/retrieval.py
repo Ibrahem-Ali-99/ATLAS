@@ -2,7 +2,7 @@ import re
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -26,6 +26,22 @@ from app.integrations.resolver import resolve_settings
 # Full-text matches stay citable past this line, including an exact code at 0.47.
 VECTOR_ONLY_MAX_DISTANCE = 0.45
 
+# Development-split choice. Held-out scores must not change this name.
+# Development split, hash embeddings, frozen rule in choose_pipeline:
+# lexical abstained more often than the hybrid variants, so it is the default.
+# Do not switch this from a held-out score.
+PRODUCTION_PIPELINE = "lexical"
+
+PipelineName = Literal[
+    "lexical",
+    "dense",
+    "baseline",
+    "hybrid",
+    "hybrid_meta",
+    "hybrid_rerank",
+    "hybrid_full",
+]
+
 
 @dataclass(frozen=True)
 class RetrievedChunk:
@@ -47,6 +63,7 @@ class _Candidate:
     distance: float | None
     lexical: bool
     shared_terms: int = 0
+    lexical_strict: bool = False
 
 
 def search_chunks(
@@ -56,7 +73,25 @@ def search_chunks(
     embedder: EmbeddingClient,
     *,
     limit: int = 5,
+    pipeline: Literal[
+        "lexical",
+        "dense",
+        "baseline",
+        "hybrid",
+        "hybrid_meta",
+        "hybrid_rerank",
+        "hybrid_full",
+    ] = "hybrid",
 ) -> list[RetrievedChunk]:
+    """Retrieve ready chunks for one organization.
+
+    ``lexical`` is full-text only. ``dense`` is the vector-only gate.
+    ``baseline`` fuses AND full-text with vector neighbors by reciprocal rank.
+    ``hybrid`` adds an OR full-text query. ``hybrid_meta`` adds title filtering.
+    ``hybrid_rerank`` replaces reciprocal-rank order with the second-stage score.
+    ``hybrid_full`` applies that score, title filtering, and near-duplicate removal.
+    """
+
     query = query_text.strip()
     if len(query) < 2:
         return []
@@ -95,26 +130,34 @@ def search_chunks(
     )
     tsquery = func.plainto_tsquery("english", query)
     rank = func.ts_rank_cd(Chunk.search_vector, tsquery)
-    text_rows = db.execute(
-        select(Chunk, Document.title, rank.label("rank"))
-        .join(Document, Document.id == Chunk.document_id)
-        .where(
-            Chunk.organization_id == organization_id,
-            Document.status == "ready",
-            Document.archived_at.is_(None),
-            Chunk.search_vector.op("@@")(tsquery),
-        )
-        .order_by(rank.desc())
-        .limit(20)
-    ).all()
+    text_rows = _text_rows(db, organization_id, tsquery, rank)
+    use_or = pipeline in {"hybrid", "hybrid_meta", "hybrid_rerank", "hybrid_full"}
+    partial_rows: Sequence[Any] = []
+    strict_ids = {cast(Chunk, row[0]).id for row in text_rows} if use_or else set()
+    if use_or:
+        or_query = _or_tsquery(query)
+        if or_query is not None:
+            or_rank = func.ts_rank_cd(Chunk.search_vector, or_query)
+            partial_rows = _text_rows(db, organization_id, or_query, or_rank)
     fused: dict[uuid.UUID, _Candidate] = {}
-    _fuse_vector(fused, vector_rows, settings.max_cosine_distance)
-    _fuse_text(fused, text_rows)
+    if pipeline != "lexical":
+        vector_limit = (
+            settings.rag_vector_only_max_distance
+            if pipeline == "dense"
+            else settings.max_cosine_distance
+        )
+        _fuse_vector(fused, vector_rows, vector_limit)
+    if pipeline != "dense":
+        _fuse_text(fused, text_rows)
+        _fuse_text(fused, partial_rows)
     _mark_shared_terms(fused, query)
-    ranked = sorted(fused.values(), key=lambda item: item.score, reverse=True)
-    evidence = [
-        item for item in ranked if _is_evidence(item, settings.rag_vector_only_max_distance)
-    ]
+    query_terms = _content_terms(query)
+    if use_or:
+        for candidate in fused.values():
+            if candidate.chunk.id in strict_ids:
+                candidate.lexical_strict = True
+                candidate.lexical = True
+    evidence = _select_evidence(fused, pipeline, query_terms, settings.rag_vector_only_max_distance)
     from app.domains.observability.tracing import record_operation
 
     record_operation(
@@ -128,6 +171,7 @@ def search_chunks(
                 for item in evidence[:limit]
             ],
             "reason": None if evidence else "no_relevant_evidence",
+            "pipeline": pipeline,
         },
     )
     return [_record(item) for item in evidence[:limit]]
@@ -153,6 +197,42 @@ _SHARED_TERM_STOP_WORDS = {
 }
 
 
+def _select_evidence(
+    fused: dict[uuid.UUID, _Candidate],
+    pipeline: PipelineName,
+    query_terms: set[str],
+    vector_threshold: float,
+) -> list[_Candidate]:
+    if pipeline == "dense":
+        ranked = sorted(
+            fused.values(), key=lambda item: item.distance if item.distance is not None else 2
+        )
+        return [
+            item
+            for item in ranked
+            if item.distance is not None and item.distance <= vector_threshold
+        ]
+    if pipeline in {"hybrid_rerank", "hybrid_full"}:
+        ranked = sorted(
+            fused.values(), key=lambda item: _hybrid_rank(item, query_terms), reverse=True
+        )
+    else:
+        ranked = sorted(fused.values(), key=lambda item: item.score, reverse=True)
+    if pipeline == "lexical":
+        evidence = [item for item in ranked if item.lexical]
+    elif pipeline in {"hybrid", "hybrid_meta", "hybrid_rerank", "hybrid_full"}:
+        evidence = [
+            item for item in ranked if _is_hybrid_evidence(item, len(query_terms), vector_threshold)
+        ]
+    else:
+        evidence = [item for item in ranked if _is_evidence(item, vector_threshold)]
+    if pipeline in {"hybrid_meta", "hybrid_full"}:
+        evidence = _filter_by_title(evidence, query_terms)
+    if pipeline == "hybrid_full":
+        evidence = _drop_near_duplicates(evidence)
+    return evidence
+
+
 def _mark_shared_terms(fused: dict[uuid.UUID, _Candidate], query: str) -> None:
     """A full-text query requires every word. One shared content word is still evidence.
 
@@ -173,6 +253,119 @@ def _content_terms(text: str) -> set[str]:
         for word in _CONTENT_TERMS.findall(text.lower())
         if len(word) >= 4 and word not in _SHARED_TERM_STOP_WORDS
     }
+
+
+def _text_rows(db: Session, organization_id: uuid.UUID, tsquery: Any, rank: Any) -> Sequence[Any]:
+    return db.execute(
+        select(Chunk, Document.title, rank.label("rank"))
+        .join(Document, Document.id == Chunk.document_id)
+        .where(
+            Chunk.organization_id == organization_id,
+            Document.status == "ready",
+            Document.archived_at.is_(None),
+            Chunk.search_vector.op("@@")(tsquery),
+        )
+        .order_by(rank.desc())
+        .limit(20)
+    ).all()
+
+
+def _or_tsquery(query: str) -> Any | None:
+    """Match a passage that shares a content word, not every word in the question."""
+
+    terms = sorted(_content_terms(query))
+    if len(terms) < 2 or any(not re.fullmatch(r"[a-z0-9]+", term) for term in terms):
+        return None
+    return func.to_tsquery("english", " | ".join(terms))
+
+
+def _hybrid_rank(candidate: _Candidate, query_terms: set[str]) -> float:
+    count = len(query_terms) or 1
+    overlap = candidate.shared_terms / count
+    similarity = 0.0 if candidate.distance is None else max(0.0, 1.0 - candidate.distance)
+    title_overlap = len(query_terms & _content_terms(candidate.title)) / count
+    strict_bonus = 0.25 if candidate.lexical_strict else 0.0
+    return candidate.score * 50 + overlap + 0.35 * similarity + 0.2 * title_overlap + strict_bonus
+
+
+def _is_hybrid_evidence(
+    candidate: _Candidate, query_term_count: int, vector_threshold: float
+) -> bool:
+    """A one-word overlap is evidence when it was already a vector neighbor.
+
+    A partial full-text hit with no nearby vector needs two shared words, or
+    half of the question's content words. That keeps "storage" searchable and
+    keeps one incidental word from answering a different question.
+    """
+
+    partial_only = candidate.lexical and not candidate.lexical_strict and candidate.distance is None
+    if partial_only:
+        if query_term_count <= 1:
+            return candidate.shared_terms > 0
+        if query_term_count == 0:
+            return False
+        return candidate.shared_terms >= 2 or candidate.shared_terms / query_term_count >= 0.5
+    return _is_evidence(candidate, vector_threshold)
+
+
+_GENERIC_TITLE_TERMS = {
+    "brochure",
+    "card",
+    "code",
+    "company",
+    "customer",
+    "document",
+    "documents",
+    "notice",
+    "policy",
+    "public",
+    "rate",
+    "rates",
+    "service",
+    "services",
+    "storage",
+    "warehouse",
+    "warehousing",
+    "yard",
+}
+
+
+def _filter_by_title(evidence: list[_Candidate], query_terms: set[str]) -> list[_Candidate]:
+    """Keep one document when the question names its title and no other title."""
+
+    distinctive = {
+        term for term in query_terms if len(term) >= 5 and term not in _GENERIC_TITLE_TERMS
+    }
+    if not distinctive:
+        return evidence
+    matched: set[str] = set()
+    for item in evidence:
+        if distinctive & _content_terms(item.title):
+            matched.add(item.title)
+    if len(matched) != 1:
+        return evidence
+    title = next(iter(matched))
+    filtered = [item for item in evidence if item.title == title]
+    return filtered or evidence
+
+
+def _drop_near_duplicates(evidence: list[_Candidate]) -> list[_Candidate]:
+    kept: list[_Candidate] = []
+    kept_terms: list[set[str]] = []
+    for item in evidence:
+        terms = _content_terms(item.chunk.content)
+        duplicate = False
+        for prior, prior_terms in zip(kept, kept_terms, strict=True):
+            if prior.chunk.document_id != item.chunk.document_id:
+                continue
+            union = terms | prior_terms
+            if union and len(terms & prior_terms) / len(union) >= 0.85:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(item)
+            kept_terms.append(terms)
+    return kept
 
 
 def _is_evidence(candidate: _Candidate, vector_threshold: float = VECTOR_ONLY_MAX_DISTANCE) -> bool:

@@ -77,6 +77,18 @@ _TASK = re.compile(r"\b(create|add|make)\b.{0,40}\btask\b")
 _EXTERNAL_SEND = re.compile(
     r"\b(send|email|text)\b.{0,40}\b(message|email|customer|lead|contact)\b"
 )
+_INJECTION = re.compile(
+    r"ignore (all |any |the )?(previous |prior |above )?instructions|"
+    r"\b(system prompt|developer message)\b|"
+    r"\byou are now\b|"
+    r"\bdo not follow the (system|rules)\b|"
+    r"\breveal (your |the )?(hidden |system )?prompt\b"
+)
+_UNRELATED = re.compile(
+    r"\b(weather|forecast|joke|recipe|sports score|capital of france|who won the)\b|"
+    r"\btranslate this\b"
+)
+_BARE_TOPIC = re.compile(r"^(storage|rates?|yard|claims|cover|hours)$")
 
 
 class Intent(enum.StrEnum):
@@ -97,6 +109,8 @@ class Intent(enum.StrEnum):
     grounded = "grounded"
     general = "general"
     ambiguous = "ambiguous"
+    unrelated = "unrelated"
+    injection = "injection"
 
 
 CLASSIFIER_SYSTEM = (
@@ -112,14 +126,15 @@ CAPABILITY_ANSWER = "\n".join(
     [
         "## What I can help with",
         "",
-        "I can help you understand ATLAS and find supported information in this workspace.",
+        "Ask me about a stored company, lead, or document and I will answer from that record.",
         "",
         "- Explain the CRM, Knowledge, Agent Runs, approvals, and workflows.",
         "- List records and documents stored in this organization.",
-        "- Answer questions from retrieved records or documents with supporting sources.",
+        "- Answer a follow-up from the record we were just discussing.",
         "- Summarize a stored lead, customer, or contact, including a linked conversation.",
         "- Propose a follow-up draft, an appointment request, or a workspace task.",
         "",
+        "If a question is too broad, I will ask which record you mean. "
         "For company facts, I check the organization’s records and say when evidence is missing.",
         "",
         "A follow-up or appointment is only a proposal. An administrator approves it before "
@@ -142,9 +157,27 @@ MUTATION_ANSWER = "\n".join(
 )
 
 GREETING_ANSWER = (
-    "Hello. I can explain ATLAS, list what this organization has stored, "
-    "and answer from those CRM records and documents. "
-    "I will not guess a company fact that is not in those records."
+    "Hello. Tell me what you want to check in this workspace and I will use the stored "
+    "records. I can explain ATLAS, list what this organization has stored, and answer "
+    "from those CRM records and documents. I will not guess a company fact that is not "
+    "in those records."
+)
+
+UNRELATED_ANSWER = (
+    "I can't help with that from here. I don't check the weather, tell jokes, or answer "
+    "general knowledge. I can look up this organization's documents and CRM, explain how "
+    "approvals work, or draft a follow-up that waits until someone approves it."
+)
+
+INJECTION_ANSWER = (
+    "I won't follow an instruction to ignore the workspace rules or to invent a fact. "
+    "Ask a question about a stored record, or ask what I can help with."
+)
+
+AMBIGUOUS_ANSWER = (
+    "That word matches more than one kind of record. Name the company or the document "
+    "you mean, such as a rate card, a yard, a claim rule, or a lead title, and I will "
+    "look up that one."
 )
 
 NO_HISTORY = "We have not discussed anything earlier in this conversation."
@@ -154,8 +187,20 @@ def normalize_question(question: str) -> str:
     return " ".join(question.strip().lower().split())
 
 
+def is_prompt_injection(question: str) -> bool:
+    return bool(_INJECTION.search(normalize_question(question)))
+
+
+def is_bare_topic(question: str) -> bool:
+    return bool(_BARE_TOPIC.fullmatch(normalize_question(question).strip(" ?.!")))
+
+
 def route_question(question: str, *, has_history: bool) -> Intent:
     text = normalize_question(question)
+    if is_prompt_injection(text):
+        return Intent.injection
+    if _UNRELATED.search(text):
+        return Intent.unrelated
     if _HANDOFF.search(text):
         return Intent.handoff
     if _EXTERNAL_SEND.search(text) and not _FOLLOW_UP.search(text):
@@ -186,6 +231,8 @@ def route_question(question: str, *, has_history: bool) -> Intent:
         return Intent.recall
     if _GREETING.search(text):
         return Intent.greeting
+    if is_bare_topic(text):
+        return Intent.ambiguous
     if has_history and _REPHRASE.search(text):
         return Intent.general
     if _REFERENCE.search(text):

@@ -76,6 +76,10 @@ class OpenAICompatibleChatClient:
     def __init__(self, settings: Settings, *, transport: HttpTransport | None = None) -> None:
         self._settings = settings
         self._transport = transport
+        self._output_limit: int | None = None
+
+    def limit_output(self, tokens: int) -> None:
+        self._output_limit = tokens
 
     def ensure_configured(self) -> None:
         if not self._settings.llm_api_key.strip():
@@ -118,8 +122,11 @@ class OpenAICompatibleChatClient:
                 {"role": "user", "content": user},
             ],
         }
-        if self._settings.llm_max_output_tokens is not None:
-            body["max_tokens"] = self._settings.llm_max_output_tokens
+        output_limit = self._output_limit
+        if output_limit is None:
+            output_limit = self._settings.llm_max_output_tokens
+        if output_limit is not None:
+            body["max_tokens"] = output_limit
         if "json" in system.lower():
             body["response_format"] = {"type": "json_object"}
         if self._transport is None:
@@ -341,7 +348,11 @@ def get_embedding_client(
 
 
 def get_chat_client(
-    db: Any = None, organization_id: Any = None, *, for_verification: bool = False
+    db: Any = None,
+    organization_id: Any = None,
+    *,
+    for_verification: bool = False,
+    max_output_tokens: int | None = None,
 ) -> ChatClient:
     settings = get_settings()
     if db is not None and organization_id is not None:
@@ -364,4 +375,7 @@ def get_chat_client(
         from app.integrations.doubles import DeterministicChatClient
 
         return DeterministicChatClient()
-    return OpenAICompatibleChatClient(settings)
+    client = OpenAICompatibleChatClient(settings)
+    if max_output_tokens is not None:
+        client.limit_output(max_output_tokens)
+    return client
