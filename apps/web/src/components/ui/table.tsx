@@ -25,7 +25,7 @@ export function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
 export function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   return (
     <th
-      className={cn("h-10 px-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground", className)}
+      className={cn("h-10 px-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground", className)}
       {...props}
     />
   );

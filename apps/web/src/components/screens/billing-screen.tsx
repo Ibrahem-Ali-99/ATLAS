@@ -38,7 +38,7 @@ export function BillingScreen({
       </PageHeader>
       {checkout === "success" ? (
         <p role="status" className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-          Checkout finished. This page updates when Stripe confirms the payment. The current plan stays in place until that confirmation.
+          Checkout finished. This page updates when the payment is confirmed. Your current plan stays in place until then.
         </p>
       ) : null}
       {checkout === "canceled" ? (
@@ -48,7 +48,7 @@ export function BillingScreen({
       ) : null}
       {portalReturn ? (
         <p role="status" className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-          The billing portal is closed. Plan, payment, and cancellation changes appear here after Stripe confirms them.
+          The billing portal is closed. Plan, payment, and cancellation changes appear here after they are confirmed.
         </p>
       ) : null}
       {organizationId ? (
@@ -140,14 +140,14 @@ function BillingCard({
           <p className="mt-0.5 text-xs text-muted-foreground">
             {stripe
               ? "Checkout uses a Stripe test account and does not create a live charge."
-              : "Plan changes stay in this workspace. Stripe appears after an operator adds a test key, an approved test price, and a signed webhook."}
+              : "Plan changes stay in this workspace until Stripe billing is connected."}
           </p>
         </div>
       </div>
       {attention ? <BillingAttentionNotice attention={attention} subscription={billing.data.subscription} /> : null}
       {watchProvider && waitExpired && current?.provider !== "stripe" ? (
         <p role="status" className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-          Stripe has not confirmed the subscription yet. Refresh this page after the payment receipt arrives. The current plan stays in place until then.
+          The payment has not been confirmed yet. Refresh this page after the receipt arrives. The current plan stays in place until then.
         </p>
       ) : null}
       <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[1.25fr_1fr]">
@@ -181,7 +181,7 @@ function BillingCard({
             </div>
           </dl>
           {stripe && current?.provider !== "stripe" ? (
-            <p className="mt-4 text-xs text-muted-foreground">Checkout does not change this plan. Stripe confirms the subscription after payment.</p>
+            <p className="mt-4 text-xs text-muted-foreground">Checkout does not change this plan. The new plan starts after payment is confirmed.</p>
           ) : null}
           {isAdmin ? (
             <div className="mt-4 space-y-3 border-t border-border pt-4">
@@ -247,18 +247,20 @@ function BillingAttentionNotice({
 }) {
   const ended = subscription.current_period_end ? new Date(subscription.current_period_end).toLocaleDateString() : null;
   const copy: Record<BillingAttention, string> = {
-    payment_failed: `The last payment failed. This workspace is using Free limits until Stripe confirms a successful payment. The recorded plan remains ${subscription.plan_code}. Open Manage billing to update the payment method.`,
+    payment_failed: `The last payment failed. This workspace is using Free limits until the payment succeeds. The selected plan is still ${subscription.plan_code}. Open Manage billing to update the payment method.`,
     canceled: "This subscription is canceled. The workspace is on Free limits. An administrator can choose a plan to subscribe again.",
     expired: "This subscription expired before payment was confirmed. The workspace is on Free limits.",
-    payment_unconfirmed: "Stripe has not confirmed payment for this subscription. The workspace stays on Free limits until the subscription is active.",
+    payment_unconfirmed: "Payment has not been confirmed. The workspace stays on Free limits until the subscription is active.",
     cancels_at_period_end: ended
-      ? `This subscription cancels on ${ended}. Access stays on ${subscription.plan_code} until then.`
-      : `This subscription cancels at the end of the current period. Access stays on ${subscription.plan_code} until then.`,
-    period_lapsed: "The paid period has ended. The workspace is on Free limits until Stripe confirms renewal.",
+      ? `This subscription cancels on ${ended}. Paid access stays in place until then.`
+      : "This subscription cancels at the end of the current period. Paid access stays in place until then.",
+    period_lapsed: "The paid period has ended. The workspace is on Free limits until the renewal is confirmed.",
   };
   const alert = attention === "payment_failed" || attention === "expired" || attention === "period_lapsed";
   return (
-    <p role={alert ? "alert" : "status"} className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-red-100">
+    <p role={alert ? "alert" : "status"} className={alert
+      ? "rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-foreground"
+      : "rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground"}>
       {copy[attention]}
     </p>
   );

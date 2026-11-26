@@ -676,10 +676,10 @@ function failureCopy(error: unknown): { heading: string; detail: string } {
     };
   }
   if (error.code === "llm_unconfigured" || error.code === "embedding_unconfigured") {
-    return { heading: "Model credentials are missing", detail: error.message };
+    return { heading: "The assistant is not connected yet", detail: "An administrator needs to connect a language model before answers can be generated." };
   }
   if (error.code === "llm_rate_limited" || error.code === "embedding_rate_limited") {
-    return { heading: "The provider rate limit was reached", detail: error.message };
+    return { heading: "The assistant is busy", detail: "Too many requests were sent. Wait a moment and try again." };
   }
   if (
     error.code === "llm_unavailable" ||
@@ -687,10 +687,10 @@ function failureCopy(error: unknown): { heading: string; detail: string } {
     error.code === "llm_timeout" ||
     error.code === "embedding_timeout"
   ) {
-    return { heading: "The provider is unavailable", detail: error.message };
+    return { heading: "The assistant is unavailable", detail: "The language service did not respond. Try again in a moment." };
   }
   if (error.code === "embedding_dimension_mismatch") {
-    return { heading: "Search could not use this index", detail: error.message };
+    return { heading: "Document search needs to be rebuilt", detail: "The document index does not match the current search setup. An administrator can rebuild it from Knowledge." };
   }
   if (error.status === 403 || error.code === "forbidden") {
     return { heading: "Permission denied", detail: error.message };
@@ -709,10 +709,10 @@ function searchNotice(reply: AssistantReply): string | null {
     return null;
   }
   if (reply.document_search === "unconfigured") {
-    return "Document search is unavailable because embeddings are not configured. This answer used CRM records only.";
+    return "Document search is not set up yet. This answer used customer records only.";
   }
   if (reply.document_search === "unavailable") {
-    return "Document search did not run. The embedding provider was unreachable, refused the request, or the index width does not match. This answer used CRM records only.";
+    return "Document search did not run, so this answer used customer records only.";
   }
   if (reply.document_search === "empty" && reply.message.sources.every((source) => source.kind !== "document")) {
     return "No company document matched this question.";

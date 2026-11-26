@@ -115,9 +115,9 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
       ) : null}
       {data.comparison ? <Comparison comparison={data.comparison} /> : null}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <Metric label="Active companies" value={String(data.companies_total)} detail="Customer accounts in the selected scope." href="/crm?tab=companies" />
-        <Metric label="Leads" value={String(data.leads_total)} detail="Leads in the selected scope." href="/crm?tab=leads" />
-        <Metric label="Open inquiries" value={String(data.open_inquiries)} detail="Customer requests in the selected scope." href="/crm?tab=inquiries" />
+        <Metric label="Active companies" value={String(data.companies_total)} detail="Customer accounts in this view." href="/crm?tab=companies" />
+        <Metric label="Leads" value={String(data.leads_total)} detail="Leads in this view." href="/crm?tab=leads" />
+        <Metric label="Open inquiries" value={String(data.open_inquiries)} detail="Customer requests in this view." href="/crm?tab=inquiries" />
         <Metric
           label="Won or lost"
           value={rate}
@@ -340,6 +340,12 @@ function shortDay(value: string): string {
   return value.length >= 10 ? value.slice(5) : value;
 }
 
+function formatDay(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return value;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function storedScope(organizationId: string): DataScope {
   if (typeof window === "undefined") return "all";
   const saved = window.localStorage.getItem(`atlas.dashboard.scope.${organizationId}`);
@@ -367,8 +373,8 @@ function Comparison({ comparison }: { comparison: NonNullable<AnalyticsSnapshot[
   ] as const;
   return (
     <section className="rounded-xl border border-border bg-card p-4" aria-label="Period comparison">
-      <h2 className="text-base text-foreground">Compared with the previous period</h2>
-      <p className="mt-1 text-xs text-muted-foreground">{comparison.previous_period.start} to {comparison.previous_period.end}</p>
+      <h2 className="text-base font-semibold text-foreground">Compared with the previous period</h2>
+      <p className="mt-1 text-xs text-muted-foreground">{formatDay(comparison.previous_period.start)} to {formatDay(comparison.previous_period.end)}</p>
       <ul className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {rows.map(([label, item]) => <ComparisonItem key={label} label={label} item={item} />)}
       </ul>
@@ -377,8 +383,9 @@ function Comparison({ comparison }: { comparison: NonNullable<AnalyticsSnapshot[
 }
 
 function ComparisonItem({ label, item }: { label: string; item: PeriodDelta }) {
-  const change = item.change_rate == null ? "No earlier activity to compare" : `${item.delta > 0 ? "+" : ""}${Math.round(item.change_rate * 1000) / 10}%`;
-  return <li className="rounded-lg bg-muted/50 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl tabular-nums">{item.current}</p><p className="mt-1 text-xs text-muted-foreground">{change} · previous {item.previous}</p></li>;
+  const change = item.change_rate == null ? "No earlier activity" : `${item.delta > 0 ? "+" : ""}${Math.round(item.change_rate * 1000) / 10}%`;
+  const previous = item.change_rate == null ? "" : ` · previous ${item.previous}`;
+  return <li className="rounded-lg bg-muted/50 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl tabular-nums">{item.current}</p><p className="mt-1 text-xs text-muted-foreground">{change}{previous}</p></li>;
 }
 
 function QualificationTrend({ rows }: { rows: NonNullable<AnalyticsSnapshot["qualification_trend"]> }) {

@@ -54,9 +54,9 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
 
   if (session.isPending) {
     return (
-      <div className="flex min-h-screen items-center justify-center p-6">
+      <div className="flex min-h-screen items-center justify-center p-6" role="status">
         <div className="w-full max-w-sm space-y-3">
-          <Skeleton className="h-8 w-32" />
+          <p className="text-sm font-medium text-foreground">Loading your workspace</p>
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-2/3" />
         </div>
@@ -94,6 +94,7 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
 
   return (
     <div className={cn("min-h-screen bg-background md:grid", collapsed ? "md:grid-cols-[68px_minmax(0,1fr)]" : "md:grid-cols-[240px_minmax(0,1fr)]")}>
+      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-card focus:px-3 focus:py-2 focus:text-sm focus:shadow-sm">Skip to content</a>
       <aside className="hidden border-r border-border bg-sidebar md:block">
         <div className="sticky top-0 flex h-screen flex-col">
           <SidebarNav organizationName={organizationName} collapsed={collapsed} onToggleCollapse={() => setCollapsed((value) => !value)} />
@@ -140,6 +141,7 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
+                aria-label="Account menu"
                 className="flex items-center gap-3 rounded-md px-2 py-1 text-left hover:bg-accent"
               >
                 <span className="flex size-8 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">

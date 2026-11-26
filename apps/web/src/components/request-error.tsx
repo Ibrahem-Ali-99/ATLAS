@@ -6,10 +6,10 @@ export function RequestError({ error }: { error: unknown }) {
       ? error.message
       : error instanceof Error
         ? error.message
-        : "Request failed";
+        : "Something went wrong. Try again.";
   return (
     <p
-      className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm leading-5 text-red-100"
+      className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm leading-5 text-foreground"
       role="alert"
     >
       {message}

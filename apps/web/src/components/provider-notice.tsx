@@ -47,11 +47,7 @@ export function ProviderNotice({
     if (!data.llm_ready) {
       return <p className="text-xs text-subtle">{data.llm_detail}</p>;
     }
-    return (
-      <p className="text-xs uppercase tracking-[0.12em] text-success">
-        {data.llm_provider} · {data.llm_model}
-      </p>
-    );
+    return <p className="text-xs font-medium text-success">Assistant connected</p>;
   }
   const problem = !data.llm_ready || !data.embedding_ready || data.incompatible_documents > 0;
   if (!detail && !problem) {
@@ -59,17 +55,17 @@ export function ProviderNotice({
   }
   return (
     <section className="rounded-[10px] bg-muted p-4 text-sm" aria-live="polite">
-      <h2 className="font-medium">Models</h2>
-      <p className="mt-1 text-muted-foreground">Read only. API keys are not shown.</p>
+      <h2 className="font-medium">Connected services</h2>
+      <p className="mt-1 text-muted-foreground">Secrets stay hidden.</p>
       <dl className="mt-3 space-y-2">
         <div>
-          <dt className="text-muted-foreground">Language model</dt>
+          <dt className="text-muted-foreground">Assistant</dt>
           <dd>
             {data.llm_provider} · {data.llm_model}. {data.llm_detail}
           </dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Embeddings</dt>
+          <dt className="text-muted-foreground">Document search</dt>
           <dd>
             {data.embedding_provider} · {data.embedding_model} · {data.embedding_dimensions} values. {data.embedding_detail}
           </dd>

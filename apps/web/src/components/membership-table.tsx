@@ -4,7 +4,7 @@ import type { Membership } from "@/lib/types";
 
 export function MembershipTable({ memberships }: { memberships: Membership[] }) {
   if (memberships.length === 0) {
-    return <p className="text-sm text-muted-foreground">This account has no organization memberships.</p>;
+    return <p className="text-sm text-muted-foreground">This account is not part of a workspace yet.</p>;
   }
 
   return (
@@ -12,7 +12,7 @@ export function MembershipTable({ memberships }: { memberships: Membership[] }) 
       <TableHeader>
         <TableRow>
           <TableHead>Organization</TableHead>
-          <TableHead>Slug</TableHead>
+          <TableHead>Workspace key</TableHead>
           <TableHead>Role</TableHead>
         </TableRow>
       </TableHeader>
@@ -24,7 +24,7 @@ export function MembershipTable({ memberships }: { memberships: Membership[] }) 
               {membership.organization_slug}
             </TableCell>
             <TableCell>
-              <Badge>{membership.role}</Badge>
+              <Badge className="capitalize">{membership.role}</Badge>
             </TableCell>
           </TableRow>
         ))}

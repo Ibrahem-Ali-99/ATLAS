@@ -100,7 +100,7 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
-      <PageHeader title="Settings" eyebrow="Workspace administration">Manage your account, organization, and service configuration.</PageHeader>
+      <PageHeader title="Settings" eyebrow="Workspace administration">Manage your account, workspace, and connections.</PageHeader>
       <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[11rem_minmax(0,1fr)]">
       <nav aria-label="Settings sections" className="min-w-0 overflow-x-auto rounded-xl border border-border bg-card p-1.5 lg:sticky lg:top-[76px]">
         <ul className="flex w-max gap-1 lg:w-full lg:flex-col">
@@ -178,16 +178,16 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
       <div id="settings-connections" className="grid scroll-mt-20 gap-4">
       {organizationId ? <ProviderNotice organizationId={organizationId} detail /> : null}
       <section className="rounded-xl border border-border bg-card p-4">
-        <h2 className="text-base text-foreground">Delivery</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Read only. Webhook keys and model keys are not shown.</p>
+        <h2 className="text-base font-semibold text-foreground">Delivery</h2>
+        <p className="mt-1 text-sm text-muted-foreground">How this workspace sends mail and runs automations. Secrets stay hidden.</p>
         {automations.isPending ? <Skeleton className="mt-4 h-16 w-full" /> : null}
         {automations.isError ? <div className="mt-4"><RequestError error={automations.error} /></div> : null}
         {automations.data ? (
-          <dl className="mt-4 space-y-2 text-sm text-muted-foreground">
-            <div>Email mode: {automations.data.email_mode}</div>
-            <div>Calendar: {automations.data.calendar_provider}</div>
-            <div>n8n: {automations.data.n8n_configured ? "configured" : "not configured"}</div>
-            <div>Webhook key: {automations.data.webhook_configured ? "configured" : "not configured"}</div>
+          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+            <div><dt className="text-xs text-muted-foreground">Email</dt><dd className="mt-1 capitalize">{automations.data.email_mode}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Calendar</dt><dd className="mt-1 capitalize">{automations.data.calendar_provider}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Automations</dt><dd className="mt-1">{automations.data.n8n_configured ? "Connected" : "Not connected"}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Callback key</dt><dd className="mt-1">{automations.data.webhook_configured ? "Ready" : "Not created"}</dd></div>
           </dl>
         ) : null}
       </section>
@@ -198,7 +198,7 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-semibold">Integrations</h2><Badge variant="secondary">Read only</Badge>
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">Workspace administrators manage provider connections.</p>
+          <p className="mt-2 text-sm text-muted-foreground">An administrator connects email, messaging, and calendar for this workspace.</p>
           <Button asChild variant="outline" className="mt-3"><Link href="/integrations">Browse integrations</Link></Button>
         </section>
       ) : null}

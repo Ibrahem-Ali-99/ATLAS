@@ -41,16 +41,16 @@ function deliveryLabel(status: string) {
 }
 
 function serviceWindowCopy(window: WhatsAppServiceWindow) {
-  const provider = window.provider === "live"
-    ? "Live WhatsApp is available"
+  const availability = window.provider === "live"
+    ? "WhatsApp replies are available"
     : window.provider === "test"
-      ? "Restricted test number"
-      : "WhatsApp sending is unavailable";
-  if (!window.closes_at) return `${provider}. No customer message has opened the 24-hour service window.`;
+      ? "Replies are limited to the test number"
+      : "WhatsApp replies are turned off";
+  if (!window.closes_at) return `${availability}. A customer message opens a 24-hour reply window.`;
   const closes = displayDate(window.closes_at);
   return window.open
-    ? `${provider}. Customer-service window is open until ${closes}.`
-    : `${provider}. Customer-service window closed ${closes}.`;
+    ? `${availability} until ${closes}.`
+    : `${availability}. The reply window closed ${closes}.`;
 }
 
 function relativeTime(date: string) {
