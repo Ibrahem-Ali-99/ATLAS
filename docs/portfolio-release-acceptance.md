@@ -41,4 +41,4 @@ Simulated means a deterministic provider, a sandbox mailbox, or a test double. I
 
 - The shared API was left running, so this pass did not repeat hosted Stripe checkout, the billing portal, or a live renewal.
 - Live email, live WhatsApp, and live Google Calendar were not called.
-- A React duplicate-key warning appeared while opening pages at a narrow width. Those pages still loaded. The warning was not traced to a file owned by this pass.
+- A React duplicate-key warning appeared while opening pages at a narrow width. Those pages still loaded. The warning was not traced during this acceptance pass. The later qualification found it on Workspace setup: the profile form and the knowledge upload were siblings keyed by the same organization id. Those keys are now distinct, and the release verification walk reports no duplicate key.

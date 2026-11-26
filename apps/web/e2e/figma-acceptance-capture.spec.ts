@@ -78,7 +78,7 @@ test("capture primary product screens at desktop and mobile widths", async ({ pa
       await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toBeVisible();
       await page.waitForLoadState("networkidle");
       if (name === "analytics") await expect(page.getByTestId("analytics-metric-leads")).toBeVisible();
-      if (name === "workflows") await expect(page.getByTestId("workflow-topology")).toBeVisible();
+      if (name === "workflows") await expect(page.getByRole("complementary", { name: "Workflow library" })).toBeVisible();
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow, `${route} at ${width}px`).toBeLessThanOrEqual(1);
       await capture(page, `${name}-${form}-${width}x${height}.png`);

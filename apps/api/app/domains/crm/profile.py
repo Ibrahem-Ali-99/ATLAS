@@ -65,9 +65,15 @@ def customer_profile(
     interactions = _interactions(db, organization_id, lead_ids)
     return {
         "subject": subject,
-        "companies": [_company_row(db, organization_id, item) for item in company_ids],
-        "contacts": [_brief(item.id, item.full_name, item.email) for item in contacts],
-        "leads": [_brief(item.id, item.title, item.status.value) for item in leads],
+        "companies": [
+            _company_row(db, organization_id, item) for item in company_ids if item != company_id
+        ],
+        "contacts": [
+            _brief(item.id, item.full_name, item.email) for item in contacts if item.id != contact_id
+        ],
+        "leads": [
+            _brief(item.id, item.title, item.status.value) for item in leads if item.id != lead_id
+        ],
         "inquiries": [_brief(item.id, item.subject, None) for item in inquiries],
         "opportunities": [
             {"id": item.id, "title": item.title, "stage": item.stage, "value": item.value}

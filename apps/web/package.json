@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --experimental-strip-types --test src/lib/api-base.test.ts src/lib/document-origin.test.ts src/lib/public-catalog.test.ts",
+    "test:unit": "node --experimental-strip-types --test src/lib/api-base.test.ts src/lib/billing-error.test.ts src/lib/document-origin.test.ts src/lib/public-catalog.test.ts",
     "e2e": "playwright test"
   },
   "dependencies": {

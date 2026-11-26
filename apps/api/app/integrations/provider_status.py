@@ -42,7 +42,7 @@ def provider_status(db: Session, organization_id: uuid.UUID) -> ProviderStatus:
         embedding_dimensions=embedding_settings.embedding_dimensions,
         embedding_ready=embedding_ready,
         embedding_detail=embedding_detail,
-        incompatible_documents=incompatible_document_count(db, organization_id),
+        incompatible_documents=incompatible_document_count(db, organization_id, embedding_settings),
     )
 
 

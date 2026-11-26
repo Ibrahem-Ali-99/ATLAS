@@ -83,11 +83,16 @@ def store_chunk_embedding(chunk: Chunk, vector: list[float], settings: Settings)
     chunk.embedding_768 = None
 
 
-def incompatible_document_count(db: Session, organization_id: uuid.UUID) -> int:
-    try:
-        settings = resolve_settings(db, organization_id, "embedding", for_verification=True)
-    except AppError:
-        settings = get_settings()
+def incompatible_document_count(
+    db: Session,
+    organization_id: uuid.UUID,
+    settings: Settings | None = None,
+) -> int:
+    if settings is None:
+        try:
+            settings = resolve_settings(db, organization_id, "embedding", for_verification=True)
+        except AppError:
+            settings = get_settings()
     if settings.embedding_provider == "double":
         return 0
     column = vector_column(settings.embedding_dimensions)

@@ -63,9 +63,9 @@ export function SetupScreen() {
       {!isAdmin ? <p className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">Workspace administrators manage the organization profile and assistant configuration.</p> : onboarding.isPending ? <Skeleton className="h-56 w-full" /> : onboarding.isError ? (
         <RequestError error={onboarding.error} />
       ) : (
-        <OnboardingForms key={organizationId} organizationId={organizationId} initialName={onboarding.data?.organization.name ?? workspace.organizationName ?? "Organization"} setup={setup} agent={agent} onProgress={refreshProgress} onSaved={() => { refreshProgress(); void queryClient.invalidateQueries({ queryKey: ["onboarding", organizationId] }); void queryClient.invalidateQueries({ queryKey: sessionQueryOptions.queryKey }); }} />
+        <OnboardingForms key={`profile-${organizationId}`} organizationId={organizationId} initialName={onboarding.data?.organization.name ?? workspace.organizationName ?? "Organization"} setup={setup} agent={agent} onProgress={refreshProgress} onSaved={() => { refreshProgress(); void queryClient.invalidateQueries({ queryKey: ["onboarding", organizationId] }); void queryClient.invalidateQueries({ queryKey: sessionQueryOptions.queryKey }); }} />
       )}
-      <KnowledgeOnboarding key={organizationId} organizationId={organizationId} />
+      <KnowledgeOnboarding key={`knowledge-${organizationId}`} organizationId={organizationId} />
       </div>
       <section aria-labelledby="setup-checklist" className="min-w-0 self-start rounded-xl border border-border bg-card">
         <div className="border-b border-border p-5">

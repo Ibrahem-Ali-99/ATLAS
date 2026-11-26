@@ -1,6 +1,37 @@
 # ATLAS engineering handoff
 
-Checkpoint date: 2026-11-26. The permanent development workspace is `D:\ATLAS` on `feature/atlas-product-completion` at `f0596326a966c9f55be099b6f8f23b113111ded6`, tracking `origin/feature/atlas-product-completion`. Continue from this checkout. Do not open a second worktree or restart the product from the parent revision `4cdffa824878488cb6fe6e3457ec72b42b9a6132`. Environment files, `var/` databases and uploads, and regenerated demo screenshots remain local state on top of the checkpoint.
+Checkpoint date: 2026-11-26. The permanent development workspace is `D:\ATLAS` on `feature/atlas-product-completion`. The frozen baseline remains `f0596326a966c9f55be099b6f8f23b113111ded6`, tracking `origin/feature/atlas-product-completion`. Continue from this checkout. Do not open a second worktree or restart the product from the parent revision `4cdffa824878488cb6fe6e3457ec72b42b9a6132`. Environment files, `var/` databases and uploads, and regenerated demo screenshots remain local state on top of the checkpoint.
+
+## Release candidate
+
+Qualification date: 2026-11-26. Portfolio acceptance is `f55c608`, and these suites ran on the tree that includes the Harbor rehearsal commit `b71d0de`. The shared API on port 8000 and the web app on port 3000 were left running. Checks used `atlas_test`, `atlas_migration_test`, and a disposable `atlas_e2e_*` database on API port 8011 and web port 3011. `ATLAS_LIVE_PROVIDERS` was unset. No message was sent and no Stripe charge was created. Repeat the commands in [release verification](release-verification.md).
+
+| Check | Result |
+| --- | --- |
+| API regression | 284 passed, 1 skipped, 0 failed. The skip is the opt-in live Groq and Ollama test. `atlas_test` is truncated by the suite. `atlas_migration_test` is upgraded, downgraded, and upgraded again. |
+| Frontend unit tests | `npm run test:unit` — 12 passed, 0 failed. The script includes the billing error cases that were previously outside it. |
+| TypeScript | `npx tsc --noEmit` passed. |
+| Production build | `next build` with `NEXT_DIST_DIR=.next-release-check` passed. Next.js 16.4.6 compiled 26 routes. The shared `.next` directory was not replaced. |
+| Browser regression | 37 passed, 2 skipped, 0 failed. The skips are the design-capture run, which stays off unless `ATLAS_E2E_ARTIFACT_DIR` is set, and the Resend transport settings test, which stays off unless `ATLAS_E2E_RESEND_TRANSPORT=1`. Do not point the artifact directory at `docs/demo/screenshots`. |
+| Migrations | `alembic heads` reports one head, `20261126_0055`. A disposable browser database upgraded from empty to that head. |
+| Dependencies | `uv lock --check` in `apps/api` resolved 114 packages. `npm ci --ignore-scripts --dry-run` in `apps/web` reported the lockfile in sync. |
+| Secrets and local state | `.env`, `apps/web/.env.local`, `infrastructure/staging/.env`, and `var/` (databases and `var/atlas-storage` uploads) are ignored. The only tracked env file from this check is `.env.example`. |
+
+### Fixes in this qualification
+
+- Workspace setup rendered the organization profile and the knowledge upload as siblings with the same React key, the organization id. The keys are now `profile-` and `knowledge-` plus that id. A browser walk of the workspace routes reports no duplicate-key warning.
+- Provider status counted incompatible documents from a second settings lookup. A legacy 1536-width document could be omitted when the status itself was reporting a 768-width model. The count now uses the embedding settings already resolved for that response.
+- A customer profile listed the open company, contact, or lead again among its related records. The table and the profile then exposed two controls with the same name. The profile keeps the open record as its subject and lists only the other linked records.
+
+### Provider evidence that this pass did not repeat
+
+The Stripe test-mode record in [stripe-test-mode.md](stripe-test-mode.md) still describes the billing service. No billing domain file has changed since that record. The only later Billing edit is customer-facing copy and alert contrast in `e7918d7`. Checkout still leaves the current plan in place until a signed webhook confirms payment, failed payments still fall back to Free limits, and cancellation still keeps paid access until the period ends. This pass did not open Checkout, the portal, or a test clock.
+
+Live Groq, Ollama, email, WhatsApp, and Google Calendar were not called. The opt-in live provider test stays skipped unless `ATLAS_LIVE_PROVIDERS=yes`. Google Calendar disconnect and revocation remain open in the backlog. WhatsApp customer messaging, live Resend campaigns, and live SMTP stay gated off.
+
+### Still outside this candidate
+
+Interactive demo access, deployment configuration, and portfolio rehearsal are in progress in other working-tree files. This qualification does not certify those files. The process already listening on port 8000 was not reloaded, so it is not the process a public deploy would start. A deploy must load its own environment, run `alembic upgrade head`, and keep live send and live charge flags off until the provider procedure is repeated on that host.
 
 ## Architecture and repository
 
@@ -44,7 +75,7 @@ uv run --locked alembic current
 Pop-Location
 ```
 
-The single head is `20261126_0052`. Seven revisions extend `20261125_0045` with campaign dispatch and transport pinning, webhook rotation and disconnect, workflow lifecycle, Google OAuth and booking ownership, and staged embedding rebuilds.
+The single head is `20261126_0055`. Revisions through `20261126_0052` add campaign dispatch and transport pinning, webhook rotation and disconnect, workflow lifecycle, Google OAuth and booking ownership, and staged embedding rebuilds. `20261126_0053` archives inbox conversations, `20261126_0054` stores assistant workspace state, and `20261126_0055` remembers document fingerprints and allows knowledge archival.
 
 ## Implemented functionality
 
