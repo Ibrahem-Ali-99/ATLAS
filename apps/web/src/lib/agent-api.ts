@@ -19,6 +19,7 @@ export type AssistantExecutionStep = {
 
 export type AssistantExecution = {
   id: string;
+  conversation_id: string;
   request: string;
   status: "running" | "completed" | "failed";
   tools: string[];

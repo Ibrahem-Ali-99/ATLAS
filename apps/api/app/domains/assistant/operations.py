@@ -35,7 +35,7 @@ _SUMMARY_NAME = re.compile(
 _LEADING_KIND = re.compile(r"^(?:the\s+)?(?:lead|customer|contact)\s+", re.IGNORECASE)
 _OPEN_LEAD = re.compile(
     r"^(?:the\s+|an?\s+)?(?:first|next|earliest|top)\s+(?:open\s+|qualified\s+|new\s+)?"
-    r"(?:lead|customer)$|^(?:an?\s+)?open\s+lead$|^(?:that|this)\s+lead$",
+    r"(?:lead|customer)$|^(?:an?\s+)?open\s+lead$|^(?:that|this)(?:\s+same)?\s+lead$",
     re.IGNORECASE,
 )
 
@@ -48,19 +48,54 @@ class ProposalDraft:
     payload: dict[str, Any]
 
 
-def question_for_stored_lead(db: Session, organization_id: uuid.UUID, question: str) -> str:
+def question_for_stored_lead(
+    db: Session,
+    organization_id: uuid.UUID,
+    question: str,
+    conversation_id: uuid.UUID | None = None,
+) -> str:
     """Replace 'the first open lead' with a stored title. A real name is left as written."""
 
     name = requested_name(question)
     if name is None or _OPEN_LEAD.search(name.strip()) is None:
         return question
-    title = _priority_lead_title(db, organization_id)
+    title = None
+    if conversation_id is not None and re.search(r"\b(that|this|same)\b", name, re.IGNORECASE):
+        title = _recent_proposed_lead(db, organization_id, conversation_id)
+    if title is None:
+        title = _priority_lead_title(db, organization_id)
     if title is None:
         return question
     start = question.lower().rfind(name.lower())
     if start < 0:
         return question
     return question[:start] + title
+
+
+def _recent_proposed_lead(
+    db: Session, organization_id: uuid.UUID, conversation_id: uuid.UUID
+) -> str | None:
+    rows = db.scalars(
+        select(AssistantProposal)
+        .where(
+            AssistantProposal.organization_id == organization_id,
+            AssistantProposal.conversation_id == conversation_id,
+        )
+        .order_by(AssistantProposal.created_at.desc())
+        .limit(5)
+    ).all()
+    for proposal in rows:
+        raw = proposal.payload.get("lead_id") if isinstance(proposal.payload, dict) else None
+        if not isinstance(raw, str):
+            continue
+        try:
+            lead_id = uuid.UUID(raw)
+        except ValueError:
+            continue
+        lead = db.get(Lead, lead_id)
+        if lead is not None and lead.organization_id == organization_id:
+            return lead.title
+    return None
 
 
 def prepare_operation(

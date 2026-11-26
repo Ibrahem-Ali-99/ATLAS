@@ -224,6 +224,10 @@ def asks_for_stored_appointment(question: str) -> bool:
     text = normalize_question(question)
     if _BOOK_PERSON.search(text) or _APPOINTMENT.search(text) or _FOLLOW_UP.search(text):
         return False
+    if re.search(r"\b(free|available|availability)\b", text):
+        return False
+    if re.search(r"\bcheck\b", text) and _CALENDAR_STATUS.search(text):
+        return False
     return bool(_CALENDAR_STATUS.search(text))
 
 

@@ -80,6 +80,7 @@ class ToolContext:
     user_id: uuid.UUID
     role: MembershipRole
     embedder: EmbeddingClient
+    conversation_id: uuid.UUID | None = None
 
 
 @dataclass
@@ -502,6 +503,7 @@ def _proposal(ctx: ToolContext, intent: Intent, lead_name: str, tool_name: str) 
             Intent.appointment: f"Request an appointment for {name}",
             Intent.task: f"Create a follow-up task for {name}",
         }[intent],
+        ctx.conversation_id,
     )
     read, draft = prepare_operation(ctx.db, ctx.organization_id, intent, question)
     records = list(read.crm_records)

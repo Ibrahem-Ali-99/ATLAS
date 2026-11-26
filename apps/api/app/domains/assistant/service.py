@@ -882,7 +882,9 @@ def _operation_turn(
     content: str,
     embedder: EmbeddingClient,
 ) -> PreparedTurn:
-    asked = operations.question_for_stored_lead(db, organization_id, content)
+    asked = operations.question_for_stored_lead(
+        db, organization_id, content, conversation.id
+    )
     excerpts = (
         _safe_passages(db, organization_id, content, embedder)
         if operations.needs_stored_excerpt(content)

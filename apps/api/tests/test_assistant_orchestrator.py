@@ -107,6 +107,17 @@ def test_compare_and_overdue_select_business_tools() -> None:
     overdue = plan_request("What work is overdue?", [])
     assert overdue.tools == [("list_tasks", {"overdue_only": True})]
     assert asks_for_several_sources("Compare our customers and the open leads")
+    followed = plan_request(
+        "What about that company?",
+        [("user", "What does the bonded warehousing note say?")],
+    )
+    assert [name for name, _arguments in followed.tools] == ["list_companies"]
+    from app.domains.assistant.routing import asks_for_stored_appointment
+
+    assert not asks_for_stored_appointment(
+        "Check whether Monday morning is open on the calendar."
+    )
+    assert asks_for_stored_appointment("Which appointments are stored?")
 
 
 def _ask(

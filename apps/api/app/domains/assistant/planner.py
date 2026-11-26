@@ -14,7 +14,7 @@ _PRIVATE = re.compile(r"\b(private home|home address|salary|birthday|date of bir
 _EMPLOYEES = re.compile(
     r"\b(employees?|staff|team members?|who works|colleagues?|workspace members?)\b"
 )
-_CUSTOMERS = re.compile(r"\b(customers?|companies|clients|accounts)\b")
+_CUSTOMERS = re.compile(r"\b(customers?|companies|company|clients|accounts)\b")
 _LEADS = re.compile(r"\b(leads?|prioriti[sz]e|status of)\b")
 _CONTACTS = re.compile(r"\bcontacts?\b")
 _OPPORTUNITIES = re.compile(r"\b(opportunit(?:y|ies)|deals?|sales pipeline)\b")
@@ -41,7 +41,7 @@ _REFERENCE = re.compile(r"\b(that|this|those|them|it|mentioned|earlier)\b")
 _NOISE = re.compile(
     r"\b(what|whats|what's|is|the|a|an|of|our|my|please|show|me|list|who|are|does|do|"
     r"how|many|tell|about|can|you|there|any|which|in|for|to|with|status|names|name|"
-    r"should|i|we|need|attention|does|did)\b"
+    r"should|i|we|need|attention|does|did|that|this|those|them|same|earlier|mentioned)\b"
 )
 _GENERIC = {
     "customer",
@@ -157,6 +157,11 @@ def answer_uses_results(text: str, payloads: list[dict[str, Any]]) -> bool:
     ]
     if totals and not any(item in text for item in totals):
         return False
+    if any("available" in payload or payload.get("needs_time") for payload in payloads):
+        if not re.search(
+            r"\b(already booked|is open|start and end|could not be checked)\b", text.lower()
+        ):
+            return False
     names = _names(payloads)
     if not names:
         return True

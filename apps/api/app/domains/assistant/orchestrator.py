@@ -466,6 +466,7 @@ def _context(db: Session, conversation: Conversation, embedder: EmbeddingClient)
         user_id=conversation.user_id,
         role=role,
         embedder=embedder,
+        conversation_id=conversation.id,
     )
 
 
