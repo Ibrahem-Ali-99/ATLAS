@@ -12,6 +12,8 @@ export type InboxConversation = {
   contact_id: string | null;
   lead_id: string | null;
   assigned_to: string | null;
+  assignee_name?: string | null;
+  archived_at?: string | null;
   handoff_requested?: boolean;
   handoff_reason?: string | null;
   updated_at: string;
@@ -19,7 +21,31 @@ export type InboxConversation = {
   company_name?: string | null;
   preview?: string | null;
 };
-export type InboxDetail = InboxConversation & { ai_resumed?: boolean; reply_recipient?: string | null; reply_unavailable?: string | null; whatsapp_reply_mode?: "test" | "live" | null; handoff_accepted_at?: string | null; handoff_resolved_at?: string | null; messages: { id: string; sender: string; recipient: string; body: string; direction: string; channel: string; delivery_status: string; created_at: string }[] };
+export type InboxCustomer = {
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  company_id: string | null;
+  company_name: string | null;
+  inquiry_id: string | null;
+  inquiry_subject: string | null;
+};
+export type WhatsAppServiceWindow = {
+  open: boolean;
+  closes_at: string | null;
+  provider: "live" | "test" | "unavailable";
+};
+export type InboxDetail = InboxConversation & {
+  ai_resumed?: boolean;
+  reply_recipient?: string | null;
+  reply_unavailable?: string | null;
+  whatsapp_reply_mode?: "test" | "live" | null;
+  whatsapp_service_window?: WhatsAppServiceWindow | null;
+  customer?: InboxCustomer | null;
+  handoff_accepted_at?: string | null;
+  handoff_resolved_at?: string | null;
+  messages: { id: string; sender: string; recipient: string; body: string; direction: string; channel: string; delivery_status: string; created_at: string }[];
+};
 const path = (id: string) => `/api/v1/organizations/${id}/inbox`;
 export type WidgetSettings = {
   allowed_domains: string[];
@@ -32,13 +58,19 @@ export const getInboxWidget = (id: string) => apiFetch<InboxWidget | null>(`${pa
 export const saveInboxWidget = (id: string, settings: WidgetSettings) =>
   apiFetch<InboxWidget>(`${path(id)}/widget`, { method: "PUT", body: JSON.stringify(settings) });
 export type InboxAssignee = { user_id: string; full_name: string; email: string };
-export const listInbox = (id: string, q = "", assigned = "all", channel = "all", status = "") => apiFetch<InboxConversation[]>(`${path(id)}?${new URLSearchParams({ ...(q ? { q } : {}), ...(assigned !== "all" ? { assigned } : {}), ...(channel !== "all" ? { channel } : {}), ...(status ? { status } : {}) })}`);
+export const listInbox = (id: string, q = "", assigned = "all", channel = "all", status = "", retention = "active") => apiFetch<InboxConversation[]>(`${path(id)}?${new URLSearchParams({ ...(q ? { q } : {}), ...(assigned !== "all" ? { assigned } : {}), ...(channel !== "all" ? { channel } : {}), ...(status ? { status } : {}), ...(retention === "archived" ? { retention } : {}) })}`);
 export const getInbox = (id: string, conversationId: string) => apiFetch<InboxDetail>(`${path(id)}/${conversationId}`);
 export const markInboxRead = (id: string, conversationId: string, updatedAt: string) =>
   apiFetch<{ marked: boolean }>(`${path(id)}/${conversationId}/read`, {
     method: "PATCH",
     body: JSON.stringify({ updated_at: updatedAt }),
   });
+export const markInboxUnread = (id: string, conversationId: string) =>
+  apiFetch<{ unread_count: number }>(`${path(id)}/${conversationId}/unread`, { method: "PATCH" });
+export const archiveInboxConversation = (id: string, conversationId: string) =>
+  apiFetch<{ archived_at: string }>(`${path(id)}/${conversationId}/archive`, { method: "POST" });
+export const restoreInboxConversation = (id: string, conversationId: string) =>
+  apiFetch<{ archived_at: null }>(`${path(id)}/${conversationId}/restore`, { method: "POST" });
 export const saveInboxDraft = (id: string, conversationId: string, recipient: string, body: string, subject: string) => apiFetch<{ id: string; delivery_status: string }>(`${path(id)}/${conversationId}/draft`, { method: "POST", body: JSON.stringify({ recipient, body, subject }) });
 export const updateInboxStatus = (id: string, conversationId: string, status: string) => apiFetch<{ status: string }>(`${path(id)}/${conversationId}/status?status=${status}`, { method: "PATCH" });
 export const draftInboxWithAi = (id: string, conversationId: string) => apiFetch<{ subject: string; body: string }>(`${path(id)}/${conversationId}/draft-with-ai`, { method: "POST", body: JSON.stringify({}) });

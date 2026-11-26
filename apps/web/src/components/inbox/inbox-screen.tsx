@@ -4,9 +4,11 @@ import { Fragment, useDeferredValue, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink, Inbox, Mail, MessageCircle, PanelRight, Search, Send, Settings2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { assignInbox, draftInboxWithAi, getInbox, linkInboxLead, listInbox, listInboxAssignees, resolveInboxHandoff, resumeInboxAi, saveInboxDraft, sendStaffMessage, submitInboxApproval, takeOverInbox, updateInboxStatus } from "@/lib/inbox";
+import { archiveInboxConversation, assignInbox, draftInboxWithAi, getInbox, linkInboxLead, listInbox, listInboxAssignees, markInboxUnread, resolveInboxHandoff, restoreInboxConversation, resumeInboxAi, saveInboxDraft, sendStaffMessage, submitInboxApproval, takeOverInbox, updateInboxStatus } from "@/lib/inbox";
 import { useWorkspace } from "@/lib/use-workspace";
 import { recordInboxInquiry } from "@/lib/inbox";
+import { AppointmentDialog } from "@/components/calendar/appointment-dialog";
+import { ConfirmButton } from "@/components/confirm-button";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
@@ -14,7 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { getContact, getLead, listContacts, listLeads } from "@/lib/records-api";
-import { getInboxWidget, markInboxRead, saveInboxWidget, type InboxDetail, type InboxWidget, type WidgetSettings } from "@/lib/inbox";
+import { getInboxWidget, markInboxRead, saveInboxWidget, type InboxDetail, type InboxWidget, type WhatsAppServiceWindow, type WidgetSettings } from "@/lib/inbox";
 import { resolveApiBaseUrl } from "@/lib/api-base";
 
 const channelNames = { email: "Email", whatsapp: "WhatsApp", webchat: "Website chat" };
@@ -24,6 +26,30 @@ const recordClass = "flex items-center justify-between gap-2 rounded-md border b
 
 function displayDate(date: string) {
   return new Date(date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function deliveryLabel(status: string) {
+  const labels: Record<string, string> = {
+    received: "Received",
+    sent: "Sent",
+    delivered: "Delivered",
+    read: "Read",
+    failed: "Failed",
+  };
+  return labels[status] ?? "Needs attention";
+}
+
+function serviceWindowCopy(window: WhatsAppServiceWindow) {
+  const provider = window.provider === "live"
+    ? "Live WhatsApp is available"
+    : window.provider === "test"
+      ? "Restricted test number"
+      : "WhatsApp sending is unavailable";
+  if (!window.closes_at) return `${provider}. No customer message has opened the 24-hour service window.`;
+  const closes = displayDate(window.closes_at);
+  return window.open
+    ? `${provider}. Customer-service window is open until ${closes}.`
+    : `${provider}. Customer-service window closed ${closes}.`;
 }
 
 function relativeTime(date: string) {
@@ -50,6 +76,7 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
   const deferredLeadSearch = useDeferredValue(leadSearch);
   const [assignmentFilter, setAssignmentFilter] = useState("all");
   const [channelFilter, setChannelFilter] = useState("all");
+  const [retention, setRetention] = useState("active");
   const [draft, setDraft] = useState("");
   const [subject, setSubject] = useState("");
   const [templateName, setTemplateName] = useState("");
@@ -57,7 +84,7 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
   const [newContactAddress, setNewContactAddress] = useState("");
   const [staffReply, setStaffReply] = useState("");
   const client = useQueryClient();
-  const conversations = useQuery({ queryKey: ["inbox", id, deferredQuery, assignmentFilter, channelFilter, statusFilter], queryFn: () => listInbox(id, deferredQuery, assignmentFilter, channelFilter, statusFilter), enabled: Boolean(id), refetchInterval: 8000 });
+  const conversations = useQuery({ queryKey: ["inbox", id, deferredQuery, assignmentFilter, channelFilter, statusFilter, retention], queryFn: () => listInbox(id, deferredQuery, assignmentFilter, channelFilter, statusFilter, retention), enabled: Boolean(id), refetchInterval: 8000 });
   const detail = useQuery({ queryKey: ["inbox-detail", id, selected], queryFn: () => getInbox(id, selected ?? ""), enabled: Boolean(id && selected), refetchInterval: 5000 });
   const { mutate: acknowledge } = useMutation({
     mutationFn: ({ id: conversationId, updated_at }: InboxDetail) => markInboxRead(id, conversationId, updated_at),
@@ -96,6 +123,9 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
   const resolve = useMutation({ mutationFn: () => resolveInboxHandoff(id, selected ?? ""), onSuccess: invalidate });
   const resumeAi = useMutation({ mutationFn: () => resumeInboxAi(id, selected ?? ""), onSuccess: invalidate });
   const staffSend = useMutation({ mutationFn: () => sendStaffMessage(id, selected ?? "", staffReply, `staff-${Date.now()}-${Math.random().toString(36).slice(2)}`), onSuccess: () => { setStaffReply(""); invalidate(); } });
+  const markUnread = useMutation({ mutationFn: () => markInboxUnread(id, selected ?? ""), onSuccess: invalidate });
+  const archive = useMutation({ mutationFn: () => archiveInboxConversation(id, selected ?? ""), onSuccess: invalidate });
+  const restore = useMutation({ mutationFn: () => restoreInboxConversation(id, selected ?? ""), onSuccess: invalidate });
   const open = (conversation: { id: string; subject: string }) => {
     if (conversation.id === selected || aiDraft.isPending || staffSend.isPending) return;
     setSelected(conversation.id);
@@ -112,7 +142,7 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
   };
   const requestError = conversations.error ?? detail.error ?? assignment.error ?? status.error ??
     save.error ?? takeover.error ?? resolve.error ?? resumeAi.error ?? staffSend.error ??
-    linkContact.error ?? createContact.error ?? linkLead.error;
+    linkContact.error ?? createContact.error ?? linkLead.error ?? markUnread.error ?? archive.error ?? restore.error;
   const filtered = Boolean(q || assignmentFilter !== "all" || channelFilter !== "all" || statusFilter);
   const clearFilters = () => {
     setQ("");
@@ -163,7 +193,33 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
           <Button size="sm" variant="secondary" disabled={takeover.isPending} onClick={() => takeover.mutate()}>Accept handoff</Button>
           {thread.handoff_requested ? <Button size="sm" variant="secondary" disabled={resolve.isPending} onClick={() => resolve.mutate()}>Resolve handoff</Button> : null}
           {isAdmin && thread.channel === "webchat" && thread.status === "resolved" ? <Button size="sm" variant="secondary" disabled={resumeAi.isPending} onClick={() => resumeAi.mutate()}>Resume AI</Button> : null}
+          <Button size="sm" variant="outline" disabled={thread.status === "pending" || status.isPending} onClick={() => status.mutate("pending")}>Mark for follow-up</Button>
         </div>
+        {thread.archived_at ? (
+          <div className="grid gap-2">
+            <p className="text-xs text-muted-foreground">Archived {displayDate(thread.archived_at)}. Messages stay in this workspace.</p>
+            <Button size="sm" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore conversation"}</Button>
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            <p className="text-xs text-muted-foreground">Archiving hides this conversation. Messages stay in the workspace, and a new customer message brings it back.</p>
+            <ConfirmButton size="sm" label="Archive conversation" confirmLabel="Archive and keep messages" pendingLabel="Archiving…" pending={archive.isPending} onConfirm={() => archive.mutate()} />
+          </div>
+        )}
+      </div>
+      <div className="grid gap-3 border-t border-border pt-4">
+        <h3 className="text-sm font-semibold">Customer</h3>
+        <dl className="grid gap-1 text-sm">
+          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Name</dt><dd className="truncate">{thread.customer?.name ?? thread.customer_name ?? "Not linked"}</dd></div>
+          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Email</dt><dd className="truncate">{thread.customer?.email ?? "None"}</dd></div>
+          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Phone</dt><dd className="truncate">{thread.customer?.phone ?? "None"}</dd></div>
+        </dl>
+        {thread.customer?.company_id ? (
+          <Link className={recordClass} href={`/crm?tab=companies&id=${thread.customer.company_id}`}>
+            {thread.customer.company_name ?? "Open company"} <ExternalLink size={13} />
+          </Link>
+        ) : null}
+        {thread.lead_id ? <AppointmentDialog organizationId={id} leadId={thread.lead_id} /> : null}
       </div>
       <div className="grid gap-3 border-t border-border pt-4">
         <h3 className="text-sm font-semibold">Linked CRM records</h3>
@@ -207,6 +263,11 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
             ) : null}
           </>
         ) : null}
+        {thread.customer?.inquiry_id ? (
+          <Link className={recordClass} href={`/crm?tab=inquiries&id=${thread.customer.inquiry_id}`}>
+            {thread.customer.inquiry_subject ?? "Open inquiry"} <ExternalLink size={13} />
+          </Link>
+        ) : null}
         {thread.contact_id && latestInbound ? (
           <RecordInquiry key={thread.id} organizationId={id} conversationId={thread.id}
             title={thread.subject} linked={Boolean(thread.lead_id)} onRecorded={invalidate} />
@@ -228,8 +289,17 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
           <div className="space-y-3 border-b border-border p-4">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold">Conversations</h2>
-              {conversations.data ? <Badge variant="secondary">{conversations.data.filter((item) => item.status === "open").length} open</Badge> : null}
+              {conversations.data ? (
+                <span className="flex gap-1">
+                  <Badge variant="secondary">{conversations.data.reduce((total, item) => total + item.unread_count, 0)} unread</Badge>
+                  <Badge variant="secondary">{conversations.data.filter((item) => item.status === "open").length} open</Badge>
+                </span>
+              ) : null}
             </div>
+            <select aria-label="Conversation retention" className={fieldClass} value={retention} onChange={(event) => setRetention(event.target.value)}>
+              <option value="active">Active conversations</option>
+              <option value="archived">Archived conversations</option>
+            </select>
             <label className="relative block">
               <Search aria-hidden="true" size={15} className="pointer-events-none absolute top-3 left-3 text-muted-foreground" />
               <input aria-label="Search inbox" className={`${fieldClass} pl-9`} placeholder="Search conversations" value={q} onChange={(event) => setQ(event.target.value)} />
@@ -238,7 +308,7 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
               <summary className="cursor-pointer font-medium">Filters</summary>
               <div className="mt-2 grid gap-2">
                 <select aria-label="Assignment filter" className={fieldClass} value={assignmentFilter} onChange={(event) => setAssignmentFilter(event.target.value)}>
-                  <option value="all">All assignees</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option>
+                  <option value="all">All assignees</option><option value="mine">Assigned to me</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option>
                 </select>
                 <select aria-label="Channel filter" className={fieldClass} value={channelFilter} onChange={(event) => setChannelFilter(event.target.value)}>
                   <option value="all">All channels</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="webchat">Website chat</option>
@@ -267,7 +337,7 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
                       </span>
                       {conversation.customer_name ? <span className="truncate text-sm">{conversation.subject}</span> : null}
                       {conversation.preview ? <span className="truncate text-xs text-muted-foreground">{conversation.preview}</span> : null}
-                      <span className="text-xs text-muted-foreground">{conversation.company_name ? `${conversation.company_name} · ` : null}{channelNames[conversation.channel]} · <span className="capitalize">{conversation.status}</span></span>
+                      <span className="text-xs text-muted-foreground">{conversation.company_name ? `${conversation.company_name} · ` : null}{channelNames[conversation.channel]} · <span className="capitalize">{conversation.status}</span>{conversation.assignee_name ? ` · ${conversation.assignee_name}` : ""}</span>
                       {conversation.handoff_requested ? <span className="text-xs font-medium text-primary">Handoff requested</span> : null}
                     </span>
                     {conversation.unread_count > 0 ? <Badge aria-label={`${conversation.unread_count} unread`}>{conversation.unread_count}</Badge> : null}
@@ -279,7 +349,7 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
           {conversations.data?.length === 0 ? (
             <div className="grid justify-items-center gap-2 p-8 text-center text-sm text-muted-foreground">
               <Inbox size={24} aria-hidden="true" />
-              <p>{filtered ? "No matching conversations." : "No customer conversations yet."}</p>
+              <p>{filtered ? "No matching conversations." : retention === "archived" ? "No archived conversations." : "No customer conversations yet."}</p>
             </div>
           ) : null}
         </section>
@@ -294,8 +364,11 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
                 <Button size="icon" variant="ghost" className="lg:hidden" aria-label="Back to conversations" onClick={() => setSelected(null)}><ArrowLeft size={16} /></Button>
                 <div className="min-w-0 flex-1">
                   <h2 className="break-words text-base font-semibold">{thread.subject}</h2>
-                  <p className="text-xs text-muted-foreground">{channelNames[thread.channel]}</p>
+                  <p className="text-xs text-muted-foreground">{channelNames[thread.channel]}{thread.assignee_name ? ` · ${thread.assignee_name}` : " · Unassigned"}</p>
                 </div>
+                {thread.unread_count === 0 && messages?.some((message) => message.direction === "inbound") ? (
+                  <Button size="sm" variant="ghost" disabled={markUnread.isPending} onClick={() => markUnread.mutate()}>Mark unread</Button>
+                ) : null}
                 <Badge variant="secondary" className="capitalize">{thread.status}</Badge>
                 <Dialog>
                   <DialogTrigger asChild>
@@ -310,6 +383,11 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
                   </DialogContent>
                 </Dialog>
               </header>
+              {thread.whatsapp_service_window ? (
+                <p className="border-b border-border bg-muted/40 px-4 py-3 text-sm" role="status">
+                  {serviceWindowCopy(thread.whatsapp_service_window)}
+                </p>
+              ) : null}
               {thread.handoff_requested ? (
                 <p className="border-b border-border bg-primary/5 px-4 py-3 text-sm">
                   <strong>{thread.handoff_accepted_at ? "Staff handling" : "Waiting for staff"}</strong>
@@ -336,7 +414,7 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
                       <time dateTime={message.created_at}>{date.toLocaleTimeString(undefined, { timeStyle: "short" })}</time>
                     </div>
                     <p className={`break-words whitespace-pre-wrap rounded-lg border px-3 py-2 text-sm leading-6 ${inbound ? "border-border bg-card" : "border-primary/20 bg-accent"}`}>{message.body}</p>
-                    {!inbound ? <p className={`text-right text-xs capitalize ${message.delivery_status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{message.delivery_status.replaceAll("_", " ")}</p> : null}
+                    <p className={`text-xs ${inbound ? "text-left" : "text-right"} ${message.delivery_status === "failed" ? "text-destructive" : "text-muted-foreground"}`} aria-label={`Delivery ${deliveryLabel(message.delivery_status)}`}>{deliveryLabel(message.delivery_status)}</p>
                     </article>
                   </Fragment>;
                 })}

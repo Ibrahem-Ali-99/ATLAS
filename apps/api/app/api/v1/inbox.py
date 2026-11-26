@@ -5,7 +5,7 @@ import json
 import re
 import secrets
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Request
@@ -136,6 +136,8 @@ def _human_request_reason(text: str) -> str | None:
 
 def _register_inbound(conversation: InboxConversation, body: str) -> None:
     conversation.unread_count += 1
+    conversation.archived_at = None
+    conversation.archived_by = None
     conversation.updated_at = datetime.now(UTC)
     reason = _human_request_reason(body)
     if reason:
@@ -168,6 +170,71 @@ def _message_preview(body: str | None) -> str | None:
     return f"{compact[:139].rstrip()}..."
 
 
+def _assignee_name(db: Session, row: InboxConversation) -> str | None:
+    if row.assigned_to is None:
+        return None
+    return db.scalar(select(User.full_name).where(User.id == row.assigned_to))
+
+
+def _customer_profile(
+    db: Session, row: InboxConversation, contact: Contact | None
+) -> dict[str, object]:
+    company_name = None
+    company_id = contact.company_id if contact else None
+    if company_id is not None:
+        company_name = db.scalar(
+            select(Company.name).where(
+                Company.id == company_id, Company.organization_id == row.organization_id
+            )
+        )
+    inquiry = (
+        db.scalar(
+            select(Inquiry)
+            .where(
+                Inquiry.organization_id == row.organization_id,
+                Inquiry.lead_id == row.lead_id,
+                Inquiry.archived_at.is_(None),
+            )
+            .order_by(Inquiry.created_at.desc(), Inquiry.id)
+            .limit(1)
+        )
+        if row.lead_id
+        else None
+    )
+    return {
+        "name": contact.full_name if contact else None,
+        "email": contact.email if contact else None,
+        "phone": contact.phone if contact else None,
+        "company_id": company_id,
+        "company_name": company_name,
+        "inquiry_id": inquiry.id if inquiry else None,
+        "inquiry_subject": inquiry.subject if inquiry else None,
+    }
+
+
+def _whatsapp_service_window(db: Session, row: InboxConversation) -> dict[str, object] | None:
+    if row.channel != "whatsapp":
+        return None
+    latest = db.scalar(
+        select(InboxMessage.created_at)
+        .where(
+            InboxMessage.organization_id == row.organization_id,
+            InboxMessage.conversation_id == row.id,
+            InboxMessage.channel == "whatsapp",
+            InboxMessage.direction == "inbound",
+        )
+        .order_by(InboxMessage.created_at.desc(), InboxMessage.id)
+        .limit(1)
+    )
+    closes_at = None if latest is None else latest + timedelta(hours=24)
+    mode = _whatsapp_reply_mode(db, row)
+    return {
+        "open": closes_at is not None and datetime.now(UTC) < closes_at,
+        "closes_at": closes_at,
+        "provider": mode if mode in {"live", "test"} else "unavailable",
+    }
+
+
 def _queue_customer_name(
     contact_name: str | None, sender: str | None, direction: str | None
 ) -> str | None:
@@ -183,9 +250,10 @@ def list_inbox(
     member: Member,
     db: DbSession,
     q: str | None = None,
-    assigned: Literal["all", "assigned", "unassigned"] = "all",
+    assigned: Literal["all", "assigned", "unassigned", "mine"] = "all",
     channel: Literal["all", "email", "whatsapp", "webchat"] = "all",
     status: InboxStatus | None = None,
+    retention: Literal["active", "archived"] = "active",
 ) -> list[dict[str, object]]:
     organization_id = member.organization.id
     ranked_messages = (
@@ -213,20 +281,28 @@ def list_inbox(
             InboxConversation,
             Contact.full_name,
             Company.name,
+            User.full_name,
             latest_message.c.body,
             latest_message.c.sender,
             latest_message.c.direction,
         )
         .outerjoin(Contact, Contact.id == InboxConversation.contact_id)
         .outerjoin(Company, Company.id == Contact.company_id)
+        .outerjoin(User, User.id == InboxConversation.assigned_to)
         .outerjoin(latest_message, latest_message.c.conversation_id == InboxConversation.id)
         .where(InboxConversation.organization_id == organization_id)
         .order_by(InboxConversation.updated_at.desc(), InboxConversation.id.desc())
     )
+    if retention == "archived":
+        query = query.where(InboxConversation.archived_at.is_not(None))
+    else:
+        query = query.where(InboxConversation.archived_at.is_(None))
     if assigned == "assigned":
         query = query.where(InboxConversation.assigned_to.is_not(None))
     elif assigned == "unassigned":
         query = query.where(InboxConversation.assigned_to.is_(None))
+    elif assigned == "mine":
+        query = query.where(InboxConversation.assigned_to == member.user.id)
     if channel != "all":
         query = query.where(InboxConversation.channel == channel)
     if status is not None:
@@ -259,6 +335,8 @@ def list_inbox(
             "contact_id": row.contact_id,
             "lead_id": row.lead_id,
             "assigned_to": row.assigned_to,
+            "assignee_name": assignee_name,
+            "archived_at": row.archived_at,
             "handoff_requested": row.handoff_requested,
             "handoff_reason": row.handoff_reason,
             "updated_at": row.updated_at,
@@ -266,7 +344,15 @@ def list_inbox(
             "company_name": company_name,
             "preview": _message_preview(preview),
         }
-        for row, contact_name, company_name, preview, sender, direction in db.execute(query)
+        for (
+            row,
+            contact_name,
+            company_name,
+            assignee_name,
+            preview,
+            sender,
+            direction,
+        ) in db.execute(query)
     ]
 
 
@@ -305,6 +391,10 @@ def get_inbox(conversation_id: uuid.UUID, member: Member, db: DbSession) -> dict
         "handoff_accepted_at": row.handoff_accepted_at,
         "handoff_resolved_at": row.handoff_resolved_at,
         "ai_resumed": row.ai_resumed,
+        "archived_at": row.archived_at,
+        "assignee_name": _assignee_name(db, row),
+        "customer": _customer_profile(db, row, contact),
+        "whatsapp_service_window": _whatsapp_service_window(db, row),
         "reply_unavailable": _whatsapp_reply_unavailable(db, row),
         "whatsapp_reply_mode": _whatsapp_reply_mode(db, row),
         "reply_recipient": (
@@ -354,6 +444,57 @@ def mark_inbox_read(
     )
     db.commit()
     return {"marked": marked is not None}
+
+
+@router.patch("/{conversation_id}/unread")
+def mark_inbox_unread(
+    conversation_id: uuid.UUID, member: CsrfMember, db: DbSession
+) -> dict[str, int]:
+    row = _conversation(db, member.organization.id, conversation_id)
+    inbound = db.scalar(
+        select(InboxMessage.id).where(
+            InboxMessage.organization_id == row.organization_id,
+            InboxMessage.conversation_id == row.id,
+            InboxMessage.direction == "inbound",
+        )
+    )
+    if inbound is None:
+        raise AppError(409, "customer_message_missing", "There is no customer message to mark unread")
+    if row.unread_count < 1:
+        db.execute(
+            update(InboxConversation)
+            .where(
+                InboxConversation.id == row.id,
+                InboxConversation.organization_id == member.organization.id,
+            )
+            .values(unread_count=1, updated_at=InboxConversation.updated_at)
+        )
+    db.commit()
+    db.refresh(row)
+    return {"unread_count": row.unread_count}
+
+
+@router.post("/{conversation_id}/archive")
+def archive_conversation(
+    conversation_id: uuid.UUID, member: CsrfMember, db: DbSession
+) -> dict[str, object]:
+    row = _conversation(db, member.organization.id, conversation_id)
+    if row.archived_at is None:
+        row.archived_at = datetime.now(UTC)
+        row.archived_by = member.user.id
+    db.commit()
+    return {"archived_at": row.archived_at}
+
+
+@router.post("/{conversation_id}/restore")
+def restore_conversation(
+    conversation_id: uuid.UUID, member: CsrfMember, db: DbSession
+) -> dict[str, object]:
+    row = _conversation(db, member.organization.id, conversation_id)
+    row.archived_at = None
+    row.archived_by = None
+    db.commit()
+    return {"archived_at": None}
 
 
 @router.post("/{conversation_id}/draft")
