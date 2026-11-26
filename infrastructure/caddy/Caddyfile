@@ -26,6 +26,12 @@
 		}
 	}
 
+	# Development mode exposes FastAPI's schema. The public origin does not.
+	@hidden expression `{http.request.uri.path}.startsWith("/docs") || {http.request.uri.path} == "/openapi.json" || {http.request.uri.path}.startsWith("/redoc")`
+	handle @hidden {
+		respond "Not found" 404
+	}
+
 	handle {
 		encode gzip
 		reverse_proxy web:3000

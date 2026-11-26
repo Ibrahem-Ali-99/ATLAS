@@ -122,11 +122,15 @@ jobs:
           docker compose --env-file .env.example -f infrastructure/compose.yaml config --quiet
           docker compose --env-file infrastructure/staging/.env.example -f infrastructure/compose.staging.yaml config --quiet
           docker compose --env-file infrastructure/production/.env.example -f infrastructure/compose.production.yaml config --quiet
+          docker compose --env-file infrastructure/portfolio/.env.example -f infrastructure/compose.portfolio.yaml config --quiet
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - name: Verify staging and production preflight rules
-        run: uv run --project apps/api --frozen pytest -c apps/api/pyproject.toml -o addopts= -q infrastructure/staging/test_preflight.py infrastructure/production/test_preflight.py infrastructure/production/test_compose_contract.py infrastructure/production/test_migration_contract.py
+      - name: Verify staging, production, and portfolio configuration
+        run: |
+          uv run --project apps/api --frozen pytest -c apps/api/pyproject.toml -o addopts= -q infrastructure/staging/test_preflight.py
+          uv run --project apps/api --frozen pytest -c apps/api/pyproject.toml -o addopts= -q infrastructure/production/test_preflight.py infrastructure/production/test_compose_contract.py infrastructure/production/test_migration_contract.py
+          uv run --project apps/api --frozen pytest -c apps/api/pyproject.toml -o addopts= -q infrastructure/portfolio/test_portfolio_preflight.py infrastructure/portfolio/test_portfolio_compose.py infrastructure/portfolio/test_portfolio_project.py
       - name: Build the API image
         run: docker build -t atlas-api:ci apps/api
       - name: Build the web image

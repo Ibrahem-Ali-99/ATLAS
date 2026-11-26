@@ -43,3 +43,6 @@ infrastructure/staging/accept-ca.crt
 infrastructure/staging/backup-proof-ca.crt
 infrastructure/staging/backups/
 infrastructure/production/backups/
+infrastructure/portfolio/.env
+infrastructure/portfolio/backups/
+infrastructure/portfolio/*.crt

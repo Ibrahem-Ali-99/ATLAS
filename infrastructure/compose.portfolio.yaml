@@ -1,0 +1,224 @@
+# Public portfolio demo. Production is infrastructure/compose.production.yaml.
+# This file does not publish Postgres, Mailpit, or the API.
+# It does not run n8n or Ollama: a public demo cannot call n8n, and the
+# deterministic provider keeps retrieval inside the API process.
+# The database name is fixed. Do not point this stack at another workspace.
+
+name: atlas-portfolio
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      ATLAS_SITE_HOST: ${PORTFOLIO_HOST:?Set PORTFOLIO_HOST}
+    ports:
+      - "${PORTFOLIO_HTTP_PORT:?Set PORTFOLIO_HTTP_PORT}:80"
+      - "${PORTFOLIO_HTTPS_PORT:?Set PORTFOLIO_HTTPS_PORT}:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - private
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 10s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: same-origin
+    networks:
+      - private
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/login').then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    environment:
+      # Production rejects the deterministic provider, and a public demo rejects a
+      # paid model key. Development plus the public-demo flag is the combination
+      # the application currently allows for a sandboxed assistant.
+      ATLAS_ENVIRONMENT: development
+      ATLAS_PUBLIC_DEMO: "true"
+      ATLAS_SECRET_KEY: ${PORTFOLIO_SECRET_KEY:?Set PORTFOLIO_SECRET_KEY}
+      ATLAS_CREDENTIAL_ENCRYPTION_KEYS: ${PORTFOLIO_CREDENTIAL_ENCRYPTION_KEYS:?Set PORTFOLIO_CREDENTIAL_ENCRYPTION_KEYS}
+      ATLAS_DATABASE_URL: postgresql+psycopg://${PORTFOLIO_POSTGRES_USER:-atlas}:${PORTFOLIO_POSTGRES_PASSWORD:?Set PORTFOLIO_POSTGRES_PASSWORD}@postgres:5432/atlas_portfolio
+      ATLAS_CORS_ORIGINS: ${PORTFOLIO_CORS_ORIGINS:?Set PORTFOLIO_CORS_ORIGINS}
+      ATLAS_COOKIE_SECURE: "true"
+      ATLAS_LOG_LEVEL: INFO
+      ATLAS_SESSION_TTL_HOURS: "4"
+      ATLAS_LOGIN_EMAIL_LIMIT: "5"
+      ATLAS_LOGIN_CLIENT_LIMIT: "120"
+      ATLAS_LOGIN_WINDOW_SECONDS: "900"
+      ATLAS_WEBHOOK_RATE_LIMIT: "10"
+      ATLAS_WEBHOOK_MAX_BYTES: "32768"
+      ATLAS_LLM_PROVIDER: double
+      ATLAS_LLM_BASE_URL: http://double.invalid/v1
+      ATLAS_LLM_API_KEY: ""
+      ATLAS_LLM_MODEL: double
+      ATLAS_LLM_MAX_OUTPUT_TOKENS: "256"
+      ATLAS_EMBEDDING_PROVIDER: double
+      ATLAS_EMBEDDING_BASE_URL: http://double.invalid/v1
+      ATLAS_EMBEDDING_API_KEY: ""
+      ATLAS_EMBEDDING_MODEL: double
+      ATLAS_EMBEDDING_DIMENSIONS: "1536"
+      ATLAS_MAX_UPLOAD_BYTES: "2097152"
+      ATLAS_STORAGE_DIR: /var/lib/atlas/portfolio-docs
+      ATLAS_MODEL_DIR: /var/lib/atlas/models
+      ATLAS_PUBLIC_API_URL: http://api:8000
+      ATLAS_N8N_LEAD_WEBHOOK_URL: ""
+      ATLAS_EMAIL_MODE: sandbox
+      ATLAS_EMAIL_LIVE_ENABLED: "false"
+      ATLAS_CAMPAIGN_PUBLIC_URL: ${PORTFOLIO_CAMPAIGN_PUBLIC_URL:?Set PORTFOLIO_CAMPAIGN_PUBLIC_URL}
+      ATLAS_CAMPAIGN_LIVE_ENABLED: "false"
+      ATLAS_SMTP_HOST: mailpit
+      ATLAS_SMTP_PORT: "1025"
+      ATLAS_SMTP_FROM: atlas@localhost
+      ATLAS_CALENDAR_MODE: simulation
+      ATLAS_GOOGLE_CALENDAR_CLIENT_ID: ""
+      ATLAS_GOOGLE_CALENDAR_CLIENT_SECRET: ""
+      ATLAS_BILLING_PROVIDER: sandbox
+      ATLAS_STRIPE_SECRET_KEY: ""
+      ATLAS_STRIPE_WEBHOOK_SECRET: ""
+      ATLAS_WHATSAPP_LIVE_ENABLED: "false"
+      ATLAS_WHATSAPP_WEBHOOK_VERIFY_TOKEN: ""
+      ATLAS_WHATSAPP_WEBHOOK_APP_SECRET: ""
+      ATLAS_INBOX_WEBHOOK_SECRET: ""
+    volumes:
+      - portfolio_docs:/var/lib/atlas/portfolio-docs
+      - model_data:/var/lib/atlas/models
+    networks:
+      - private
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/ready', timeout=4)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
+    logging: *default-logging
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ${PORTFOLIO_POSTGRES_USER:-atlas}
+      POSTGRES_PASSWORD: ${PORTFOLIO_POSTGRES_PASSWORD:?Set PORTFOLIO_POSTGRES_PASSWORD}
+      POSTGRES_DB: atlas_portfolio
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PORTFOLIO_POSTGRES_USER:-atlas} -d atlas_portfolio"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_MESSAGES: "200"
+    volumes:
+      - mailpit_data:/data
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD-SHELL", "/mailpit readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 10s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+networks:
+  private:
+
+volumes:
+  caddy_data:
+  caddy_config:
+  portfolio_docs:
+  model_data:
+  postgres_data:
+  mailpit_data:

@@ -11,8 +11,11 @@ No server, DNS record, certificate, or paid account was created for this procedu
 | Development | `infrastructure/compose.yaml` | `atlas` | repository `.env` | Postgres, API, Mailpit, and n8n on the developer machine |
 | Staging | `infrastructure/compose.staging.yaml` | `atlas-staging` | `infrastructure/staging/.env` | Caddy only |
 | Production | `infrastructure/compose.production.yaml` | `atlas-production` | `infrastructure/production/.env` | Caddy only |
+| Public portfolio | `infrastructure/compose.portfolio.yaml` | `atlas-portfolio` | `infrastructure/portfolio/.env` | Caddy only |
 
-The three projects use different volume names. A production command must not use the development or staging project. Restore refuses `atlas`, `atlas-staging`, and `atlas-production`.
+The portfolio stack is the public demonstration. Its procedure is in [portfolio-deployment.md](portfolio-deployment.md). It is not a smaller copy of this production file: it does not run n8n or Ollama, and it keeps the deterministic provider behind the public-demo flag.
+
+Each project uses its own volumes. A production command must not use the development, staging, or portfolio project. Restore refuses `atlas`, `atlas-staging`, and `atlas-production`. The portfolio backup refuses those names as well and only accepts `atlas-portfolio`.
 
 Development may keep local passwords. Production Compose has no password default. `infrastructure/production/up.sh` runs the preflight and the Compose contract before it starts containers. The checked-in `.env.example` is rejected by that preflight.
 
@@ -37,7 +40,7 @@ That is about 5.4 GB for the long-running services. The rest is for the operatin
 
 A Hetzner CX33-class machine in the EU was listed at about €8.99 per month before VAT in November 2026, with IPv4 included. A domain name is about €1 per month when the yearly price is spread out. Optional off-host backup storage is about €1–7 if an S3-compatible bucket is added later. Groq's free tier covers light chat use. Ollama on the same machine serves `nomic-embed-text:v1.5` at 768 dimensions, so embeddings do not need a paid API. n8n Community Edition and Mailpit add no license fee.
 
-Do not start with a 4 GB machine. Image builds and the combined footprint are too tight. Do not add Redis, a queue, a container registry, or a managed database for the first boot. The host builds from the git checkout. A registry can wait until builds on the server become the slow step.
+Do not start with a 4 GB machine for this production file. Image builds and the combined footprint are too tight. The public portfolio demonstration does not use this file; its smaller host is described in [portfolio-deployment.md](portfolio-deployment.md). Do not add Redis, a queue, a container registry, or a managed database for the first boot. The host builds from the git checkout. A registry can wait until builds on the server become the slow step.
 
 ```text
 Browser
