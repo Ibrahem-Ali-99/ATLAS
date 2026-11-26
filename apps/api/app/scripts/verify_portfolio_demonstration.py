@@ -328,6 +328,8 @@ def _require_product_behavior(document: str, failures: list[str]) -> None:
         failures.append("Knowledge replacement no longer deletes the old passages")
     if route and "workflow_effect_already_recorded" not in route:
         failures.append("A repeated workflow effect is no longer refused")
+    if route and "workflow_run_in_progress" not in route:
+        failures.append("A second workflow run is no longer refused while the first is unfinished")
     if panel and "No task, lead change, or follow-up draft was saved." not in panel:
         failures.append("Workflow preview no longer says that nothing was saved")
     if "old passages" not in document.casefold() and "old passage" not in document.casefold():
@@ -346,6 +348,9 @@ def _require_rehearsal(failures: list[str]) -> None:
         "Sandbox billing",
         "That time is already booked",
         "Thursday afternoon",
+        "atlas_rehearsal_profile",
+        "workflow_run_in_progress",
+        "nomic-embed-text",
     ):
         if phrase not in rehearsal:
             failures.append(f"Rehearsal record is missing {phrase!r}")

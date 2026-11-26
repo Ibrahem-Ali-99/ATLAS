@@ -44,7 +44,15 @@ def postgres_url(database: str) -> str:
 
 _load_postgres_defaults()
 
-TEST_DATABASE_URL = postgres_url("atlas_test")
+def test_database_name() -> str:
+    requested = os.environ.get("ATLAS_TEST_DATABASE", "atlas_test").strip()
+    if requested == "atlas_test" or re.fullmatch(r"atlas_rehearsal_[a-z0-9_]{1,40}", requested):
+        return requested
+    raise RuntimeError(f"Refusing unexpected test database {requested}")
+
+
+TEST_DATABASE_NAME = test_database_name()
+TEST_DATABASE_URL = postgres_url(TEST_DATABASE_NAME)
 MIGRATION_DATABASE_URL = postgres_url("atlas_migration_test")
 ADMIN_DATABASE_URL = postgres_url("postgres")
 
@@ -73,9 +81,9 @@ os.environ["ATLAS_N8N_LEAD_WEBHOOK_URL"] = ""
 
 
 def ensure_database(name: str, *, require_new: bool = False) -> None:
-    if name not in {"atlas_test", "atlas_migration_test"} and not (
-        require_new and re.fullmatch(r"atlas_e2e_[0-9a-f]{32}", name)
-    ):
+    rehearsal = re.fullmatch(r"atlas_rehearsal_[a-z0-9_]{1,40}", name) is not None
+    generated = require_new and re.fullmatch(r"atlas_e2e_[0-9a-f]{32}", name) is not None
+    if name not in {"atlas_test", "atlas_migration_test"} and not rehearsal and not generated:
         raise RuntimeError(f"Refusing to create unexpected database {name}")
     admin = create_engine(
         ADMIN_DATABASE_URL,

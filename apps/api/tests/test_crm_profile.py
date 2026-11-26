@@ -1,7 +1,11 @@
+from enum import Enum
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.domains.crm.profile import _channel_label
 from app.domains.identity.models import MembershipRole
+from app.domains.inbox.models import InboxConversation, InboxStatus
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
 from tests.helpers import login
 
@@ -120,9 +124,31 @@ def test_duplicate_records_lead_conversion_and_profile(client: TestClient, db: S
     assert ordered.status_code == 200
     assert ordered.json()["items"][0]["title"] == "Closed pier"
 
+    conversation = InboxConversation(
+        organization_id=atlas.id,
+        contact_id=contact_id,
+        lead_id=lead_id,
+        subject="Cold storage for the north pier",
+        channel="email",
+        status=InboxStatus.open,
+    )
+    db.add(conversation)
+    db.commit()
+    with_channel = client.get(f"{base}/customer-profile", params={"company_id": company_id})
+    assert with_channel.status_code == 200, with_channel.text
+    assert with_channel.json()["conversations"][0]["channel"] == "email"
+
     client.cookies.clear()
     other = login(client, "outsider@example.org", PASSWORD)
     hidden = client.get(
         f"/api/v1/organizations/{_org(other)}/customer-profile", params={"lead_id": lead_id}
     )
     assert hidden.status_code == 404
+
+
+def test_channel_label_reads_stored_text_and_enum_values() -> None:
+    class LegacyChannel(Enum):
+        whatsapp = "whatsapp"
+
+    assert _channel_label("email") == "email"
+    assert _channel_label(LegacyChannel.whatsapp) == "whatsapp"

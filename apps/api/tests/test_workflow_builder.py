@@ -255,3 +255,74 @@ def test_preview_does_not_save_and_a_repeat_needs_confirmation(
     assert len(tasks) == 2
     refused = client.post(f"{url}/runs/{applied.json()['id']}/retry", headers=headers)
     assert refused.status_code == 409
+
+
+def test_a_second_run_waits_until_the_first_finishes(client: TestClient, db: Session) -> None:
+    org = make_organization(db, "Workflow In Progress", "workflow-in-progress")
+    admin = make_user(db, "workflow-in-progress@example.com")
+    make_membership(db, admin, org, MembershipRole.admin)
+    lead = create_lead(
+        db, org.id, admin.id, {"title": "North pier expansion", "status": "qualified"}
+    )
+    headers = _csrf(login(client, admin.email, PASSWORD))
+    path = f"/api/v1/organizations/{org.id}/workflow-definitions"
+    created = client.post(
+        path,
+        headers=headers,
+        json={
+            "name": "Qualified lead follow-up branch",
+            "slug": "qualified-lead-follow-up-branch",
+            "definition": {
+                "trigger": "lead_created",
+                "conditions": [
+                    {"field": "lead_status", "operator": "equals", "value": "qualified"}
+                ],
+                "actions": [
+                    {"type": "require_approval", "note": "Confirm the bonded service sheet"},
+                    {"type": "create_task", "title": "Send the bonded service sheet"},
+                ],
+                "otherwise_actions": [
+                    {"type": "create_task", "title": "Ask Mina for the missing yard details"}
+                ],
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    url = f"{path}/{created.json()['id']}"
+
+    def queue(**extra: object):
+        return client.post(
+            f"{url}/runs",
+            headers=headers,
+            json={"request_id": str(uuid.uuid4()), "lead_id": str(lead.id), **extra},
+        )
+
+    started = queue()
+    assert started.status_code == 202, started.text
+    while_pending = queue()
+    assert while_pending.status_code == 409
+    assert while_pending.json()["error"]["code"] == "workflow_run_in_progress"
+    confirmed_early = queue(confirm_repeat=True)
+    assert confirmed_early.status_code == 409
+    assert confirmed_early.json()["error"]["code"] == "workflow_run_in_progress"
+    preview = queue(dry_run=True)
+    assert preview.status_code == 202, preview.text
+    dispatch_workflow(db, org.id, uuid.UUID(started.json()["id"]))
+    waiting = queue()
+    assert waiting.status_code == 409
+    assert waiting.json()["error"]["code"] == "workflow_run_in_progress"
+    assert (
+        client.post(
+            f"{url}/runs/{started.json()['id']}/review",
+            headers=headers,
+            json={"decision": "approve"},
+        ).status_code
+        == 200
+    )
+    dispatch_workflow(db, org.id, uuid.UUID(started.json()["id"]))
+    assert db.scalar(select(WorkflowTask).where(WorkflowTask.lead_id == lead.id)) is not None
+    repeated = queue()
+    assert repeated.status_code == 409
+    assert repeated.json()["error"]["code"] == "workflow_effect_already_recorded"
+    confirmed = queue(confirm_repeat=True)
+    assert confirmed.status_code == 202, confirmed.text

@@ -69,7 +69,9 @@ def customer_profile(
             _company_row(db, organization_id, item) for item in company_ids if item != company_id
         ],
         "contacts": [
-            _brief(item.id, item.full_name, item.email) for item in contacts if item.id != contact_id
+            _brief(item.id, item.full_name, item.email)
+            for item in contacts
+            if item.id != contact_id
         ],
         "leads": [
             _brief(item.id, item.title, item.status.value) for item in leads if item.id != lead_id
@@ -83,7 +85,7 @@ def customer_profile(
             {
                 "id": item.id,
                 "subject": item.subject,
-                "channel": item.channel if isinstance(item.channel, str) else item.channel.value,
+                "channel": _channel_label(item.channel),
                 "status": item.status.value,
                 "updated_at": item.updated_at,
             }
@@ -102,6 +104,15 @@ def customer_profile(
         "tasks": tasks,
         "activity": _activity(inquiries, interactions, appointments, tasks, conversations),
     }
+
+
+def _channel_label(channel: object) -> str:
+    if isinstance(channel, str):
+        return channel
+    value = getattr(channel, "value", None)
+    if isinstance(value, str):
+        return value
+    raise AppError(500, "profile_channel_invalid", "The conversation channel could not be read")
 
 
 def _subject(

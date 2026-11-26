@@ -414,17 +414,36 @@ class ManualRun(BaseModel):
 _CONSEQUENTIAL = {"update_lead", "prepare_follow_up", "create_task"}
 
 
+def _targets_record(run: WorkflowRun, body: ManualRun) -> bool:
+    opportunity_id = str(body.opportunity_id) if body.opportunity_id else None
+    if body.lead_id is not None and run.lead_id != body.lead_id:
+        return False
+    if opportunity_id is not None and run.payload.get("opportunity_id") != opportunity_id:
+        return False
+    if body.lead_id is None and opportunity_id is None and run.lead_id is not None:
+        return False
+    return True
+
+
+def _run_in_progress(db: DbSession, row: WorkflowDefinition, body: ManualRun) -> bool:
+    runs = db.scalars(_run_query(row).order_by(WorkflowRun.created_at.desc()).limit(40)).all()
+    for run in runs:
+        if run.payload.get("dry_run") or not _targets_record(run, body):
+            continue
+        if run.status in {WorkflowStatus.pending, WorkflowStatus.dispatching}:
+            return True
+        if (
+            run.status == WorkflowStatus.accepted
+            and run.payload.get("outcome") == "awaiting_approval"
+        ):
+            return True
+    return False
+
+
 def _effect_recorded(db: DbSession, row: WorkflowDefinition, body: ManualRun) -> bool:
     runs = db.scalars(_run_query(row).order_by(WorkflowRun.created_at.desc()).limit(40)).all()
-    opportunity_id = str(body.opportunity_id) if body.opportunity_id else None
     for run in runs:
-        if run.payload.get("dry_run"):
-            continue
-        if body.lead_id is not None and run.lead_id != body.lead_id:
-            continue
-        if opportunity_id is not None and run.payload.get("opportunity_id") != opportunity_id:
-            continue
-        if body.lead_id is None and opportunity_id is None and run.lead_id is not None:
+        if run.payload.get("dry_run") or not _targets_record(run, body):
             continue
         steps = run.payload.get("steps") or []
         if any(
@@ -528,6 +547,13 @@ def manual_run(
         return _run_out(existing)
     if row.archived_at is not None:
         raise AppError(409, "workflow_archived", "Archived workflows cannot run")
+    if not body.dry_run and _run_in_progress(db, row, body):
+        raise AppError(
+            409,
+            "workflow_run_in_progress",
+            "This workflow is already running on this record. "
+            "Wait until it finishes before running it again.",
+        )
     if not body.dry_run and not body.confirm_repeat and _effect_recorded(db, row, body):
         raise AppError(
             409,

@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from alembic import command
-from tests.bootstrap import API_ROOT, TEST_DATABASE_URL, ensure_database
+from tests.bootstrap import API_ROOT, TEST_DATABASE_NAME, TEST_DATABASE_URL, ensure_database
 
 os.environ["ALEMBIC_DATABASE_URL"] = TEST_DATABASE_URL
 
@@ -21,8 +21,9 @@ def _alembic_config(url: str) -> Config:
 
 @pytest.fixture(scope="session", autouse=True)
 def migrated_database() -> None:
-    ensure_database("atlas_test")
-    ensure_database("atlas_migration_test")
+    ensure_database(TEST_DATABASE_NAME)
+    if TEST_DATABASE_NAME == "atlas_test":
+        ensure_database("atlas_migration_test")
     command.upgrade(_alembic_config(TEST_DATABASE_URL), "head")
 
 
@@ -32,7 +33,8 @@ def clean_tables() -> None:
     from app.core.database import engine
 
     url = get_settings().database_url
-    if not url.endswith("/atlas_test"):
+    name = url.rsplit("/", 1)[-1]
+    if name != TEST_DATABASE_NAME:
         raise RuntimeError(f"Refusing to truncate unexpected database: {url}")
     with engine.begin() as connection:
         connection.execute(
