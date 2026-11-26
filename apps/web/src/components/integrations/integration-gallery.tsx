@@ -24,21 +24,20 @@ export function IntegrationGallery() {
           <Badge variant="secondary">Not connected</Badge>
         </div>
       </div>
-      <div className="integration-grid">
+      <div className="provider-board">
         {gallery.map((item) => {
           const Icon = item.icon;
           return (
-            <article className="integration-card" key={item.name}>
-              <span className="integration-icon" style={{ background: item.color, color: "#fff" }}><Icon size={18} aria-hidden /></span>
-              <span>
-                <strong>{item.name}</strong>
-                <small>{item.purpose}</small>
-              </span>
+            <article className="provider-tile" key={item.name}>
+              <header>
+                <span className="provider-mark" style={{ background: item.color }}><Icon size={18} aria-hidden /></span>
+                <span>
+                  <strong>{item.name}</strong>
+                  <small>{item.purpose}</small>
+                </span>
+              </header>
               <Badge variant="secondary">{item.status}</Badge>
-              <details>
-                <summary>Details</summary>
-                <p>{item.note}</p>
-              </details>
+              <ul className="provider-caps"><li>{item.note}</li></ul>
             </article>
           );
         })}

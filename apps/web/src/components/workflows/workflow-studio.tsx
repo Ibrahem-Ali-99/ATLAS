@@ -60,7 +60,7 @@ export function WorkflowStudio({ organizationId, requestedWorkflow, requestedRun
     void client.invalidateQueries({ queryKey });
   };
   return (
-    <section aria-label="Workflow builder" className="space-y-5">
+    <section aria-label="Workflow builder" className="flow-page">
       <PageHeader title="Workflows" eyebrow="Automation" actions={
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild><Button><Plus className="size-4" />New workflow</Button></DialogTrigger>
@@ -72,8 +72,8 @@ export function WorkflowStudio({ organizationId, requestedWorkflow, requestedRun
           </DialogContent>
         </Dialog>
       }>Build repeatable processes for leads, opportunities, and team tasks.</PageHeader>
-      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <aside className="min-w-0 rounded-xl border border-border bg-card p-3" aria-label="Workflow library">
+      <div className="flow-studio">
+        <aside className="flow-library" aria-label="Workflow library">
           <div className="flex items-center justify-between gap-2 px-1"><h2 className="text-sm font-semibold">Workflow library</h2><Badge variant="secondary">{items.length}</Badge></div>
           <div className="relative mt-3"><Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" aria-hidden="true" />
             <Input className="pl-8" aria-label="Search workflows" placeholder="Search workflows" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -163,7 +163,7 @@ function WorkflowEditor({ item, organizationId, saved, onArchived, requestedRun 
     setNotice(""); validate.reset(); setGraph(next);
   }
   return (
-    <section aria-label="Workflow details" className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
+    <section aria-label="Workflow details" className="flow-editor">
       <header className="grid gap-4 border-b border-border p-4 md:p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
@@ -188,7 +188,7 @@ function WorkflowEditor({ item, organizationId, saved, onArchived, requestedRun 
         {error ? <RequestError error={error} /> : null}
       </header>
       {view === "builder" ? (
-        <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="flow-board">
           <WorkflowCanvas graph={graph} selection={selection} select={(node) => {
             setSelection(node);
             if (!window.matchMedia("(min-width: 1280px)").matches) {
@@ -196,7 +196,7 @@ function WorkflowEditor({ item, organizationId, saved, onArchived, requestedRun 
               nodePanel.current?.scrollIntoView({ block: "start" });
             }
           }} />
-          <div ref={nodePanel} tabIndex={-1} className="min-w-0 scroll-mt-20 border-t border-border p-4 xl:border-t-0 xl:border-l">
+          <div ref={nodePanel} tabIndex={-1} className="flow-inspector">
             <NodeSettings organizationId={organizationId} graph={graph} update={changeGraph} selection={selection} select={setSelection} readOnly={readOnly || busy} />
             <details className="mt-5 border-t border-border pt-4">
               <summary className="cursor-pointer text-sm font-medium">Workflow settings</summary>
@@ -213,32 +213,33 @@ function WorkflowEditor({ item, organizationId, saved, onArchived, requestedRun 
   );
 }
 
-type CanvasNode = { node: NodeSelection; label: string; detail: string; icon: typeof Zap };
+type CanvasNode = { node: NodeSelection; label: string; detail: string; icon: typeof Zap; tone: "trigger" | "condition" | "action" | "approval" };
 
 function WorkflowCanvas({ graph, selection, select }: { graph: WorkflowGraph; selection: NodeSelection; select: (node: NodeSelection) => void }) {
   const conditions = graph.conditions ?? [];
   const triggerNodes: CanvasNode[] = [
-    { node: { kind: "trigger" }, label: triggerLabels[graph.trigger], detail: "Trigger", icon: Zap },
+    { node: { kind: "trigger" }, label: triggerLabels[graph.trigger], detail: "Trigger", icon: Zap, tone: "trigger" as const },
     ...conditions.map((entry, index) => ({
       node: { kind: "condition" as const, index },
       label: `${entry.operator === "equals" ? "Is" : "Is not"} ${entry.value.replaceAll("-", " ")}`,
-      detail: "Condition", icon: GitBranch,
+      detail: "Condition", icon: GitBranch, tone: "condition" as const,
     })),
   ];
   const actionNodes = (path: ActionPath): CanvasNode[] => (graph[path] ?? []).map((action, index) => ({
     node: { kind: "action", index, path }, label: stepLabels[action.type],
     detail: action.title || action.status || (action.type === "require_approval" ? "Human review" : "Action"),
     icon: action.type === "require_approval" ? ShieldCheck : ListChecks,
+    tone: action.type === "require_approval" ? "approval" as const : "action" as const,
   }));
   function column(nodes: CanvasNode[]) {
     return <ol className="mx-auto w-full max-w-[21rem]">
-      {nodes.map(({ node, label, detail, icon: Icon }, index) => {
+      {nodes.map(({ node, label, detail, icon: Icon, tone }, index) => {
         const active = node.kind === selection.kind &&
           (node.kind === "trigger" || ("index" in selection && selection.index === node.index)) &&
           (node.kind !== "action" || (selection.kind === "action" && selection.path === node.path));
         return <li key={node.kind === "trigger" ? "trigger" : `${node.kind}-${node.index}`}>
           {index > 0 ? <CanvasConnector /> : null}
-          <button type="button" aria-pressed={active} onClick={() => select(node)} className={cn("workflow-node", node.kind === "condition" && "approval", active && "ring-2")}>
+          <button type="button" aria-pressed={active} onClick={() => select(node)} className={cn("flow-node", tone, active && "is-on")}>
             <span><Icon size={14} aria-hidden="true" /></span>
             <div><small>{detail}</small><strong>{label}</strong></div>
           </button>

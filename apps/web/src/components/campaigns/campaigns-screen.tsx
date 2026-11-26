@@ -78,7 +78,7 @@ function CampaignWorkspace({ organizationId }: { organizationId: string }) {
             <ul className="campaign-list">
               {visibleCampaigns.map((campaign) => (
                 <li key={campaign.id}>
-                  <button aria-current={selected?.id === campaign.id || undefined} className={selected?.id === campaign.id ? "active" : ""} type="button" onClick={() => setSelectedId(campaign.id)}>
+                  <button aria-current={selected?.id === campaign.id || undefined} className={`campaign-card${selected?.id === campaign.id ? " active" : ""}`} type="button" onClick={() => setSelectedId(campaign.id)}>
                     <span className="flex min-w-0 items-center gap-3">
                       <Mail size={18} className="shrink-0 text-primary" />
                       <span className="min-w-0">

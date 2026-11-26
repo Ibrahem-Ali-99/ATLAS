@@ -119,6 +119,13 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
         </ul>
       </nav>
       <div className="settings-content" key={organizationId}>
+      <header className="settings-hero">
+        <span className="avatar avatar-blue avatar-md">{(user?.full_name ?? organizationId ?? "A").slice(0, 2).toUpperCase()}</span>
+        <div>
+          <strong>{session.data?.memberships.find((membership) => membership.organization_id === organizationId)?.organization_name ?? "Workspace"}</strong>
+          <small>{user ? `${user.full_name} · ${user.email}` : "Account"} · {role ?? "member"}</small>
+        </div>
+      </header>
       <div id="settings-organization" className="grid scroll-mt-20 gap-4">
       {organizationId && isAdmin ? <OrganizationCard organizationId={organizationId} initialName={session.data?.memberships.find((m) => m.organization_id === organizationId)?.organization_name ?? ""} onSaved={() => void queryClient.invalidateQueries({ queryKey: ["session"] })} /> : null}
       <section className="rounded-xl border border-border bg-card p-4">
@@ -463,7 +470,7 @@ function IntegrationMarketplace({
       {error ? <RequestError error={error} /> : isLoading ? (
         <div role="status" aria-label="Loading integrations"><Skeleton className="h-40 w-full" /></div>
       ) : cards.length || showWidget || showCalendar ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="provider-board">
           {showCalendar ? (
             calendar.error ? <RequestError error={calendar.error} /> :
               <CalendarConnectionCard organizationId={organizationId} isAdmin={isAdmin}
@@ -479,10 +486,13 @@ function IntegrationMarketplace({
             const props = { organizationId, isAdmin, record, onChanged };
             return (
               <Dialog key={item.type}>
-                <article className="integration-card">
-                  <span className="integration-icon" style={{ background: brandColor(item.type), color: "#fff" }}><item.icon size={18} aria-hidden /></span>
-                  <span><strong>{connectionTitle(item.type, item.name)}</strong><small>{item.benefit}</small></span>
+                <article className="provider-tile">
+                  <header>
+                    <span className="provider-mark" style={{ background: brandColor(item.type) }}><item.icon size={18} aria-hidden /></span>
+                    <span><strong>{connectionTitle(item.type, item.name)}</strong><small>{item.benefit}</small></span>
+                  </header>
                   <Badge variant="secondary">{status}</Badge>
+                  <ul className="provider-caps"><li>{item.providers}</li><li>{item.activation}</li></ul>
                   <DialogTrigger asChild>
                     <Button variant="outline" size="sm" className="self-start" aria-label={`${item.name} settings`}>
                       {isAdmin && (record?.status === "disabled" || record?.status === "verification_failed") ? "Recover connection" : isAdmin && item.type !== "n8n" ? "Configure" : "View details"}
@@ -504,14 +514,13 @@ function IntegrationMarketplace({
               </Dialog>
             );
           })}
-          {showWidget ? <article className="flex min-w-0 flex-col rounded-xl border border-border bg-card p-5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="rounded-lg bg-accent p-2.5 text-accent-foreground"><MessageCircle size={20} aria-hidden /></span>
-              <Badge variant="secondary">{!isAdmin ? "Admin managed" : widget.isError ? "Unavailable" : widget.isPending ? "Checking" : widget.data?.enabled && widget.data.allowed_domains.length ? "Enabled" : widget.data ? "Paused" : "Not configured"}</Badge>
-            </div>
-            <h2 className="mt-4 font-semibold">Website chat</h2>
-            <p className="mt-1 text-xs text-muted-foreground">ATLAS embed</p>
-            <p className="mb-5 mt-3 flex-1 text-sm leading-6 text-muted-foreground">Open a chat from your website and handle customer messages in Inbox.</p>
+          {showWidget ? <article className="provider-tile">
+            <header>
+              <span className="provider-mark" style={{ background: "#2856d7" }}><MessageCircle size={18} aria-hidden /></span>
+              <span><strong>Website chat</strong><small>Open a chat from your website and handle customer messages in Inbox.</small></span>
+            </header>
+            <Badge variant="secondary">{!isAdmin ? "Admin managed" : widget.isError ? "Unavailable" : widget.isPending ? "Checking" : widget.data?.enabled && widget.data.allowed_domains.length ? "Enabled" : widget.data ? "Paused" : "Not configured"}</Badge>
+            <ul className="provider-caps"><li>ATLAS embed</li></ul>
             {isAdmin ? <div className="self-start"><WidgetSettingsDialog organizationId={organizationId} /></div> : <Button asChild size="sm" variant="outline" className="self-start"><Link href="/inbox">Open Inbox</Link></Button>}
           </article> : null}
         </div>

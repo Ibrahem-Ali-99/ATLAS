@@ -270,7 +270,7 @@ function AssistantWorkspace({
           ) : null}
           <button type="button" className="button button-ghost button-icon context-toggle force" aria-label="Open workspace context" aria-expanded={panelOpen} onClick={() => setPanelOpen((value) => !value)}><FileText size={16} /></button>
         </header>
-        <div className="assistant-thread">
+        <div className="assistant-thread answer-stream">
           {!conversationId ? <EmptyThread organizationName={organizationName} onPrompt={setDraft} /> : null}
           {conversationId && detail.data && detail.data.messages.length === 0 && !send.isPending ? (
             <EmptyThread organizationName={organizationName} onPrompt={setDraft} />
@@ -506,37 +506,42 @@ function MessageView({
 }) {
   const documents = message.sources.filter((source) => source.kind === "document");
   const refused = message.role === "assistant" && message.content.includes(NO_RECORDS);
+  const records = message.sources.filter((source) => source.kind !== "document" && source.record_id);
   if (message.role === "user") {
     return (
-      <article className="assistant-message user">
-        <span className="avatar avatar-blue avatar-sm">{userInitials}</span>
-        <div><strong>You</strong><p>{message.content}</p></div>
+      <article className="answer-turn user">
+        <p>{message.content}</p>
+        <span className="sr-only">{userInitials}</span>
       </article>
     );
   }
   return (
-    <article className="assistant-message">
-      <span className="assistant-avatar"><Bot size={16} /></span>
-      <div className="assistant-response">
-        <strong>ATLAS Assistant</strong>
-        {refused ? <p>{message.content}</p> : <RichText id={message.id} text={message.content} />}
-        {message.steps && message.steps.length > 0 ? (
-          <div className="evidence-list">
-            {message.steps.map((step, index) => (
-              <div key={`${message.id}-step-${index}`}>
-                <span>
-                  <strong>{stepLabel(step.tool_name)}</strong>
-                  <small>{step.detail || stepStatus(step.status)}</small>
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : null}
-        {documents.length > 0 ? <SourceList sources={documents} onSource={onSource} /> : null}
-        {message.proposals?.map((proposal) => (
-          <ProposalCard key={proposal.id} proposal={proposal} pending={proposalPending} onSubmit={onProposal} onDismiss={onDismiss} />
-        ))}
-      </div>
+    <article className="answer-turn">
+      {message.steps && message.steps.length > 0 ? (
+        <ol className="tool-rail" aria-label="What the assistant checked">
+          {message.steps.map((step, index) => (
+            <li key={`${message.id}-step-${index}`}>
+              <span className={`tool-mark ${step.status === "failed" ? "bad" : "ok"}`} />
+              <span><strong>{stepLabel(step.tool_name)}</strong><small>{step.detail || stepStatus(step.status)}</small></span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {refused ? <p className="answer-copy">{message.content}</p> : <RichText id={message.id} text={message.content} />}
+      {records.length > 0 ? (
+        <div className="record-row">
+          {records.map((source) => (
+            <Link key={sourceKey(source)} href={crmRecordHref(source)} className="record-card">
+              <strong>{source.title}</strong>
+              <small>{recordLabel(source)}</small>
+            </Link>
+          ))}
+        </div>
+      ) : null}
+      {documents.length > 0 ? <SourceList sources={documents} onSource={onSource} /> : null}
+      {message.proposals?.map((proposal) => (
+        <ProposalCard key={proposal.id} proposal={proposal} pending={proposalPending} onSubmit={onProposal} onDismiss={onDismiss} />
+      ))}
     </article>
   );
 }

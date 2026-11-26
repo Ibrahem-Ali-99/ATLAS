@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Bot, ChevronRight, Filter, Search } from "lucide-react";
+import { ChevronRight, Filter, Search } from "lucide-react";
 import { useState } from "react";
 
 import { DataScopeControl } from "@/components/data-scope";
@@ -130,23 +130,23 @@ function AgentRunsBody({
           <p className="px-4 pb-6 text-sm text-muted-foreground">No agent runs match this filter.</p>
         ) : null}
         {visible.length > 0 ? (
-          <div className="operations-table runs-table" role="table" aria-label="Agent run history">
-            <div className="operations-row head" role="row"><span>Run</span><span>Inquiry</span><span>Status</span><span>Started</span><span>Duration</span><span>Result</span><span /></div>
+          <ol className="run-timeline" aria-label="Agent run history">
             {visible.map((run) => {
               const presentation = presentedRun(run);
               return (
-              <button key={run.id} type="button" role="row" className="operations-row" aria-current={run.id === selectedId || undefined} onClick={() => onSelect(run.id)}>
-                <span className="operation-primary"><span className="operation-icon"><Bot size={15} /></span><span><strong>{run.inquiry_subject}</strong><small>{presentation.label}</small></span></span>
-                <span>{run.inquiry_subject}</span>
-                <span><span className={presentation.tone}>{presentation.label}</span></span>
+              <li key={run.id}>
+              <button type="button" className="run-event" aria-current={run.id === selectedId || undefined} onClick={() => onSelect(run.id)}>
+                <span><strong>{run.inquiry_subject}</strong><small>{presentation.label}</small></span>
+                <span className={presentation.tone}>{presentation.label}</span>
                 <span>{new Date(run.started_at).toLocaleDateString()}</span>
                 <span>{runDuration(run.started_at, run.finished_at, run.status)}</span>
                 <span>{run.error_code ? "Needs attention" : "Recorded"}</span>
                 <ChevronRight size={15} />
               </button>
+              </li>
               );
             })}
-          </div>
+          </ol>
         ) : null}
         {runs.data ? (
           <Pager page={runs.data.page} pageSize={runs.data.page_size} total={runs.data.total} onPage={setPage} />
@@ -208,7 +208,7 @@ function AssistantExecutions({ organizationId }: { organizationId: string }) {
         <div>
           <h2 className="text-base font-semibold">Assistant executions</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Stored tool calls, the records they returned, and whether a person still has to approve an action. The stored execution does not include the originating conversation.
+            Each execution stays tied to the conversation that asked for it. The steps are the tools that ran, the records they returned, and whether a person still has to approve an action.
           </p>
         </div>
         <select className={selectClass} aria-label="Filter assistant executions" value={status} onChange={(event) => setStatus(event.target.value as "" | "running" | "completed" | "failed")}>
@@ -258,6 +258,11 @@ function ExecutionDetail({ execution, admin }: { execution: AssistantExecution; 
   return (
     <div className="mt-4 space-y-3">
       <p className="text-sm font-medium">{execution.request}</p>
+      <p className="text-sm">
+        <Link className="underline" href={`/assistant?conversation=${execution.conversation_id}`}>
+          Open the conversation
+        </Link>
+      </p>
       {execution.error_message ? <p className="text-sm text-destructive">{execution.error_message}</p> : null}
       {execution.steps.length === 0 ? <p className="text-sm text-muted-foreground">No tool step is stored for this request.</p> : null}
       <ol className="space-y-2">
@@ -603,10 +608,10 @@ function RunDetail({
       <SupportingRecords detail={detail} />
       <div>
         <h3 className="mb-2 text-sm font-medium">Timeline</h3>
-        <ol className="space-y-2">
-          {detail.events.length === 0 ? <li className="text-sm text-muted-foreground">No steps are stored for this run.</li> : null}
+        <ol className="exec-timeline">
+          {detail.events.length === 0 ? <li className="exec-step text-sm text-muted-foreground">No steps are stored for this run.</li> : null}
           {detail.events.map((event) => (
-            <li key={event.id} className="rounded-[10px] bg-secondary px-3 py-2 text-sm">
+            <li key={event.id} className="exec-step text-sm">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium">{stepTitle(event.step)}</span>
                 <span className={`text-xs uppercase tracking-[0.12em] ${statusClass(event.status)}`}>{event.status}</span>

@@ -116,7 +116,7 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
           No leads or inquiries are stored in this scope.
         </p>
       ) : null}
-      <div className="analytics-metrics">
+      <div className="kpi-band">
         <Metric label="Active companies" value={String(data.companies_total)} detail="Customer accounts in this view." href="/crm?tab=companies" />
         <Metric label="Leads" value={String(data.leads_total)} detail="Leads in this view." href="/crm?tab=leads" />
         <Metric label="Open inquiries" value={String(data.open_inquiries)} detail="Customer requests in this view." href="/crm?tab=inquiries" />
@@ -128,7 +128,7 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
         />
       </div>
       {data.comparison ? <Comparison comparison={data.comparison} /> : null}
-      <div className="analytics-grid">
+      <div className="bi-layout">
         {data.customer_activity ? <CustomerActivity rows={data.customer_activity} /> : null}
         <LeadPipeline data={data} />
       </div>
@@ -139,7 +139,7 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
       {data.ai ? <TrendSection title="AI requests and failures" rows={data.ai.trend.map((item) => ({ day: item.day, label: item.status, value: item.count }))} unit="requests" /> : null}
       {data.workflow_performance ? <section className="rounded-xl border border-border bg-card p-4" aria-label="Workflow performance"><h2 className="text-base text-foreground">Workflow performance</h2><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3"><Metric label="Executions" value={String(data.workflow_performance.total)} detail={`${data.workflow_performance.pending} pending · ${data.workflow_performance.running} running.`} /><Metric label="Workflow success" value={data.workflow_performance.success_rate === null ? "Unavailable" : `${Math.round(data.workflow_performance.success_rate * 100)}%`} detail={`${data.workflow_performance.successful} successful / ${data.workflow_performance.denominator} terminal executions.`} /><Metric label="Failed workflows" value={String(data.workflow_performance.failed)} detail="Failed and needs-attention terminal runs." /></div><TrendSection title="Successful versus failed executions" rows={data.workflow_performance.trend.filter((item) => ["completed", "failed", "needs_attention"].includes(item.status)).map((item) => ({ day: item.day, label: item.status, value: item.count }))} unit="runs" /></section> : null}
       {data.support || data.ai || data.evaluation ? <div className="grid gap-3 md:grid-cols-3">{data.support ? <Metric label="Human handoffs" value={String(data.support.handoffs)} detail={`${data.support.by_channel.length} channel/status groups.`} /> : null}{data.ai ? <Metric label="AI requests" value={String(data.ai.requests)} detail={data.ai.failure_rate === null ? "No recorded AI operations." : `${Math.round(data.ai.failure_rate * 1000) / 10}% failed`} /> : null}{data.evaluation ? <Metric label="Evaluation pass rate" value={data.evaluation.pass_rate === null ? "Unavailable" : `${Math.round(data.evaluation.pass_rate * 1000) / 10}%`} detail={`${data.evaluation.passed} of ${data.evaluation.executed} cases passed.`} /> : null}</div> : null}
-      <section className="rounded-xl border border-border bg-card p-4">
+      <section className="chart-panel" aria-label="Leads created">
         <h2 className="text-base text-foreground">Leads created</h2>
         <p className="mt-2 text-xs leading-5 text-subtle">New CRM leads by day in the selected period.</p>
         {data.lead_trend.every((row) => row.count === 0) ? (
@@ -357,11 +357,11 @@ function storedScope(organizationId: string): DataScope {
 function Metric({ label, value, detail, href }: { label: string; value: string; detail: string; href?: string }) {
   const slug = label.toLowerCase().replaceAll(" ", "-");
   return (
-    <section data-testid={`analytics-metric-${slug}`} className="panel analytics-metric">
-      <p className="text-xs uppercase tracking-[0.12em] text-subtle">{label}</p>
-      <p data-testid={`analytics-metric-${slug}-value`} className="mt-3 text-2xl tabular-nums text-foreground">{value}</p>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground">{detail}</p>
-      {href ? <Link className="mt-3 inline-block text-xs font-medium text-primary" href={href}>Open records</Link> : null}
+    <section data-testid={`analytics-metric-${slug}`} className="insight-card">
+      <header><span>{label}</span></header>
+      <strong data-testid={`analytics-metric-${slug}-value`}>{value}</strong>
+      <small>{detail}</small>
+      {href ? <Link className="text-xs font-medium text-primary" href={href}>Open records</Link> : null}
     </section>
   );
 }
@@ -374,10 +374,10 @@ function Comparison({ comparison }: { comparison: NonNullable<AnalyticsSnapshot[
     ["Opportunities won", comparison.opportunities_won],
   ] as const;
   return (
-    <section className="rounded-xl border border-border bg-card p-4" aria-label="Period comparison">
+    <section className="compare-strip" aria-label="Period comparison">
       <h2 className="text-base font-semibold text-foreground">Compared with the previous period</h2>
       <p className="mt-1 text-xs text-muted-foreground">{formatDay(comparison.previous_period.start)} to {formatDay(comparison.previous_period.end)}</p>
-      <ul className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <ul>
         {rows.map(([label, item]) => <ComparisonItem key={label} label={label} item={item} />)}
       </ul>
     </section>
@@ -387,13 +387,22 @@ function Comparison({ comparison }: { comparison: NonNullable<AnalyticsSnapshot[
 function ComparisonItem({ label, item }: { label: string; item: PeriodDelta }) {
   const change = item.change_rate == null ? "No earlier activity" : `${item.delta > 0 ? "+" : ""}${Math.round(item.change_rate * 1000) / 10}%`;
   const previous = item.change_rate == null ? "" : ` · previous ${item.previous}`;
-  return <li className="rounded-lg bg-muted/50 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl tabular-nums">{item.current}</p><p className="mt-1 text-xs text-muted-foreground">{change}{previous}</p></li>;
+  const tone = item.change_rate == null ? "" : item.delta < 0 ? "down" : "up";
+  const span = Math.max(item.current, item.previous, 1);
+  return (
+    <li className="compare-cell">
+      <span>{label}</span>
+      <strong>{item.current}</strong>
+      <small className={tone}>{change}{previous}</small>
+      <div className="stage-meter" aria-hidden="true"><b style={{ width: `${Math.max(8, (item.current / span) * 100)}%` }} /></div>
+    </li>
+  );
 }
 
 function QualificationTrend({ rows }: { rows: NonNullable<AnalyticsSnapshot["qualification_trend"]> }) {
   const empty = rows.every((row) => row.created === 0);
   return (
-    <section className="rounded-xl border border-border bg-card p-4" aria-label="Qualification trend">
+    <section className="chart-panel" aria-label="Qualification trend">
       <h2 className="text-base text-foreground">Lead acquisition and qualification</h2>
       <p className="mt-1 text-xs text-muted-foreground">Leads created each day, and how many of those leads are currently qualified. This is not a history of status changes.</p>
       {empty ? <p className="mt-3 text-sm text-muted-foreground">No leads were created in this period.</p> : (

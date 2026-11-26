@@ -101,7 +101,7 @@ function MonitoringWorkspace({ organizationId, isAdmin }: { organizationId: stri
           ))}
         </div>
       </section>
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
+      <div className="ops-split">
         <section className="min-w-0 space-y-3 rounded-xl border border-border bg-card p-5">
           <h2 className="font-semibold">Earlier incidents</h2>
           <p className="text-sm text-muted-foreground">Failed agent runs stay here after they stop. Opening one does not mean it is still running.</p>
@@ -112,7 +112,7 @@ function MonitoringWorkspace({ organizationId, isAdmin }: { organizationId: stri
               key={run.id}
               type="button"
               aria-current={run.id === runId || undefined}
-              className={`block w-full rounded-[10px] px-3 py-3 text-left text-sm ${run.id === runId ? "bg-accent" : "bg-secondary"}`}
+              className="incident-row"
               onClick={() => setRunId(run.id)}
             >
               <span className="font-medium">{run.hint ?? "Failed run"}</span>

@@ -179,12 +179,11 @@ function ApprovalsBody({ organizationId, isAdmin }: {
         <div className="module-empty"><strong>No approval requests found</strong><p>Change the search or status filter to see other requests.</p></div>
       ) : null}
       {visible.length > 0 ? (
-        <div className="operations-table approvals-table" role="table" aria-label="Approval review queue">
-          <div className="operations-row head" role="row"><span>Request</span><span>Destination</span><span>Account</span><span>Status</span><span>Created</span><span /></div>
+        <div className="decision-queue" role="list" aria-label="Approval review queue">
           {visible.map((approval) => (
-            <button key={approval.id} type="button" role="row" data-approval-id={approval.id} aria-current={approval.id === selectedId || undefined} className="operations-row" onClick={() => select(approval.id)}>
-              <span className="operation-primary"><span className="operation-icon"><FileCheck2 size={15} /></span><span><strong>{actionLabel(approval.action_type)}</strong><small>{proposalChange(approval.action_type, approval.payload)}</small></span></span>
-              <span>{scopeLabel(approval)}</span>
+            <button key={approval.id} type="button" role="listitem" data-approval-id={approval.id} aria-current={approval.id === selectedId || undefined} className="decision-card" onClick={() => select(approval.id)}>
+              <span className="operation-icon"><FileCheck2 size={15} /></span>
+              <span><strong>{actionLabel(approval.action_type)}</strong><small style={{ display: "block", color: "var(--text-tertiary)" }}>{proposalChange(approval.action_type, approval.payload)}</small></span>
               <span>{proposalTarget(approval.payload)}</span>
               <span><span className={statusBadge(approval.status)}>{approval.status.replaceAll("_", " ")}</span></span>
               <span>{new Date(approval.created_at).toLocaleDateString()}</span>

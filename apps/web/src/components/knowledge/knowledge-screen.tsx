@@ -14,7 +14,6 @@ import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   archiveDocument,
   deleteDocument,
@@ -201,8 +200,8 @@ function KnowledgeWorkspace({
       </Dialog>
       {upload.isSuccess ? <p role="status" className="text-sm text-success">Document uploaded. The library shows its indexing status.</p> : null}
       {view === "library" ? (
-        <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]">
-          <section aria-label="Document library" className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-card">
+        <div className="doc-workspace">
+          <section aria-label="Document library" className="doc-library">
             <div className="flex w-full min-w-0 flex-wrap items-center gap-2 border-b border-border p-4 [&>select]:h-9 [&>select]:max-w-full [&>select]:rounded-md [&>select]:border [&>select]:border-border [&>select]:bg-background [&>select]:px-2 [&>select]:text-sm">
               <Input className="min-w-40 flex-1" aria-label="Search document library" placeholder="Search by document name" value={documentName} onChange={(event) => { setDocumentName(event.target.value); setPage(1); }} />
               <select aria-label="Filter by processing status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as DocumentStatus | ""); setPage(1); }}>
@@ -232,18 +231,7 @@ function KnowledgeWorkspace({
           </div>
         ) : null}
         {documents.data && documents.data.items.length > 0 ? (
-          <div className="min-w-0 overflow-x-auto">
-          <Table aria-label="Knowledge documents">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Document</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Origin</TableHead>
-                <TableHead>Updated</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <div role="table" aria-label="Knowledge documents">
               {documents.data.items.map((document) => (
                 <DocumentRow
                   key={document.id}
@@ -272,8 +260,6 @@ function KnowledgeWorkspace({
                   }}
                 />
               ))}
-            </TableBody>
-          </Table>
           </div>
         ) : null}
             {documents.data && (documents.data.total > documents.data.page_size || page > 1) ? (
@@ -396,28 +382,21 @@ function DocumentRow({
   });
   const pending = reindex.isPending || archive.isPending || restore.isPending || replace.isPending || remove.isPending;
   return (
-    <TableRow className={selected ? "bg-accent/40" : undefined}>
-      <TableCell>
+    <div role="row" className={`doc-row${selected ? " is-on" : ""}`}>
+      <div>
         <button type="button" aria-pressed={selected} className="flex min-w-0 items-start gap-2 break-words text-left font-medium hover:text-primary" onClick={onSelect}>
           <FileText className="mt-0.5 shrink-0 text-primary" size={16} /> {document.title}
         </button>
-        <p className="mt-1 pl-6 text-xs text-muted-foreground">{Math.ceil(document.byte_size / 1024)} KB</p>
+        <p className="mt-1 pl-6 text-xs text-muted-foreground">{Math.ceil(document.byte_size / 1024)} KB · {documentOriginLabel(document.origin)} · {new Date(document.updated_at).toLocaleDateString()}</p>
         {document.error_message ? <p className="mt-1 text-xs text-destructive">{document.error_message}</p> : null}
         {reindex.isError ? <RequestError error={reindex.error} /> : null}
         {archive.isError ? <RequestError error={archive.error} /> : null}
         {restore.isError ? <RequestError error={restore.error} /> : null}
         {replace.isError ? <RequestError error={replace.error} /> : null}
         {remove.isError ? <RequestError error={remove.error} /> : null}
-      </TableCell>
-      <TableCell>
-        <Badge variant="secondary" className={statusClass(document.status)}>{archived ? "archived" : document.status}</Badge>
-      </TableCell>
-      <TableCell className={document.origin === "demo" ? "text-primary" : "text-muted-foreground"}>
-        {documentOriginLabel(document.origin)}
-      </TableCell>
-      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{new Date(document.updated_at).toLocaleDateString()}</TableCell>
-      <TableCell>
-        <div className="flex flex-wrap gap-2 sm:flex-nowrap">
+      </div>
+      <Badge variant="secondary" className={statusClass(document.status)}>{archived ? "archived" : document.status}</Badge>
+      <div className="flex flex-wrap gap-2 sm:flex-nowrap">
           {archived ? (
             <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button>
           ) : (
@@ -438,8 +417,7 @@ function DocumentRow({
           ) : null}
           <ConfirmButton label="Delete" confirmLabel="Confirm delete" pendingLabel="Deleting…" pending={remove.isPending} size="sm" onConfirm={() => { if (!pending) remove.mutate(); }} />
         </div>
-      </TableCell>
-    </TableRow>
+    </div>
   );
 }
 
@@ -464,7 +442,7 @@ function ChunkList({
     queryFn: () => previewDocument(organizationId, document.id),
   });
   return (
-    <section className="min-w-0 rounded-xl border border-border bg-card p-4">
+    <section className="source-inspector">
       <h2 className="break-words text-base font-medium text-foreground">{document.title}</h2>
       <p className={`mt-2 text-xs uppercase tracking-[0.12em] ${statusClass(status)}`}>{archived ? "Archived. Search and assistant answers skip this document until it is restored." : statusCopy(status)}</p>
       <dl className="mt-4 space-y-2 text-xs text-muted-foreground">

@@ -162,6 +162,7 @@ function BillingCard({
             </div>
             <Badge variant="secondary" className="capitalize">{(current?.status ?? "Unavailable").replaceAll("_", " ")}</Badge>
           </div>
+          <p className="bill-plan">{current?.plan_code ?? "Unavailable"}</p>
           <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
             <div>
               <dt className="text-xs text-muted-foreground">Current plan</dt>
