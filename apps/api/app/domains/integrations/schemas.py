@@ -109,3 +109,34 @@ class EmailDomainOut(BaseModel):
     verified_at: Any | None = None
     checked_at: Any | None = None
     credential_version: int
+
+
+class ResendTestStatus(BaseModel):
+    credential_configured: bool
+    test_delivery_verified: bool
+    sending_domain_verified: bool
+    production_delivery_enabled: bool
+    test_sender: str
+    approved_recipient: str | None = None
+    official_recipients: list[str]
+    last_test_recipient: str | None = None
+    last_test_message_id: str | None = None
+    last_test_at: Any | None = None
+    provider_confirmation: str | None = None
+
+
+class ResendTestRecipientUpdate(BaseModel):
+    address: str | None = None
+    expected_version: int = Field(ge=1)
+
+
+class ResendTestRequest(BaseModel):
+    recipient: str = Field(min_length=3, max_length=320)
+
+
+class ResendTestReceipt(BaseModel):
+    message_id: str
+    recipient: str
+    sender: str
+    provider_confirmation: str
+    status: ResendTestStatus

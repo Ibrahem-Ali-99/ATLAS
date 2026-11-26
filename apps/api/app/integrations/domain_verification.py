@@ -70,6 +70,13 @@ class ResendDomainProvider:
         except httpx.RequestError as exc:
             raise AppError(502, "resend_unavailable", "Resend could not be reached") from exc
         if response.status_code in {401, 403}:
+            if _error_name(response) == "restricted_api_key":
+                raise AppError(
+                    403,
+                    "resend_domain_access_required",
+                    "Domain administration needs a full-access Resend key. "
+                    "A sending key can still deliver the administrator test.",
+                )
             raise AppError(422, "resend_credentials_rejected", "Check the Resend key permissions")
         if response.status_code == 404:
             raise AppError(
@@ -90,6 +97,15 @@ class ResendDomainProvider:
         raise AppError(
             502, "resend_domain_response_invalid", "Resend returned an invalid domain response"
         )
+
+
+def _error_name(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    name = payload.get("name") if isinstance(payload, dict) else None
+    return name if isinstance(name, str) else ""
 
 
 def _domain_status(payload: dict[str, object]) -> DomainStatus:

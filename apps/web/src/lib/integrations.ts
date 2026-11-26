@@ -140,3 +140,43 @@ export function checkEmailDomain(organizationId: string, id: string) {
 export function revokeEmailDomain(organizationId: string, id: string) {
   return apiFetch<EmailDomain>(`${base(organizationId)}/email-domains/${id}/revoke`, { method: "POST" });
 }
+
+export type ResendTestStatus = {
+  credential_configured: boolean;
+  test_delivery_verified: boolean;
+  sending_domain_verified: boolean;
+  production_delivery_enabled: boolean;
+  test_sender: string;
+  approved_recipient: string | null;
+  official_recipients: string[];
+  last_test_recipient: string | null;
+  last_test_message_id: string | null;
+  last_test_at: string | null;
+  provider_confirmation: "accepted" | "retrieved" | null;
+};
+
+export function getResendTestStatus(organizationId: string) {
+  return apiFetch<ResendTestStatus>(`${base(organizationId)}/email/resend-test`);
+}
+
+export function approveResendTestRecipient(organizationId: string, address: string | null, expectedVersion: number) {
+  return apiFetch<ResendTestStatus>(`${base(organizationId)}/email/resend-test-recipient`, {
+    method: "PUT",
+    body: JSON.stringify({ address, expected_version: expectedVersion }),
+  });
+}
+
+export type ResendTestReceipt = {
+  message_id: string;
+  recipient: string;
+  sender: string;
+  provider_confirmation: "accepted" | "retrieved";
+  status: ResendTestStatus;
+};
+
+export function sendResendTest(organizationId: string, recipient: string) {
+  return apiFetch<ResendTestReceipt>(`${base(organizationId)}/email/resend-test`, {
+    method: "POST",
+    body: JSON.stringify({ recipient }),
+  });
+}

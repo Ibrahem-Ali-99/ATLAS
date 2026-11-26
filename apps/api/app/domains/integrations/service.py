@@ -1,4 +1,3 @@
-import json
 import uuid
 from collections.abc import Mapping
 from typing import Any
@@ -12,6 +11,10 @@ from app.domains.audit.service import record_event
 from app.domains.automation.signatures import open_integration_secret, seal_integration_secret
 from app.domains.inbox.models import InboxMessage
 from app.domains.integrations.models import IntegrationConfig, IntegrationStatus, IntegrationType
+from app.domains.integrations.resend_credentials import (
+    email_credentials_for_storage,
+    retain_test_recipient,
+)
 from app.domains.integrations.schemas import IntegrationInput, IntegrationMetadata
 from app.domains.knowledge.models import Chunk, Document, DocumentStatus
 from app.domains.knowledge.vectors import lock_embedding_index
@@ -141,30 +144,25 @@ def replace_configuration(
     existing = _get(db, organization_id, data.integration_type, lock=True)
     if data.integration_type == IntegrationType.embedding:
         _guard_embedding_change(db, organization_id, existing, data)
-    if merge_email_credentials:
-        if data.integration_type != IntegrationType.email or data.credentials is None:
+    if data.integration_type == IntegrationType.email:
+        current_config = None if existing is None else existing.config
+        data = data.model_copy(
+            update={"config": retain_test_recipient(current_config, data.config)}
+        )
+        if data.credentials is not None:
+            data = data.model_copy(
+                update={
+                    "credentials": email_credentials_for_storage(
+                        existing,
+                        data.credentials,
+                        merge=merge_email_credentials,
+                    )
+                }
+            )
+        elif merge_email_credentials:
             raise AppError(422, "invalid_credential_update", "Supply email credentials to update")
-        try:
-            updates = json.loads(data.credentials)
-            if not isinstance(updates, dict) or not all(
-                key in {"username", "password", "resend_api_key"}
-                and isinstance(value, str)
-                and value
-                for key, value in updates.items()
-            ):
-                raise ValueError("Invalid credential update")
-            if ("username" in updates) != ("password" in updates):
-                raise ValueError("Incomplete SMTP credentials")
-            prior: dict[str, Any] = {}
-            if existing is not None and existing.encrypted_credentials:
-                previous = json.loads(open_integration_secret(existing.encrypted_credentials))
-                if isinstance(previous, dict):
-                    prior = previous
-            data = data.model_copy(update={"credentials": json.dumps({**prior, **updates})})
-        except (ValueError, TypeError) as exc:
-            raise AppError(
-                422, "invalid_credential_update", "Enter both SMTP username and password"
-            ) from exc
+    elif merge_email_credentials:
+        raise AppError(422, "invalid_credential_update", "Supply email credentials to update")
     if existing is None:
         return create_configuration(
             db,
@@ -291,6 +289,8 @@ def update_metadata(
     record = _get(db, organization_id, integration_type, lock=True)
     if record is None:
         raise AppError(404, "integration_not_found", "Integration configuration not found")
+    if integration_type == IntegrationType.email:
+        config = retain_test_recipient(record.config, config)
     data = IntegrationInput(integration_type=integration_type, provider=provider, config=config)
     data.validate_provider()
     _validate_embedding_config(data)
@@ -341,6 +341,8 @@ def replace_credentials(
     if not credentials.strip():
         raise AppError(422, "credentials_empty", "Credentials cannot be empty")
     record = _get(db, organization_id, integration_type, lock=True)
+    if record is not None and integration_type == IntegrationType.email:
+        credentials = email_credentials_for_storage(record, credentials, merge=False)
     if record is None:
         raise AppError(404, "integration_not_found", "Integration configuration not found")
     if record.credential_version != expected_version:

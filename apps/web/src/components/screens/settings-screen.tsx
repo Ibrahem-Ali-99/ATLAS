@@ -39,6 +39,9 @@ import {
   registerEmailDomain,
   checkEmailDomain,
   revokeEmailDomain,
+  getResendTestStatus,
+  approveResendTestRecipient,
+  sendResendTest,
   integrationAction,
   saveIntegration,
   verifyIntegration,
@@ -362,7 +365,7 @@ function ExternalActivationChecklist() {
 }
 
 const marketplace = [
-  { type: "email", name: "Email", providers: "SMTP · Resend", category: "Messaging", benefit: "Test SMTP, manage sending domains, and review sandbox delivery settings.", activation: "Local Mailpit accepts sandbox mail. Resend and live replies need an external account and approval.", icon: Mail },
+  { type: "email", name: "Email", providers: "SMTP · Resend", category: "Messaging", benefit: "Test SMTP, manage sending domains, and review sandbox delivery settings.", activation: "Local Mailpit accepts sandbox mail. An administrator can test the Resend sending key without enabling live replies or campaigns.", icon: Mail },
   { type: "whatsapp", name: "WhatsApp Business", providers: "Meta Cloud API", category: "Messaging", benefit: "Receive customer messages in Inbox once your Meta webhook is verified.", activation: "Requires a Meta Business account. Saving settings does not send customer messages.", icon: MessageCircle },
   { type: "n8n", name: "n8n", providers: "n8n", category: "Automation", benefit: "Run workflows and track callbacks from ATLAS.", activation: "Requires your own n8n instance. Issue a callback key here, then confirm the first signed callback.", icon: Workflow },
   { type: "chat", name: "Language model", providers: "OpenAI · Groq", category: "Knowledge", benefit: "Power grounded answers and draft follow-ups.", activation: "The deployment model is used until this workspace saves its own provider.", icon: Bot },
@@ -645,6 +648,7 @@ function EmailSettingsCard({
     <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-medium">Email delivery</h3><p className="mt-1 text-xs text-muted-foreground">SMTP for approved replies and Resend for campaign delivery.</p></div><Badge variant="secondary">{live ? "LIVE ENVIRONMENT" : delivery.data ? "MAILPIT SANDBOX" : "DELIVERY STATUS UNAVAILABLE"}</Badge></div>
     <p className="mt-3 rounded-md border border-border bg-accent px-3 py-2 text-sm leading-6 text-foreground">{live ? "Live replies require a verified domain, a verified SMTP connection and workspace approval." : "Approved sandbox replies already go to the mailbox on this machine. No SMTP change is required."}</p>
     {live ? null : <p className="mt-3 text-sm leading-6 text-muted-foreground">Open the section below only when you are preparing Resend or a live relay. Those fields do not send customer mail while this workspace stays in sandbox.</p>}
+    {isAdmin ? <ResendAdministratorTest organizationId={organizationId} credentialVersion={version} /> : null}
     {isAdmin ? (live ? <div className="mt-4 grid gap-3">{emailRelayFields}</div> : (
       <details className="mt-4 border-t border-border pt-3">
         <summary className="cursor-pointer text-sm font-medium">Prepare live SMTP and Resend</summary>
@@ -658,10 +662,73 @@ function EmailSettingsCard({
       <code className="mt-2 block break-all rounded-md bg-muted p-2">{`/api/v1/organizations/${organizationId}/inbox/webhooks/inbound`}</code>
       {record?.last_inbound_at ? <p className="mt-2">Last inbound email {new Date(record.last_inbound_at).toLocaleString()}</p> : null}
     </details>
-    <div className="mt-5 border-t border-border pt-4"><h4 className="text-sm font-medium">Sending domains</h4><p className="mt-1 text-xs text-muted-foreground">Register a domain, publish the provider DNS records, then refresh verification.</p>{isAdmin ? <div className="mt-3 flex gap-2"><Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="mail.example.com" /><Button size="sm" onClick={() => register.mutate()} disabled={!domain || register.isPending}>Register domain</Button></div> : null}
+    <div className="mt-5 border-t border-border pt-4"><h4 className="text-sm font-medium">Sending domains</h4><p className="mt-1 text-xs text-muted-foreground">Register a domain, publish the provider DNS records, then refresh verification. Domain administration needs a full-access Resend key. A sending key is enough for the administrator test.</p>{isAdmin ? <div className="mt-3 flex gap-2"><Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="mail.example.com" /><Button size="sm" onClick={() => register.mutate()} disabled={!domain || register.isPending}>Register domain</Button></div> : null}
       <div className="mt-3 space-y-3">{!isAdmin ? <p className="text-sm text-muted-foreground">Workspace administrators manage sending domains.</p> : domains.isPending ? <Skeleton className="h-12 w-full" /> : domains.error ? <RequestError error={domains.error} /> : domains.data?.length ? domains.data.map((item) => <div key={item.id} className="rounded-md border border-border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{item.domain}</span><Badge variant="secondary">{item.status === "verified" && item.credential_version !== version ? "Recheck required" : item.status}</Badge></div>{item.dns_records.length ? <div className="mt-2 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr className="text-muted-foreground"><th className="pr-3">Type</th><th className="pr-3">Host</th><th>Value</th></tr></thead><tbody>{item.dns_records.map((dns) => <tr key={`${dns.record_type}-${dns.name}`}><td className="pr-3">{dns.record_type}</td><td className="max-w-[220px] truncate pr-3">{dns.name}</td><td className="max-w-[320px] truncate">{dns.value}</td></tr>)}</tbody></table></div> : null}{isAdmin && item.status !== "revoked" ? <div className="mt-3 flex gap-2"><Button size="sm" variant="outline" disabled={check.isPending || revoke.isPending} onClick={() => check.mutate(item.id)}>Verify domain</Button><Button size="sm" variant="ghost" onClick={() => { if (window.confirm(`Revoke ${item.domain}?`)) revoke.mutate(item.id); }}>Revoke</Button></div> : null}</div>) : <p className="text-sm text-muted-foreground">No sending domains registered.</p>}</div>
     </div>{message ? <p className="mt-3 text-xs text-muted-foreground" role="status">{message}</p> : null}
   </div>;
+}
+
+function ResendAdministratorTest({ organizationId, credentialVersion }: { organizationId: string; credentialVersion?: number }) {
+  const queryClient = useQueryClient();
+  const status = useQuery({ queryKey: ["resend-test", organizationId], queryFn: () => getResendTestStatus(organizationId) });
+  const [owner, setOwner] = useState("");
+  const [recipient, setRecipient] = useState("delivered@resend.dev");
+  const [notice, setNotice] = useState<string | null>(null);
+  const approved = status.data?.approved_recipient;
+  useEffect(() => {
+    if (approved) setOwner((current) => current || approved);
+  }, [approved]);
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["resend-test", organizationId] });
+  const approve = useMutation({
+    mutationFn: () => approveResendTestRecipient(organizationId, owner.trim() || null, credentialVersion ?? 0),
+    onSuccess: (saved) => {
+      setNotice(saved.approved_recipient ? `Approved ${saved.approved_recipient} for the administrator test.` : "Cleared the approved test recipient.");
+      refresh();
+    },
+  });
+  const send = useMutation({
+    mutationFn: () => sendResendTest(organizationId, recipient),
+    onSuccess: (result) => {
+      setNotice(`Resend accepted the test for ${result.recipient}. Message ${result.message_id}.`);
+      refresh();
+    },
+  });
+  const recipients = [
+    ...(approved ? [approved] : []),
+    ...(status.data?.official_recipients ?? []),
+  ];
+  const states = status.data ? [
+    ["Sending key", status.data.credential_configured ? "Configured" : "Not configured"],
+    ["Test delivery", status.data.test_delivery_verified ? "Verified" : "Not verified"],
+    ["Sending domain", status.data.sending_domain_verified ? "Verified" : "Not verified"],
+    ["Production delivery", status.data.production_delivery_enabled ? "Enabled" : "Disabled"],
+  ] : [];
+  return <section aria-label="Resend administrator test" className="mt-4 rounded-md border border-border p-3">
+    <h4 className="text-sm font-medium">Administrator test</h4>
+    <p className="mt-1 text-xs leading-5 text-muted-foreground">Sends one message from {status.data?.test_sender ?? "onboarding@resend.dev"} with the stored sending key. This does not send customer mail or start a campaign.</p>
+    {status.isPending ? <Skeleton className="mt-3 h-16 w-full" /> : status.error ? <div className="mt-3"><RequestError error={status.error} /></div> : <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+      {states.map(([label, value]) => <div key={label} className="flex items-center justify-between gap-2 rounded-md bg-accent px-3 py-2"><dt className="text-xs text-muted-foreground">{label}</dt><dd><Badge variant="secondary">{value}</Badge></dd></div>)}
+    </dl>}
+    <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+      <label className="grid gap-1 text-sm">Account-owner address
+        <Input value={owner} onChange={(event) => setOwner(event.target.value)} autoComplete="off" placeholder="The address registered on the Resend account" />
+      </label>
+      <Button size="sm" className="self-end" variant="outline" disabled={!credentialVersion || approve.isPending} onClick={() => approve.mutate()}>{owner.trim() ? "Approve address" : "Clear address"}</Button>
+    </div>
+    <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+      <label className="grid gap-1 text-sm">Test recipient
+        <select className="h-10 rounded-md border border-input bg-background px-2 text-sm" value={recipient} onChange={(event) => setRecipient(event.target.value)}>
+          {recipients.map((item) => <option key={item} value={item}>{item === approved ? `Account owner · ${item}` : item}</option>)}
+        </select>
+      </label>
+      <Button size="sm" className="self-end" disabled={!status.data?.credential_configured || send.isPending} onClick={() => {
+        if (window.confirm(`Send one Resend test to ${recipient}?`)) send.mutate();
+      }}>{send.isPending ? "Sending…" : "Send test email"}</Button>
+    </div>
+    {approve.error || send.error ? <div className="mt-3"><RequestError error={approve.error ?? send.error} /></div> : null}
+    {notice ? <p className="mt-3 text-xs text-muted-foreground" role="status">{notice}</p> : null}
+    {status.data?.last_test_message_id ? <p className="mt-2 text-xs text-muted-foreground">Last accepted test to {status.data.last_test_recipient} · {status.data.provider_confirmation === "retrieved" ? "Resend returned the message" : "Resend accepted the message"} · {status.data.last_test_message_id}</p> : null}
+  </section>;
 }
 
 function reindexFailure(code: string) {

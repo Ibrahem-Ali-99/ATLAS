@@ -16,6 +16,7 @@ from app.domains.identity.dependencies import Admin, CsrfAdmin, DbSession
 from app.domains.integrations.domain_models import EmailDomainVerification
 from app.domains.integrations.domain_service import check_domain, register_domain, revoke_domain
 from app.domains.integrations.models import IntegrationConfig, IntegrationStatus, IntegrationType
+from app.domains.integrations.resend_test import approve_test_recipient, deliver_test, test_status
 from app.domains.integrations.schemas import (
     CredentialUpdate,
     EmailDomainInput,
@@ -23,6 +24,10 @@ from app.domains.integrations.schemas import (
     IntegrationInput,
     IntegrationMetadata,
     IntegrationUpdate,
+    ResendTestReceipt,
+    ResendTestRecipientUpdate,
+    ResendTestRequest,
+    ResendTestStatus,
     VerificationResult,
     VersionUpdate,
 )
@@ -138,6 +143,29 @@ def revoke_email_domain(
     )
     db.commit()
     return record
+
+
+@router.get("/email/resend-test", response_model=ResendTestStatus)
+def get_resend_test(admin: Admin, db: DbSession) -> ResendTestStatus:
+    return test_status(db, admin.organization.id)
+
+
+@router.put("/email/resend-test-recipient", response_model=ResendTestStatus)
+def put_resend_test_recipient(
+    body: ResendTestRecipientUpdate, admin: CsrfAdmin, db: DbSession
+) -> ResendTestStatus:
+    return approve_test_recipient(
+        db,
+        admin.organization.id,
+        admin.user.id,
+        body.address,
+        expected_version=body.expected_version,
+    )
+
+
+@router.post("/email/resend-test", response_model=ResendTestReceipt)
+def post_resend_test(body: ResendTestRequest, admin: CsrfAdmin, db: DbSession) -> ResendTestReceipt:
+    return deliver_test(db, admin.organization.id, admin.user.id, body.recipient)
 
 
 @router.get("", response_model=list[IntegrationMetadata])
