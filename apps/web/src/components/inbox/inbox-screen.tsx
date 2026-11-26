@@ -290,8 +290,8 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
         Manage customer conversations across connected channels.
       </PageHeader>
       {requestError ? <RequestError error={requestError} /> : null}
-      <div className="grid min-w-0 overflow-hidden rounded-xl border border-border bg-card lg:max-[1439px]:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)] min-[1440px]:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)_minmax(16rem,20rem)]">
-        <section aria-label="Conversation queue" className={`min-w-0 lg:border-r lg:border-border ${selected ? "hidden lg:block" : ""}`}>
+      <div className="comm-workspace">
+        <section aria-label="Conversation queue" className={`comm-queue ${selected ? "hidden lg:block" : ""}`}>
           <div className="space-y-3 border-b border-border p-4">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold">Conversations</h2>
@@ -332,21 +332,17 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
               const ChannelIcon = conversation.channel === "email" ? Mail : MessageCircle;
               return (
                 <li key={conversation.id}>
-                  <button type="button" aria-current={selected === conversation.id || undefined}
-                    className={`flex w-full min-w-0 items-start gap-3 px-4 py-3 text-left hover:bg-accent ${selected === conversation.id ? "bg-accent" : ""}`}
-                    onClick={() => open(conversation)}>
-                    <span className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary"><ChannelIcon aria-hidden="true" size={16} /></span>
-                    <span className="grid min-w-0 flex-1 gap-1">
-                      <span className="flex items-baseline justify-between gap-2">
-                        <span className="truncate text-sm font-semibold">{conversation.customer_name ?? conversation.subject}</span>
-                        <time className="shrink-0 text-xs text-muted-foreground" dateTime={conversation.updated_at} title={displayDate(conversation.updated_at)}>{relativeTime(conversation.updated_at)}</time>
-                      </span>
-                      {conversation.customer_name ? <span className="truncate text-sm">{conversation.subject}</span> : null}
-                      {conversation.preview ? <span className="truncate text-xs text-muted-foreground">{conversation.preview}</span> : null}
-                      <span className="text-xs text-muted-foreground">{conversation.company_name ? `${conversation.company_name} · ` : null}{channelNames[conversation.channel]} · <span className="capitalize">{conversation.status}</span>{conversation.assignee_name ? ` · ${conversation.assignee_name}` : ""}</span>
-                      {conversation.handoff_requested ? <span className="text-xs font-medium text-primary">Handoff requested</span> : null}
+                  <button type="button" aria-current={selected === conversation.id || undefined} className="comm-item" onClick={() => open(conversation)}>
+                    <span className="avatar avatar-blue avatar-md">{(conversation.customer_name ?? conversation.subject).slice(0, 2).toUpperCase()}</span>
+                    <span>
+                      <strong>{conversation.customer_name ?? conversation.subject}</strong>
+                      <small>{conversation.preview || conversation.subject}</small>
+                      <small>{channelNames[conversation.channel]}{conversation.company_name ? ` · ${conversation.company_name}` : ""} · {conversation.status}</small>
                     </span>
-                    {conversation.unread_count > 0 ? <Badge aria-label={`${conversation.unread_count} unread`}>{conversation.unread_count}</Badge> : null}
+                    <span>
+                      <time dateTime={conversation.updated_at} title={displayDate(conversation.updated_at)}>{relativeTime(conversation.updated_at)}</time>
+                      {conversation.unread_count > 0 ? <span className="unread-dot" aria-label={`${conversation.unread_count} unread`} /> : <ChannelIcon size={14} aria-hidden="true" />}
+                    </span>
                   </button>
                 </li>
               );
@@ -359,7 +355,7 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
             </div>
           ) : null}
         </section>
-        <section aria-label="Conversation details" className={`min-w-0 ${selected ? "" : "hidden lg:block"}`}>
+        <section aria-label="Conversation details" className={`comm-thread ${selected ? "" : "hidden lg:block"}`}>
           {selected && !thread ? <div className="space-y-3 p-4">
             <Button size="sm" variant="ghost" className="lg:hidden" onClick={() => setSelected(null)}><ArrowLeft size={14} /> Conversations</Button>
             {detail.isPending ? <div role="status" aria-label="Loading conversation"><Skeleton className="h-12" /></div> : null}
@@ -400,7 +396,7 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
                   {thread.handoff_reason ? ` · ${thread.handoff_reason}` : ""}
                 </p>
               ) : null}
-              <div ref={threadLog} role="log" aria-label="Customer messages" className="flex max-h-[58dvh] min-h-36 flex-col gap-3 overflow-y-auto bg-muted/30 p-3 sm:p-4"
+              <div ref={threadLog} role="log" aria-label="Customer messages" className="comm-log"
                 onScroll={(event) => {
                   const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
                   followMessages.current = scrollHeight - scrollTop - clientHeight < 80;
@@ -414,13 +410,12 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
                   const inbound = message.direction === "inbound";
                   return <Fragment key={message.id}>
                     {showDay ? <div className="flex items-center gap-3 text-xs text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">{day}</div> : null}
-                    <article className={`grid max-w-[94%] min-w-0 gap-1 sm:max-w-[85%] ${inbound ? "self-start" : "self-end"}`}>
-                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                      <span className="break-all font-medium">{message.sender}</span>
-                      <time dateTime={message.created_at}>{date.toLocaleTimeString(undefined, { timeStyle: "short" })}</time>
-                    </div>
-                    <p className={`break-words whitespace-pre-wrap rounded-lg border px-3 py-2 text-sm leading-6 ${inbound ? "border-border bg-card" : "border-primary/20 bg-accent"}`}>{message.body}</p>
-                    <p className={`text-xs ${inbound ? "text-left" : "text-right"} ${message.delivery_status === "failed" ? "text-destructive" : "text-muted-foreground"}`} aria-label={`Delivery ${deliveryLabel(message.delivery_status)}`}>{deliveryLabel(message.delivery_status)}</p>
+                    <article className={`comm-bubble ${inbound ? "in" : "out"}`}>
+                      <span className="avatar avatar-sm avatar-neutral">{message.sender.slice(0, 1).toUpperCase()}</span>
+                      <div>
+                        <p>{message.body}</p>
+                        <time dateTime={message.created_at}>{date.toLocaleTimeString(undefined, { timeStyle: "short" })} · {deliveryLabel(message.delivery_status)}</time>
+                      </div>
                     </article>
                   </Fragment>;
                 })}
@@ -460,7 +455,7 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
             </div>
           ) : null}
         </section>
-        <aside aria-label="Customer context" className="hidden min-w-0 border-l border-border p-4 min-[1440px]:block">
+        <aside aria-label="Customer context" className="comm-context p-4">
           <h2 className="mb-4 text-sm font-semibold">Customer context</h2>
           {context ?? <p className="text-sm text-muted-foreground">Select a conversation to see linked records.</p>}
         </aside>

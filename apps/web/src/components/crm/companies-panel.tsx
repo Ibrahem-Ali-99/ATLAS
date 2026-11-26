@@ -15,8 +15,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { ChevronRight } from "lucide-react";
 import { createCompany, getCompany, deleteCompany, listCompanies, restoreCompany, updateCompany } from "@/lib/records-api";
 import { blankToNull, type Company } from "@/lib/records";
 
@@ -117,32 +117,25 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
           <p className="px-4 pb-6 text-sm text-muted-foreground">No companies match this search.</p>
         ) : null}
         {companies.data && companies.data.items.length > 0 ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Industry</TableHead>
-                <TableHead>Website</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {companies.data.items.map((company) => (
-                <TableRow
-                  key={company.id}
-                  className={company.id === selectedId ? "bg-accent/40" : undefined}
-                  onClick={() => onNavigate({ tab: "companies", id: company.id })}
-                >
-                  <TableCell>
-                    <button type="button" className="text-left font-medium" onClick={() => onNavigate({ tab: "companies", id: company.id })}>
-                      {company.name}
-                    </button>
-                  </TableCell>
-                  <TableCell>{company.industry ?? "—"}</TableCell>
-                  <TableCell>{company.website ?? "—"}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="crm-directory" role="table" aria-label="Companies">
+            <div className="crm-person crm-head" role="row"><span /><span>Company</span><span>Industry</span><span>Website</span><span /></div>
+            {companies.data.items.map((company) => (
+              <button
+                key={company.id}
+                type="button"
+                role="row"
+                className="crm-person"
+                aria-current={company.id === selectedId || undefined}
+                onClick={() => onNavigate({ tab: "companies", id: company.id })}
+              >
+                <span className="avatar avatar-blue avatar-md">{company.name.slice(0, 2).toUpperCase()}</span>
+                <span><strong>{company.name}</strong><small>{company.archived_at ? "Archived" : "Active"}</small></span>
+                <span>{company.industry ?? "—"}</span>
+                <span>{company.website ?? "—"}</span>
+                <ChevronRight size={14} />
+              </button>
+            ))}
+          </div>
         ) : null}
         {companies.data ? (
           <Pager page={companies.data.page} pageSize={companies.data.page_size} total={companies.data.total} onPage={setPage} />

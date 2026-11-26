@@ -5,8 +5,9 @@ import { Providers } from "@/components/providers";
 
 import "./globals.css";
 import "@/styles/atlas-reference.css";
+import "@/styles/product.css";
 
-const inter = Inter({ subsets: ["latin"], display: "swap" });
+const inter = Inter({ subsets: ["latin"], display: "swap", variable: "--font-inter" });
 
 export const metadata: Metadata = {
   title: {
@@ -18,7 +19,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${inter.className} h-full antialiased`}>
+    <html lang="en" className={`${inter.variable} ${inter.className} h-full antialiased`}>
       <body className="min-h-full">
         <Providers>{children}</Providers>
       </body>

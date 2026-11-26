@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ArrowRight, BadgeCheck, BriefcaseBusiness, Building2, CheckCircle2, ChevronRight, MessageSquareText, Plus, Search } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, ChevronRight, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -57,18 +57,23 @@ export function OverviewScreen() {
         </div>
         <div className="page-actions">{organizationId ? <NewOpportunity key={organizationId} organizationId={organizationId} companies={companies.data?.items ?? []} /> : null}</div>
       </div>
-      {empty ? <EmptyWorkspace /> : <>
-        <Kpis data={analytics.data} />
-        <div className="overview-grid" data-testid="overview-top-content">
+      {empty ? <EmptyWorkspace /> : <div className="saas-overview">
+        <Kpis data={analytics.data} period={period} onPeriod={setPeriod} />
+        <div className="saas-split" data-testid="overview-top-content">
           <Pipeline data={analytics.data} />
-          <Attention approvals={approvals.data?.items ?? []} pending={approvals.isPending} error={approvals.error} />
+          <div className="saas-stack">
+            <Attention approvals={approvals.data?.items ?? []} pending={approvals.isPending} error={approvals.error} />
+            <Recommendations data={analytics.data} />
+          </div>
         </div>
-        <ActivitySection data={analytics.data} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} />
-        <div className="overview-grid" data-testid="overview-bottom-content">
-          <InquirySection inquiries={inquiries.data?.items ?? []} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} pending={inquiries.isPending} />
-          <PeriodSummary data={analytics.data} period={period} onPeriod={setPeriod} />
+        <div className="saas-split" data-testid="overview-bottom-content">
+          <ActivitySection data={analytics.data} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} />
+          <div className="saas-stack">
+            <InquirySection inquiries={inquiries.data?.items ?? []} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} pending={inquiries.isPending} />
+            <Appointments data={analytics.data} />
+          </div>
         </div>
-      </>}
+      </div>}
     </div>
   );
 }
@@ -139,18 +144,14 @@ function NewOpportunity({ organizationId, companies }: { organizationId: string;
   );
 }
 
-function PeriodSummary({ data, period, onPeriod }: { data: AnalyticsSnapshot; period: string; onPeriod: (value: string) => void }) {
-  const sales = data.sales;
-  const comparison = data.comparison;
-  const money = sales?.currencies ?? [];
+function Kpis({ data, period, onPeriod }: { data: AnalyticsSnapshot; period: string; onPeriod: (value: string) => void }) {
+  const active = data.lead_status.filter((item) => ["new", "contacted", "qualified"].includes(item.status)).reduce((sum, item) => sum + item.count, 0);
+  const inquirySeries = (data.customer_activity ?? []).map((row) => row.inquiries);
+  const leadSeries = data.lead_trend.map((row) => row.count);
   return (
-    <section className="panel" aria-label="Period performance" data-testid="overview-period">
-      <div className="panel-header">
-        <div>
-          <h2>This period</h2>
-          <p>{data.period ? `${formatDay(data.period.start)} to ${formatDay(data.period.end)}` : "Selected dates"}{comparison ? ` · previous ${formatDay(comparison.previous_period.start)} to ${formatDay(comparison.previous_period.end)}` : ""}</p>
-        </div>
-        <label className="field">Date range
+    <section aria-label="Workspace metrics" data-testid="overview-kpi-band">
+      <div className="flex items-center justify-end" style={{ marginBottom: 8 }}>
+        <label className="toolbar-select">Date range
           <select aria-label="Overview date range" value={period} onChange={(event) => onPeriod(event.target.value)}>
             <option value="7d">Last 7 days</option>
             <option value="30d">Last 30 days</option>
@@ -158,61 +159,54 @@ function PeriodSummary({ data, period, onPeriod }: { data: AnalyticsSnapshot; pe
           </select>
         </label>
       </div>
-      <div className="grid gap-3 p-4 sm:grid-cols-2">
-        <PeriodLink href="/crm?tab=leads" label="Leads created" value={comparison?.leads_created.current ?? 0} delta={comparison?.leads_created} />
-        <PeriodLink href="/crm?tab=opportunities" label="Opportunities" value={sales?.opportunities_total ?? 0} delta={comparison?.opportunities_created} />
-        <PeriodLink href="/inbox" label="Conversations" value={comparison?.conversations.current ?? 0} delta={comparison?.conversations} />
-        <PeriodLink href="/workflows" label="Overdue tasks" value={sales?.tasks_overdue ?? 0} detail={`${sales?.tasks_completed ?? 0} completed in this period`} />
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div>
-          <h3 className="text-sm font-medium">Pipeline value</h3>
-          {money.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No opportunity amounts are stored for this period.</p> : (
-            <ul className="mt-2 space-y-1 text-sm">{money.map((item) => <li key={item.currency} className="flex justify-between"><span>{item.currency}</span><span className="tabular-nums">{item.value == null ? "No amount stored" : item.value.toLocaleString()}</span></li>)}</ul>
-          )}
-          <p className="mt-2 text-xs text-muted-foreground">{sales?.win_rate == null ? "No won or lost opportunities in this period." : `${Math.round(sales.win_rate * 100)}% won, ${sales.loss_rate == null ? "" : `${Math.round(sales.loss_rate * 100)}% lost`}. Amounts stay in their own currency.`}</p>
-          <Link className="mt-2 inline-block text-xs font-medium text-primary" href="/analytics">Open analytics</Link>
-        </div>
-        <div>
-          <h3 className="text-sm font-medium">Appointments and approvals</h3>
-          <p className="mt-2 text-sm">{data.calendar.booked} booked, {data.calendar.cancelled} cancelled.</p>
-          <p className="mt-1 text-sm">{data.approvals.pending} approvals waiting now.</p>
-          <div className="mt-2 flex flex-wrap gap-3 text-xs font-medium"><Link className="text-primary" href="/crm?tab=leads">Leads</Link><Link className="text-primary" href="/approvals">Approvals</Link><Link className="text-primary" href="/workflows">Workflows</Link></div>
-        </div>
+      <div className="kpi-band">
+        <Kpi href="/crm?tab=companies" testId="overview-kpi-companies" label="Companies" value={data.companies_total} detail="Accounts in this workspace" />
+        <Kpi href="/crm?tab=leads" testId="overview-kpi-active-leads" label="Active leads" value={active} detail={`${data.leads_total} total leads`} series={leadSeries} delta={data.comparison?.leads_created} />
+        <Kpi href="/crm?tab=inquiries" testId="overview-kpi-customer-requests" label="Open inquiries" value={data.open_inquiries} detail="Waiting on a reply" series={inquirySeries} />
+        <Kpi href="/approvals" testId="overview-kpi-pending-approvals" label="Pending approvals" value={data.approvals.pending} detail="Decisions still open" />
       </div>
     </section>
   );
 }
 
-function PeriodLink({ href, label, value, delta, detail }: { href: string; label: string; value: number; delta?: { delta: number; previous: number; change_rate: number | null }; detail?: string }) {
-  const change = !delta ? null : delta.change_rate == null ? "No earlier activity" : `${delta.delta > 0 ? "+" : ""}${Math.round(delta.change_rate * 1000) / 10}% vs previous`;
-  return <Link href={href} className="rounded-lg border border-border p-3 hover:bg-accent/40"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>{change ? <p className="mt-1 text-xs text-muted-foreground">{change}</p> : null}{detail ? <p className="mt-1 text-xs text-muted-foreground">{detail}</p> : null}</Link>;
-}
-
-function Kpis({ data }: { data: AnalyticsSnapshot }) {
-  const active = data.lead_status.filter((item) => ["new", "contacted", "qualified"].includes(item.status)).reduce((sum, item) => sum + item.count, 0);
+function Kpi({ href, testId, label, value, detail, series, delta }: {
+  href: string; testId: string; label: string; value: number; detail: string;
+  series?: number[]; delta?: { delta: number; change_rate: number | null };
+}) {
+  const tone = !delta || delta.change_rate == null ? "flat" : delta.delta < 0 ? "down" : "up";
+  const change = !delta || delta.change_rate == null ? "No earlier period" : `${delta.delta > 0 ? "+" : ""}${Math.round(delta.change_rate * 1000) / 10}% vs previous`;
   return (
-    <section className="metric-grid" aria-label="Workspace metrics" data-testid="overview-kpi-band">
-      <Kpi href="/crm?tab=companies" testId="overview-kpi-companies" label="Companies" value={data.companies_total} detail="Total accounts" icon={Building2} />
-      <Kpi href="/crm?tab=leads" testId="overview-kpi-active-leads" label="Active leads" value={active} detail={`${data.leads_total} total leads`} icon={BriefcaseBusiness} />
-      <Kpi href="/crm?tab=inquiries" testId="overview-kpi-customer-requests" label="Open inquiries" value={data.open_inquiries} detail="Awaiting response" icon={MessageSquareText} />
-      <Kpi href="/approvals" testId="overview-kpi-pending-approvals" label="Pending approvals" value={data.approvals.pending} detail="Needs review" icon={BadgeCheck} />
-    </section>
-  );
-}
-
-function Kpi({ href, testId, label, value, detail, icon: Icon }: { href: string; testId: string; label: string; value: number; detail?: string; icon: typeof Building2 }) {
-  return (
-    <Link data-testid={testId} href={href} className="metric-card">
-      <span className="metric-icon"><Icon size={16} /></span>
-      <span className="metric-copy">
-        <span className="metric-label">{label}</span>
-        <strong data-testid={`${testId}-value`}>{value}</strong>
-        {detail ? <span className="metric-meta">{detail}</span> : null}
-      </span>
-      <ChevronRight className="metric-arrow" size={16} />
+    <Link data-testid={testId} href={href} className="kpi-card">
+      <header><span>{label}</span></header>
+      <strong data-testid={`${testId}-value`}>{value}</strong>
+      <div className="kpi-foot">
+        <div><small>{detail}</small><div className={`kpi-delta ${tone}`}>{change}</div></div>
+        {series && series.some((point) => point > 0) ? <Sparkline points={sparkPoints(series)} /> : null}
+      </div>
     </Link>
   );
+}
+
+function sparkPoints(points: number[]): number[] {
+  if (points.length <= 12) return points;
+  const size = Math.ceil(points.length / 12);
+  const buckets: number[] = [];
+  for (let index = 0; index < points.length; index += size) {
+    buckets.push(points.slice(index, index + size).reduce((sum, point) => sum + point, 0));
+  }
+  return buckets;
+}
+
+function Sparkline({ points }: { points: number[] }) {
+  const max = Math.max(...points, 1);
+  const width = 108;
+  const height = 36;
+  const path = points.map((point, index) => {
+    const x = points.length === 1 ? width : (index / (points.length - 1)) * width;
+    const y = height - 3 - (point / max) * (height - 8);
+    return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return <svg className="spark" viewBox={`0 0 ${width} ${height}`} aria-hidden="true"><path d={path} /></svg>;
 }
 
 function ActivitySection({ data, leads, companies }: { data: AnalyticsSnapshot; leads: Lead[]; companies: Company[] }) {
@@ -264,14 +258,11 @@ function Pipeline({ data }: { data: AnalyticsSnapshot }) {
         <Link href="/crm?tab=opportunities" className="text-button">View pipeline <ArrowRight size={14} /></Link>
       </div>
       {data.leads_total ? (
-        <div className="pipeline-list">
+        <div className="stage-board">
           {STAGES.map(([status, label, tone], index) => (
-            <Link key={status} href={`/crm?tab=leads&status=${status}`} className="pipeline-row">
-              <span className={`status-dot dot-${tone}`} />
-              <span className="pipeline-label">{label}</span>
-              <div className="bar-track"><span className={`bar-fill fill-${tone}`} style={{ width: `${Math.max(8, (counts[index] / largest) * 100)}%` }} /></div>
-              <strong>{counts[index]}</strong>
-              <ChevronRight size={14} />
+            <Link key={status} href={`/crm?tab=leads&status=${status}`} className="stage-col">
+              <header><span className={`status-dot dot-${tone}`} /><span>{label}</span><strong>{counts[index]}</strong></header>
+              <div className="stage-meter" aria-hidden="true"><b className={`fill-${tone}`} style={{ width: `${Math.max(8, (counts[index] / largest) * 100)}%` }} /></div>
             </Link>
           ))}
         </div>
@@ -339,12 +330,37 @@ function Attention({ approvals, pending, error }: { approvals: Approval[]; pendi
   );
 }
 
+function Recommendations({ data }: { data: AnalyticsSnapshot }) {
+  const items = [
+    data.approvals.pending > 0 ? { href: "/approvals", title: `${data.approvals.pending} approval${data.approvals.pending === 1 ? "" : "s"} waiting`, detail: "A decision is required before the stored action can run." } : null,
+    data.open_inquiries > 0 ? { href: "/crm?tab=inquiries", title: `${data.open_inquiries} open inquiries`, detail: "These customer requests do not have a recorded resolution." } : null,
+    (data.sales?.tasks_overdue ?? 0) > 0 ? { href: "/workflows", title: `${data.sales?.tasks_overdue} overdue tasks`, detail: "Follow-ups that are past their due date." } : null,
+    data.comparison && data.comparison.leads_created.delta < 0 ? { href: "/analytics", title: "Fewer new leads than the previous period", detail: `${data.comparison.leads_created.current} created, ${data.comparison.leads_created.previous} in the previous window.` } : null,
+  ].filter((item) => item !== null);
+  return (
+    <section className="panel" aria-label="Recommendations">
+      <div className="panel-header"><div><h2>Recommended next</h2><p>From the records in this period</p></div></div>
+      {items.length === 0 ? <div className="empty-state"><strong>Nothing urgent</strong><p>No overdue tasks, open inquiries, or waiting approvals are stored.</p></div> : (
+        <div className="reco-list">{items.map((item) => (
+          <Link key={item.href + item.title} href={item.href}><span className="status-dot dot-amber" /><span><strong>{item.title}</strong><small>{item.detail}</small></span><ChevronRight size={14} /></Link>
+        ))}</div>
+      )}
+    </section>
+  );
+}
+
+function Appointments({ data }: { data: AnalyticsSnapshot }) {
+  return (
+    <section className="panel" aria-label="Appointments">
+      <div className="panel-header"><div><h2>Appointments</h2><p>Booked in the selected period</p></div><Link href="/crm?tab=leads" className="text-button">Open leads</Link></div>
+      <div className="appt-list">
+        <div><span className="status-dot dot-green" /><span><strong>{data.calendar.booked} booked</strong><small>{data.calendar.cancelled} cancelled in the same window</small></span></div>
+        <div><span className="status-dot dot-blue" /><span><strong>{data.approvals.pending} approvals still open</strong><small>Review them before a reserved time is confirmed.</small></span><Link href="/approvals">Review</Link></div>
+      </div>
+    </section>
+  );
+}
+
 function EmptyWorkspace() { return <section className="rounded-lg border border-dashed border-border bg-card px-5 py-8"><h2 className="text-lg font-semibold text-foreground">Your workspace is ready</h2><p className="mt-2 max-w-lg text-sm text-muted-foreground">Create your first company or lead to start tracking customer work here.</p><Link href="/crm?tab=companies" className="mt-4 inline-flex rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">Open CRM</Link></section>; }
 function OverviewSkeleton() { return <div className="space-y-5"><Skeleton className="h-16 w-full" /><div className="grid gap-3 sm:grid-cols-4"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div><Skeleton className="h-64 w-full" /></div>; }
 function timeGreeting(): string { const hour = new Date().getHours(); return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"; }
-function formatDay(value: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  if (!match) return value;
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
