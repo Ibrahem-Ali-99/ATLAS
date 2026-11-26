@@ -29,6 +29,12 @@ export function integrationConnection(record?: IntegrationMetadata) {
   return record.last_inbound_at ? "Connected" : "Verified";
 }
 
+export function modelConnection(record: IntegrationMetadata | undefined, deploymentReady: boolean | undefined) {
+  if (record) return `Workspace · ${integrationConnection(record)}`;
+  if (deploymentReady === undefined) return "Checking";
+  return deploymentReady ? "Managed by deployment" : "Not configured";
+}
+
 export type VerificationResult = {
   integration: IntegrationMetadata | null;
   verified: boolean;

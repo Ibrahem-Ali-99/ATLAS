@@ -12,7 +12,7 @@ import { CalendarConnectionCard } from "@/components/calendar/calendar-connectio
 import { WidgetSettingsDialog } from "@/components/inbox/inbox-screen";
 import { PageHeader } from "@/components/page-header";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { ProviderNotice } from "@/components/provider-notice";
+import { getProviderStatus, ProviderNotice } from "@/components/provider-notice";
 import { MembershipTable } from "@/components/membership-table";
 import { RequestError } from "@/components/request-error";
 import { SignOutDialog } from "@/components/sign-out-dialog";
@@ -34,6 +34,7 @@ import {
   issueWebhookKey,
   disconnectWebhookKey,
   integrationConnection,
+  modelConnection,
   getEmailDomains,
   registerEmailDomain,
   checkEmailDomain,
@@ -364,7 +365,7 @@ const marketplace = [
   { type: "email", name: "Email", providers: "SMTP · Resend", category: "Messaging", benefit: "Test SMTP, manage sending domains, and review sandbox delivery settings.", activation: "Local Mailpit accepts sandbox mail. Resend and live replies need an external account and approval.", icon: Mail },
   { type: "whatsapp", name: "WhatsApp Business", providers: "Meta Cloud API", category: "Messaging", benefit: "Receive customer messages in Inbox once your Meta webhook is verified.", activation: "Requires a Meta Business account. Saving settings does not send customer messages.", icon: MessageCircle },
   { type: "n8n", name: "n8n", providers: "n8n", category: "Automation", benefit: "Run workflows and track callbacks from ATLAS.", activation: "Requires your own n8n instance. Issue a callback key here, then confirm the first signed callback.", icon: Workflow },
-  { type: "chat", name: "Language model", providers: "OpenAI · Groq", category: "Knowledge", benefit: "Power grounded answers and draft follow-ups.", activation: "Requires a Groq or OpenAI account. The workspace key stays on this deployment.", icon: Bot },
+  { type: "chat", name: "Language model", providers: "OpenAI · Groq", category: "Knowledge", benefit: "Power grounded answers and draft follow-ups.", activation: "The deployment model is used until this workspace saves its own provider.", icon: Bot },
   { type: "embedding", name: "Embeddings", providers: "OpenAI · Ollama", category: "Knowledge", benefit: "Find relevant passages across your organization's documents.", activation: "Ollama on this machine keeps passages local. OpenAI sends passages to an external account and needs approval.", icon: Search },
 ] satisfies { type: IntegrationType; name: string; providers: string; category: string; benefit: string; activation: string; icon: typeof Mail }[];
 
@@ -388,6 +389,11 @@ function IntegrationMarketplace({
     queryFn: () => getInboxWidget(organizationId),
     enabled: Boolean(organizationId && isAdmin),
   });
+  const providers = useQuery({
+    queryKey: ["provider-status", organizationId],
+    queryFn: () => getProviderStatus(organizationId),
+    enabled: Boolean(organizationId),
+  });
   const n8n = useQuery({
     queryKey: ["webhook-key-status", organizationId],
     queryFn: () => getWebhookKeyStatus(organizationId),
@@ -398,7 +404,8 @@ function IntegrationMarketplace({
     (view === "Discover" || Boolean(widget.data));
   const cards = marketplace.filter((item) => {
     const record = integrations.find((entry) => entry.integration_type === item.type);
-    const connected = item.type === "n8n" ? Boolean(n8n.data) : Boolean(record);
+    const deploymentReady = item.type === "chat" ? providers.data?.llm_ready : item.type === "embedding" ? providers.data?.embedding_ready : false;
+    const connected = item.type === "n8n" ? Boolean(n8n.data) : Boolean(record) || Boolean(deploymentReady);
     return (view === "Discover" || connected) &&
       (category === "All categories" || category === item.category) &&
       `${item.name} ${item.providers} ${item.benefit}`.toLowerCase().includes(search.trim().toLowerCase());
@@ -437,7 +444,9 @@ function IntegrationMarketplace({
             const record = integrations.find((entry) => entry.integration_type === item.type);
             const status = !isAdmin ? "Admin managed" : item.type === "n8n"
               ? (n8n.data?.revoked_at ? "Disconnected" : n8n.data?.last_accepted_at ? "Callback verified" : n8n.data ? "Awaiting callback" : "Managed by deployment")
-              : integrationConnection(record);
+              : item.type === "chat" || item.type === "embedding"
+                ? modelConnection(record, item.type === "chat" ? providers.data?.llm_ready : providers.data?.embedding_ready)
+                : integrationConnection(record);
             const props = { organizationId, isAdmin, record, onChanged };
             return (
               <Dialog key={item.type}>
@@ -709,7 +718,7 @@ function ProviderCard({
   const fallback = !record;
   return (
     <section aria-label={title} className="min-w-0 rounded-[10px] border border-border bg-background p-4">
-      <div className="flex items-start justify-between gap-2"><div><h3 className="font-medium">{title}</h3><p className="mt-1 text-xs text-muted-foreground">{fallback ? "Using environment default" : `${record.status.replaceAll("_", " ")} · version ${record.credential_version}`}</p></div><Badge variant="secondary">{fallback ? "Fallback" : record.has_credentials ? "Key installed" : type === "embedding" && provider === "ollama" ? "Local" : "No key"}</Badge></div>
+      <div className="flex items-start justify-between gap-2"><div><h3 className="font-medium">{title}</h3><p className="mt-1 text-xs text-muted-foreground">{fallback ? "Deployment settings are active. Saving here creates a workspace override." : `Workspace configuration · version ${record.credential_version}`}</p></div><Badge variant="secondary">{fallback ? "Managed by deployment" : "Workspace"}</Badge></div>
       {type === "embedding" ? <ol className="mt-3 list-decimal space-y-1 pl-4 text-xs leading-5 text-muted-foreground"><li>Choose Ollama on this machine, or OpenAI when an external account is approved.</li><li>Save, then test the connection. Local Ollama does not need an API key.</li><li>When documents already exist, build a replacement index before switching models. Cancel leaves the current index in place.</li></ol> : null}
       <div className="mt-4 grid gap-3">
         <label className="grid gap-1 text-sm"><span>Provider</span><select disabled={!isAdmin} value={provider} onChange={(event) => {
