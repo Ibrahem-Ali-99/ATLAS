@@ -49,7 +49,7 @@ function AnalyticsWorkspace({ organizationId }: { organizationId: string }) {
   return (
     <div className="flex w-full min-w-0 flex-col gap-5">
       <PageHeader title="Analytics" eyebrow="Business activity">Review customer activity, pipeline movement, and operational outcomes.</PageHeader>
-      <section aria-label="Analytics filters" className="space-y-3 rounded-xl border border-border bg-card p-4">
+      <section className="analytics-filters panel" aria-label="Analytics filters">
         <div className="flex flex-wrap items-end gap-3 [&_label]:grid [&_label]:gap-1 [&_label]:text-sm [&_select]:h-9 [&_select]:rounded-md [&_select]:border [&_select]:border-border [&_select]:bg-background [&_select]:px-2">
           <label>Date range
             <select aria-label="Analytics date range" value={period} onChange={(event) => setPeriod(event.target.value)}>
@@ -105,8 +105,6 @@ function AnalyticsWorkspace({ organizationId }: { organizationId: string }) {
 
 function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
   const rate = data.conversion.rate === null ? "Not enough closed leads" : `${Math.round(data.conversion.rate * 1000) / 10}%`;
-  const automation =
-    data.automation.success_rate === null ? "—" : `${Math.round(data.automation.success_rate * 1000) / 10}%`;
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <details className="max-w-3xl text-xs leading-5 text-muted-foreground">
@@ -118,20 +116,19 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
           No leads or inquiries are stored in this scope.
         </p>
       ) : null}
-      {data.comparison ? <Comparison comparison={data.comparison} /> : null}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="analytics-metrics">
         <Metric label="Active companies" value={String(data.companies_total)} detail="Customer accounts in this view." href="/crm?tab=companies" />
         <Metric label="Leads" value={String(data.leads_total)} detail="Leads in this view." href="/crm?tab=leads" />
         <Metric label="Open inquiries" value={String(data.open_inquiries)} detail="Customer requests in this view." href="/crm?tab=inquiries" />
         <Metric
           label="Won or lost"
           value={rate}
-          detail={`${data.conversion.won} won, ${data.conversion.lost} lost. ${data.conversion.definition}`}
+          detail={`${data.conversion.won} won, ${data.conversion.lost} lost.`}
           href="/crm?tab=leads"
         />
-        <Metric label="Automation" value={data.workflow_performance?.success_rate == null ? automation : `${Math.round(data.workflow_performance.success_rate * 1000) / 10}%`} detail={data.workflow_performance ? `${data.workflow_performance.successful} successful of ${data.workflow_performance.denominator} finished runs in this period.` : data.automation.definition} href="/workflows" />
       </div>
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+      {data.comparison ? <Comparison comparison={data.comparison} /> : null}
+      <div className="analytics-grid">
         {data.customer_activity ? <CustomerActivity rows={data.customer_activity} /> : null}
         <LeadPipeline data={data} />
       </div>
@@ -191,7 +188,7 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
 
 function LeadPipeline({ data }: { data: AnalyticsSnapshot }) {
   return (
-      <section className="rounded-xl border border-border bg-card p-4">
+      <section className="panel pipeline-distribution">
         <h2 className="text-base text-foreground">Lead pipeline</h2>
         <p className="mt-2 text-xs leading-5 text-subtle">{data.qualification.definition}</p>
         <p className="mt-2 text-sm text-muted-foreground">
@@ -216,7 +213,7 @@ function LeadPipeline({ data }: { data: AnalyticsSnapshot }) {
 function CustomerActivity({ rows }: { rows: NonNullable<AnalyticsSnapshot["customer_activity"]> }) {
   const hasActivity = rows.some(({ inquiries, interactions }) => inquiries > 0 || interactions > 0);
   return (
-    <section className="min-w-0 rounded-xl border border-border bg-card p-5" aria-labelledby="customer-activity-heading">
+    <section className="panel analytics-trend" aria-labelledby="customer-activity-heading">
       <h2 id="customer-activity-heading" className="font-semibold">Customer activity trend</h2>
       <p className="mt-1 text-sm text-muted-foreground">Inquiries and interactions by day</p>
       {hasActivity ? (
@@ -360,7 +357,7 @@ function storedScope(organizationId: string): DataScope {
 function Metric({ label, value, detail, href }: { label: string; value: string; detail: string; href?: string }) {
   const slug = label.toLowerCase().replaceAll(" ", "-");
   return (
-    <section data-testid={`analytics-metric-${slug}`} className="rounded-xl border border-border bg-card p-4">
+    <section data-testid={`analytics-metric-${slug}`} className="panel analytics-metric">
       <p className="text-xs uppercase tracking-[0.12em] text-subtle">{label}</p>
       <p data-testid={`analytics-metric-${slug}-value`} className="mt-3 text-2xl tabular-nums text-foreground">{value}</p>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">{detail}</p>

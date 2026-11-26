@@ -92,7 +92,7 @@ test("populated workspace supports connected CRM operations", async ({ page }) =
   await page.getByRole("button", { name: "Restore" }).click();
   await page.getByLabel("Show archived").uncheck();
   await expect(page.getByRole("button", { name: "Sample workspace · North pier expansion", exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "AI Assistant", exact: true }).click();
+  await page.getByRole("link", { name: "Assistant", exact: true }).click();
   const conversation = page.getByRole("button", {
     name: /^Sample workspace · Working with the sample pipeline/,
   });

@@ -69,11 +69,16 @@ export function ProviderNotice({
         </div>
         <div>
           <dt className="text-muted-foreground">Document search</dt>
-          <dd>
-            {data.embedding_provider} · {data.embedding_model} · {data.embedding_dimensions} values. {data.embedding_detail}
-          </dd>
+          <dd>{data.embedding_ready ? "Ready for company documents." : "An administrator still needs to finish document search."}</dd>
         </div>
       </dl>
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs text-muted-foreground">Administrator diagnostics</summary>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Assistant service: {data.llm_detail} Document search: {data.embedding_detail}
+          {data.embedding_dimensions ? ` Index width ${data.embedding_dimensions}.` : ""}
+        </p>
+      </details>
       {data.incompatible_documents > 0 ? (
         <p className="mt-3 leading-6 text-muted-foreground">
           {data.incompatible_documents} ready {data.incompatible_documents === 1 ? "document was" : "documents were"} embedded with a different model. Reindex {data.incompatible_documents === 1 ? "it" : "them"} before vector search can use the current model. The file and its citations stay in place.

@@ -238,19 +238,16 @@ function WorkflowCanvas({ graph, selection, select }: { graph: WorkflowGraph; se
           (node.kind !== "action" || (selection.kind === "action" && selection.path === node.path));
         return <li key={node.kind === "trigger" ? "trigger" : `${node.kind}-${node.index}`}>
           {index > 0 ? <CanvasConnector /> : null}
-          <button type="button" aria-pressed={active} onClick={() => select(node)} className={cn(
-            "flex w-full min-w-0 items-center gap-3 rounded-xl border bg-card p-3 text-left shadow-sm hover:border-primary/60",
-            active ? "border-primary ring-2 ring-primary/20" : "border-border",
-          )}>
-            <span className={cn("grid size-9 shrink-0 place-items-center rounded-lg", node.kind === "trigger" ? "bg-primary/10 text-primary" : node.kind === "condition" ? "bg-warning/10 text-warning" : "bg-accent text-accent-foreground")}><Icon className="size-4" aria-hidden="true" /></span>
-            <span className="min-w-0"><span className="block break-words text-xs text-muted-foreground">{detail}</span><span className="block break-words text-sm font-semibold">{label}</span></span>
+          <button type="button" aria-pressed={active} onClick={() => select(node)} className={cn("workflow-node", node.kind === "condition" && "approval", active && "ring-2")}>
+            <span><Icon size={14} aria-hidden="true" /></span>
+            <div><small>{detail}</small><strong>{label}</strong></div>
           </button>
         </li>;
       })}
     </ol>;
   }
   return (
-    <div className="min-w-0 bg-background p-4 [background-image:radial-gradient(var(--border-strong)_1px,transparent_1px)] [background-size:18px_18px] sm:p-6" aria-label="Workflow canvas">
+    <div className="workflow-canvas-board" aria-label="Workflow canvas">
       {conditions.length ? <>
         {column(triggerNodes)}
         <div aria-hidden="true" className="relative mx-auto hidden h-8 max-w-[44rem] text-primary/60 sm:block">

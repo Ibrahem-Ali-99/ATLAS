@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, Building2, Inbox, Plus, ShieldCheck, TrendingUp } from "lucide-react";
+import { AlertCircle, ArrowRight, BadgeCheck, BriefcaseBusiness, Building2, CheckCircle2, ChevronRight, MessageSquareText, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -21,11 +21,11 @@ import type { Company, Inquiry, Lead } from "@/lib/records";
 import { useWorkspace } from "@/lib/use-workspace";
 
 const STAGES = [
-  ["new", "New", "bg-blue-400"],
-  ["contacted", "Contacted", "bg-violet-400"],
-  ["qualified", "Qualified", "bg-emerald-400"],
-  ["won", "Won", "bg-teal-300"],
-  ["lost", "Lost", "bg-slate-500"],
+  ["new", "New", "blue"],
+  ["contacted", "Contacted", "purple"],
+  ["qualified", "Qualified", "amber"],
+  ["won", "Won", "green"],
+  ["lost", "Lost", "red"],
 ] as const;
 
 export function OverviewScreen() {
@@ -45,30 +45,28 @@ export function OverviewScreen() {
   if (analytics.isError) return <RequestError error={analytics.error} />;
   if (!analytics.data) return null;
   const empty = analytics.data.companies_total === 0 && analytics.data.leads_total === 0 && analytics.data.inquiries_total === 0;
+  const firstName = session.data?.user.full_name.split(" ")[0] ?? "";
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-5" data-testid="overview-workspace">
-      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5" data-testid="overview-intro">
+    <div data-testid="overview-workspace">
+      <div className="page-heading" data-testid="overview-intro">
         <div>
-          <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            <span className={`size-1.5 rounded-full ${demonstration ? "bg-primary" : "bg-success"}`} />
-            {demonstration ? "Demonstration" : "Workspace"}
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-foreground sm:text-[30px]">{timeGreeting()}</h1>
-          <p className="mt-2 text-[13px] text-muted-foreground">Here’s what needs your attention across {workspace.organizationName ?? "your workspace"}.</p>
+          <div className="eyebrow"><span className="live-dot" />{demonstration ? "Demonstration" : "Live workspace"}</div>
+          <h1>{timeGreeting()}{firstName ? `, ${firstName}` : ""}</h1>
+          <p>Here’s what needs your attention across {workspace.organizationName ?? "your workspace"}.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">{organizationId ? <NewOpportunity key={organizationId} organizationId={organizationId} companies={companies.data?.items ?? []} /> : null}</div>
-      </header>
+        <div className="page-actions">{organizationId ? <NewOpportunity key={organizationId} organizationId={organizationId} companies={companies.data?.items ?? []} /> : null}</div>
+      </div>
       {empty ? <EmptyWorkspace /> : <>
         <Kpis data={analytics.data} />
-        <PeriodSummary data={analytics.data} period={period} onPeriod={setPeriod} />
-        <div className="grid gap-4 xl:grid-cols-[1.35fr_0.9fr]" data-testid="overview-top-content">
+        <div className="overview-grid" data-testid="overview-top-content">
           <Pipeline data={analytics.data} />
           <Attention approvals={approvals.data?.items ?? []} pending={approvals.isPending} error={approvals.error} />
         </div>
-        <div className="grid gap-4" data-testid="overview-bottom-content">
-          <ActivitySection data={analytics.data} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} />
+        <ActivitySection data={analytics.data} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} />
+        <div className="overview-grid" data-testid="overview-bottom-content">
           <InquirySection inquiries={inquiries.data?.items ?? []} leads={leads.data?.items ?? []} companies={companies.data?.items ?? []} pending={inquiries.isPending} />
+          <PeriodSummary data={analytics.data} period={period} onPeriod={setPeriod} />
         </div>
       </>}
     </div>
@@ -108,7 +106,7 @@ function NewOpportunity({ organizationId, companies }: { organizationId: string;
         setOpen(next);
       }}>
         <DialogTrigger asChild>
-          <Button><Plus className="size-4" aria-hidden="true" />New opportunity</Button>
+          <Button className="button button-primary button-md"><Plus size={16} aria-hidden="true" />New opportunity</Button>
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
@@ -146,21 +144,21 @@ function PeriodSummary({ data, period, onPeriod }: { data: AnalyticsSnapshot; pe
   const comparison = data.comparison;
   const money = sales?.currencies ?? [];
   return (
-    <section className="rounded-xl border border-border bg-card p-4" aria-label="Period performance" data-testid="overview-period">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <section className="panel" aria-label="Period performance" data-testid="overview-period">
+      <div className="panel-header">
         <div>
-          <h2 className="text-base font-semibold">This period</h2>
-          <p className="mt-1 text-xs text-muted-foreground">{data.period ? `${formatDay(data.period.start)} to ${formatDay(data.period.end)}` : "Selected dates"}{comparison ? ` · previous ${formatDay(comparison.previous_period.start)} to ${formatDay(comparison.previous_period.end)}` : ""}</p>
+          <h2>This period</h2>
+          <p>{data.period ? `${formatDay(data.period.start)} to ${formatDay(data.period.end)}` : "Selected dates"}{comparison ? ` · previous ${formatDay(comparison.previous_period.start)} to ${formatDay(comparison.previous_period.end)}` : ""}</p>
         </div>
-        <label className="grid gap-1 text-sm">Date range
-          <select aria-label="Overview date range" className="h-9 rounded-md border border-border bg-background px-2" value={period} onChange={(event) => onPeriod(event.target.value)}>
+        <label className="field">Date range
+          <select aria-label="Overview date range" value={period} onChange={(event) => onPeriod(event.target.value)}>
             <option value="7d">Last 7 days</option>
             <option value="30d">Last 30 days</option>
             <option value="90d">Last 90 days</option>
           </select>
         </label>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 p-4 sm:grid-cols-2">
         <PeriodLink href="/crm?tab=leads" label="Leads created" value={comparison?.leads_created.current ?? 0} delta={comparison?.leads_created} />
         <PeriodLink href="/crm?tab=opportunities" label="Opportunities" value={sales?.opportunities_total ?? 0} delta={comparison?.opportunities_created} />
         <PeriodLink href="/inbox" label="Conversations" value={comparison?.conversations.current ?? 0} delta={comparison?.conversations} />
@@ -193,16 +191,62 @@ function PeriodLink({ href, label, value, delta, detail }: { href: string; label
 
 function Kpis({ data }: { data: AnalyticsSnapshot }) {
   const active = data.lead_status.filter((item) => ["new", "contacted", "qualified"].includes(item.status)).reduce((sum, item) => sum + item.count, 0);
-  return <section className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-card shadow-sm lg:grid-cols-4" aria-label="CRM metrics" data-testid="overview-kpi-band"><Kpi href="/crm?tab=companies" label="Companies" value={data.companies_total} detail="Active customer accounts" icon={Building2} /><Kpi href="/crm?tab=leads" label="Active leads" value={active} detail={`${data.leads_total} total leads`} icon={TrendingUp} /><Kpi href="/crm?tab=inquiries" label="Customer requests" value={data.open_inquiries} detail="Open inquiries" icon={Inbox} /><Kpi href="/approvals" label="AI actions ready" value={data.approvals.pending} detail="Awaiting human review" icon={ShieldCheck} attention={data.approvals.pending > 0} /></section>;
+  return (
+    <section className="metric-grid" aria-label="Workspace metrics" data-testid="overview-kpi-band">
+      <Kpi href="/crm?tab=companies" testId="overview-kpi-companies" label="Companies" value={data.companies_total} detail="Total accounts" icon={Building2} />
+      <Kpi href="/crm?tab=leads" testId="overview-kpi-active-leads" label="Active leads" value={active} detail={`${data.leads_total} total leads`} icon={BriefcaseBusiness} />
+      <Kpi href="/crm?tab=inquiries" testId="overview-kpi-customer-requests" label="Open inquiries" value={data.open_inquiries} detail="Awaiting response" icon={MessageSquareText} />
+      <Kpi href="/approvals" testId="overview-kpi-pending-approvals" label="Pending approvals" value={data.approvals.pending} detail="Needs review" icon={BadgeCheck} />
+    </section>
+  );
 }
 
-function Kpi({ href, label, value, detail, attention, icon: Icon }: { href: string; label: string; value: number; detail?: string; attention?: boolean; icon: typeof Building2 }) {
-  const slug = label.toLowerCase().replaceAll(" ", "-");
-  return <Link data-testid={`overview-kpi-${slug}`} href={href} className="group min-w-0 border-b border-border p-4 transition hover:bg-accent/40 lg:border-b-0 lg:border-r last:border-r-0"><div className="flex items-center justify-between gap-2"><span className="flex min-w-0 items-center gap-2 text-[11px] font-medium text-muted-foreground"><span className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"><Icon className="size-4" /></span><span className="leading-4">{label}</span></span><ArrowUpRight className="size-4 shrink-0 text-subtle transition group-hover:text-primary" aria-hidden="true" /></div><p data-testid={`overview-kpi-${slug}-value`} className="mt-4 text-2xl font-semibold tabular-nums tracking-tight text-foreground">{value}</p>{detail ? <p className="mt-1 truncate text-[11px] text-subtle">{detail}</p> : null}{attention ? <span className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-medium text-warning"><span className="size-1.5 rounded-full bg-warning" />Needs review</span> : null}</Link>;
+function Kpi({ href, testId, label, value, detail, icon: Icon }: { href: string; testId: string; label: string; value: number; detail?: string; icon: typeof Building2 }) {
+  return (
+    <Link data-testid={testId} href={href} className="metric-card">
+      <span className="metric-icon"><Icon size={16} /></span>
+      <span className="metric-copy">
+        <span className="metric-label">{label}</span>
+        <strong data-testid={`${testId}-value`}>{value}</strong>
+        {detail ? <span className="metric-meta">{detail}</span> : null}
+      </span>
+      <ChevronRight className="metric-arrow" size={16} />
+    </Link>
+  );
 }
 
 function ActivitySection({ data, leads, companies }: { data: AnalyticsSnapshot; leads: Lead[]; companies: Company[] }) {
-  return <section className="rounded-xl border border-border bg-card" aria-labelledby="recent-activity-title" data-testid="overview-customer-activity"><div className="flex flex-col gap-2 border-b border-border/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><h2 id="recent-activity-title" className="text-base font-semibold text-foreground">Customer activity</h2><p className="mt-1 text-xs text-muted-foreground">Recent conversations and changes across your accounts.</p></div><Link href="/crm?tab=leads" className="self-start text-xs font-medium text-primary sm:shrink-0">View activity →</Link></div>{data.recent_interactions.length === 0 ? <p className="px-5 py-8 text-sm text-muted-foreground">No customer activity recorded yet.</p> : <ul className="divide-y divide-border/60">{data.recent_interactions.map((item) => { const lead = leads.find((entry) => entry.id === item.lead_id); const company = lead ? companies.find((entry) => entry.id === lead.company_id) : undefined; return <li key={item.id} className="px-5 py-4"><Link href={`/crm?tab=leads&id=${item.lead_id}`} className="block rounded-md hover:bg-accent/30"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-semibold text-foreground">{company?.name ?? "Customer activity"}</span><time className="text-[11px] text-subtle">{new Date(item.created_at).toLocaleString()}</time></div><p className="mt-1 text-sm text-muted-foreground">{lead?.title ?? "Related lead"}</p><p className="mt-1 truncate text-xs text-subtle">{item.kind.replaceAll("_", " ")} · {item.summary}</p></Link></li>; })}</ul>}</section>;
+  return (
+    <section className="panel activity-panel" aria-labelledby="recent-activity-title" data-testid="overview-customer-activity">
+      <div className="panel-header activity-header">
+        <div>
+          <h2 id="recent-activity-title">Recent customer activity</h2>
+          <p>Latest updates across your accounts</p>
+        </div>
+        <Link href="/crm?tab=leads" className="text-button">View activity <ArrowRight size={14} /></Link>
+      </div>
+      {data.recent_interactions.length === 0 ? (
+        <div className="empty-state"><Search size={22} /><strong>No activity yet</strong><p>Customer updates will appear here.</p></div>
+      ) : (
+        <div className="activity-table" role="table" aria-label="Recent customer activity">
+          <div className="activity-row table-head" role="row"><span>Company</span><span>Activity</span><span>Time</span><span /></div>
+          {data.recent_interactions.map((item) => {
+            const lead = leads.find((entry) => entry.id === item.lead_id);
+            const company = lead ? companies.find((entry) => entry.id === lead.company_id) : undefined;
+            const name = company?.name ?? "Customer";
+            return (
+              <Link className="activity-row" role="row" key={item.id} href={`/crm?tab=leads&id=${item.lead_id}`}>
+                <span className="company-cell"><span className="avatar avatar-blue avatar-sm">{name.slice(0, 2).toUpperCase()}</span><strong>{name}</strong></span>
+                <span className="activity-copy"><strong>{lead?.title ?? "Related lead"}</strong><small>{item.summary}</small></span>
+                <span className="time-cell">{new Date(item.created_at).toLocaleString()}</span>
+                <ChevronRight size={16} />
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function Pipeline({ data }: { data: AnalyticsSnapshot }) {
@@ -211,64 +255,86 @@ function Pipeline({ data }: { data: AnalyticsSnapshot }) {
   const active = counts.slice(0, 3).reduce((sum, count) => sum + count, 0);
 
   return (
-    <section className="rounded-xl border border-border bg-card" aria-labelledby="pipeline-title" data-testid="overview-pipeline">
-      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border px-5 py-4">
+    <section className="panel pipeline-panel" aria-labelledby="pipeline-title" data-testid="overview-pipeline">
+      <div className="panel-header">
         <div>
-          <h2 id="pipeline-title" className="text-base font-semibold">Pipeline overview</h2>
-          <p className="mt-1 text-xs text-muted-foreground">{data.leads_total} total leads · {active} active</p>
+          <h2 id="pipeline-title">Lead pipeline</h2>
+          <p>{data.leads_total} leads · {active} active</p>
         </div>
-        <Link href="/crm?tab=leads" className="text-xs font-medium text-primary">View leads</Link>
+        <Link href="/crm?tab=opportunities" className="text-button">View pipeline <ArrowRight size={14} /></Link>
       </div>
       {data.leads_total ? (
-        <ul className="divide-y divide-border px-5">
-          {STAGES.map(([status, label, color], index) => (
-            <li key={status}>
-              <Link href={`/crm?tab=leads&status=${status}`} className="grid grid-cols-[5rem_minmax(0,1fr)_2rem] items-center gap-2 py-3 text-xs hover:bg-accent/30 sm:grid-cols-[6rem_minmax(0,1fr)_2rem]">
-                <span className="flex items-center gap-2 font-medium"><span className={`size-2 rounded-full ${color}`} aria-hidden="true" />{label}</span>
-                <span className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                  <span className={`block h-full rounded-full ${color}`} style={{ width: `${(counts[index] / largest) * 100}%` }} />
-                </span>
-                <span className="text-right tabular-nums text-muted-foreground">{counts[index]}</span>
-              </Link>
-            </li>
+        <div className="pipeline-list">
+          {STAGES.map(([status, label, tone], index) => (
+            <Link key={status} href={`/crm?tab=leads&status=${status}`} className="pipeline-row">
+              <span className={`status-dot dot-${tone}`} />
+              <span className="pipeline-label">{label}</span>
+              <div className="bar-track"><span className={`bar-fill fill-${tone}`} style={{ width: `${Math.max(8, (counts[index] / largest) * 100)}%` }} /></div>
+              <strong>{counts[index]}</strong>
+              <ChevronRight size={14} />
+            </Link>
           ))}
-        </ul>
-      ) : <p className="px-5 py-8 text-sm text-muted-foreground">No leads are stored in this scope.</p>}
+        </div>
+      ) : <div className="empty-state"><strong>No leads yet</strong><p>New leads will appear across these stages.</p></div>}
     </section>
   );
 }
 
 function InquirySection({ inquiries, leads, companies, pending }: { inquiries: Inquiry[]; leads: Lead[]; companies: Company[]; pending: boolean }) {
-  return <section className="rounded-lg border border-border/80 bg-card" aria-labelledby="inquiries-title"><div className="flex items-center justify-between border-b border-border/70 px-4 py-3"><h2 id="inquiries-title" className="text-sm font-semibold text-foreground">Open inquiries</h2><Link href="/crm?tab=inquiries" className="text-xs text-primary">View all</Link></div>{pending ? <Skeleton className="m-4 h-12" /> : inquiries.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">No open inquiries.</p> : <ul className="divide-y divide-border/60">{inquiries.slice(0, 5).map((item) => { const lead = leads.find((entry) => entry.id === item.lead_id); const company = companies.find((entry) => entry.id === item.company_id); return <li key={item.id} className="px-4 py-3"><Link href={`/crm?tab=inquiries&id=${item.id}`} className="flex items-center justify-between gap-3 rounded-md hover:bg-accent/30"><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{item.subject}</p><p className="mt-1 truncate text-xs text-muted-foreground">{company?.name ?? "Company"}{lead ? ` · ${lead.title}` : ""}</p></div><span className="shrink-0 text-[11px] text-warning">Open</span></Link></li>; })}</ul>}</section>;
+  return (
+    <section className="panel" aria-labelledby="inquiries-title">
+      <div className="panel-header">
+        <div><h2 id="inquiries-title">Open inquiries</h2><p>Requests waiting on a reply</p></div>
+        <Link href="/crm?tab=inquiries" className="text-button">View all <ArrowRight size={14} /></Link>
+      </div>
+      {pending ? <Skeleton className="m-4 h-12" /> : inquiries.length === 0 ? <div className="empty-state"><strong>No open inquiries</strong><p>New customer requests will show up here.</p></div> : (
+        <div className="activity-table">
+          {inquiries.slice(0, 5).map((item) => {
+            const lead = leads.find((entry) => entry.id === item.lead_id);
+            const company = companies.find((entry) => entry.id === item.company_id);
+            return (
+              <Link key={item.id} href={`/crm?tab=inquiries&id=${item.id}`} className="activity-row">
+                <span className="company-cell"><strong>{company?.name ?? "Company"}</strong></span>
+                <span className="activity-copy"><strong>{item.subject}</strong><small>{lead?.title ?? "Inquiry"}</small></span>
+                <span className="time-cell">Open</span>
+                <ChevronRight size={16} />
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function Attention({ approvals, pending, error }: { approvals: Approval[]; pending: boolean; error: Error | null }) {
   return (
-    <section className="rounded-xl border border-border bg-card" aria-labelledby="attention-title">
-      <div className="flex items-start justify-between gap-2 border-b border-border px-5 py-4">
+    <section className="panel attention-panel" aria-labelledby="attention-title">
+      <div className="panel-header">
         <div>
-          <h2 id="attention-title" className="text-base font-semibold">Needs attention</h2>
-          <p className="mt-1 text-xs text-muted-foreground">Requests waiting for a decision.</p>
+          <h2 id="attention-title">Needs attention</h2>
+          <p>Priority items for today</p>
         </div>
-        <Link href="/approvals" className="text-xs font-medium text-primary">View approvals</Link>
+        <span className="badge badge-amber">{approvals.length} pending</span>
       </div>
       {error ? <div className="p-4"><RequestError error={error} /></div> : pending ? (
         <Skeleton className="m-4 h-12" />
       ) : approvals.length ? (
-        <ul className="divide-y divide-border">
-          {approvals.slice(0, 4).map((approval) => (
-            <li key={approval.id} className="px-5 py-3">
-              <Link href={`/approvals?approval=${approval.id}`} className="flex items-center gap-3 rounded-md hover:bg-accent/30">
-                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-warning/10 text-warning"><ShieldCheck className="size-4" aria-hidden="true" /></span>
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium capitalize">{approval.action_type.replaceAll("_", " ")}</span>
-                  <span className="block text-xs text-muted-foreground">Awaiting review</span>
-                </span>
-              </Link>
-            </li>
+        <div className="approval-list">
+          {approvals.slice(0, 3).map((approval) => (
+            <article className="approval-item" key={approval.id}>
+              <div className="approval-icon"><AlertCircle size={16} /></div>
+              <div>
+                <h3 className="capitalize">{approval.action_type.replaceAll("_", " ")}</h3>
+                <p>Waiting for a decision</p>
+                <div className="approval-actions">
+                  <Link href={`/approvals?approval=${approval.id}`} className="button button-primary button-sm">Review</Link>
+                </div>
+              </div>
+            </article>
           ))}
-        </ul>
-      ) : <p className="px-5 py-8 text-sm text-muted-foreground">No requests are waiting for approval.</p>}
+        </div>
+      ) : <div className="empty-state"><CheckCircle2 size={22} /><strong>All caught up</strong><p>There are no approvals waiting for review.</p></div>}
     </section>
   );
 }

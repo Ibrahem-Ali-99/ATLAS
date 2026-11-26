@@ -108,19 +108,17 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader title="Settings" eyebrow="Workspace administration">Manage your account, workspace, and connections.</PageHeader>
-      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[11rem_minmax(0,1fr)]">
-      <nav aria-label="Settings sections" className="min-w-0 overflow-x-auto rounded-xl border border-border bg-card p-1.5 lg:sticky lg:top-[76px]">
+      <div className="settings-layout">
+      <nav aria-label="Settings sections" className="settings-nav">
         <ul className="flex w-max gap-1 lg:w-full lg:flex-col">
           {settingsSections.map(({ id, label, icon: Icon }) => (
             <li key={id}>
-              <a href={`#settings-${id}`} className="flex h-9 items-center gap-2 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground">
-                <Icon className="size-4 shrink-0" aria-hidden="true" />{label}
-              </a>
+              <a href={`#settings-${id}`} className=""><Icon className="size-4 shrink-0" aria-hidden="true" />{label}</a>
             </li>
           ))}
         </ul>
       </nav>
-      <div className="grid min-w-0 gap-4" key={organizationId}>
+      <div className="settings-content" key={organizationId}>
       <div id="settings-organization" className="grid scroll-mt-20 gap-4">
       {organizationId && isAdmin ? <OrganizationCard organizationId={organizationId} initialName={session.data?.memberships.find((m) => m.organization_id === organizationId)?.organization_name ?? ""} onSaved={() => void queryClient.invalidateQueries({ queryKey: ["session"] })} /> : null}
       <section className="rounded-xl border border-border bg-card p-4">
@@ -364,8 +362,11 @@ function ExternalActivationChecklist() {
         {externalActivation.map((item) => (
           <li key={item.name} className="rounded-md border border-border p-3">
             <h3 className="text-sm font-medium">{item.name}</h3>
-            <p className="mt-2 text-sm leading-6"><span className="font-medium">You </span>{item.customer}</p>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground"><span className="font-medium text-foreground">Operator </span>{item.operator}</p>
+            <p className="mt-2 text-sm leading-6">{item.customer}</p>
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs text-muted-foreground">Administrator setup</summary>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">{item.operator}</p>
+            </details>
           </li>
         ))}
       </ol>
@@ -380,6 +381,22 @@ const marketplace = [
   { type: "chat", name: "Language model", providers: "OpenAI · Groq", category: "Knowledge", benefit: "Power grounded answers and draft follow-ups.", activation: "The deployment model is used until this workspace saves its own provider.", icon: Bot },
   { type: "embedding", name: "Embeddings", providers: "OpenAI · Ollama", category: "Knowledge", benefit: "Find relevant passages across your organization's documents.", activation: "Ollama on this machine keeps passages local. OpenAI sends passages to an external account and needs approval.", icon: Search },
 ] satisfies { type: IntegrationType; name: string; providers: string; category: string; benefit: string; activation: string; icon: typeof Mail }[];
+
+function brandColor(type: string): string {
+  if (type === "email") return "#1a73e8";
+  if (type === "whatsapp") return "#25D366";
+  if (type === "n8n") return "#EA4B71";
+  if (type === "chat") return "#10a37f";
+  if (type === "embedding") return "#5b4bdb";
+  return "#2856d7";
+}
+
+function connectionTitle(type: string, name: string): string {
+  if (type === "embedding") return "Document search";
+  if (type === "chat") return "Assistant";
+  if (type === "whatsapp") return "WhatsApp";
+  return name;
+}
 
 function IntegrationMarketplace({
   organizationId, isAdmin, integrations, isLoading, error, onChanged,
@@ -462,15 +479,10 @@ function IntegrationMarketplace({
             const props = { organizationId, isAdmin, record, onChanged };
             return (
               <Dialog key={item.type}>
-                <article className="flex min-w-0 flex-col rounded-xl border border-border bg-card p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <span className="rounded-lg bg-accent p-2.5 text-accent-foreground"><item.icon size={20} aria-hidden /></span>
-                    <Badge variant="secondary">{status}</Badge>
-                  </div>
-                  <h2 className="mt-4 font-semibold">{item.name}</h2>
-                  <p className="mt-1 text-xs text-muted-foreground">{item.providers}</p>
-                  <p className="mt-3 flex-1 text-sm leading-6 text-muted-foreground">{item.benefit}</p>
-                  <p className="mb-5 mt-2 text-xs leading-5 text-muted-foreground">{item.activation}</p>
+                <article className="integration-card">
+                  <span className="integration-icon" style={{ background: brandColor(item.type), color: "#fff" }}><item.icon size={18} aria-hidden /></span>
+                  <span><strong>{connectionTitle(item.type, item.name)}</strong><small>{item.benefit}</small></span>
+                  <Badge variant="secondary">{status}</Badge>
                   <DialogTrigger asChild>
                     <Button variant="outline" size="sm" className="self-start" aria-label={`${item.name} settings`}>
                       {isAdmin && (record?.status === "disabled" || record?.status === "verification_failed") ? "Recover connection" : isAdmin && item.type !== "n8n" ? "Configure" : "View details"}

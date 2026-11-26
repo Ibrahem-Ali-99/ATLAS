@@ -54,7 +54,7 @@ test("Harbor demonstration supports the main workspace actions", async ({ page }
   await expect(page.getByText(/excerpt/)).toBeVisible();
   await shot(page, "04-knowledge.png");
 
-  await page.getByRole("link", { name: "AI Assistant", exact: true }).click();
+  await page.getByRole("link", { name: "Assistant", exact: true }).click();
   await page.getByRole("button", { name: /Bonded yard capacity/ }).click();
   await page.getByLabel("Message to ATLAS").fill("Is bonded warehousing available at the north pier?");
   await page.getByRole("button", { name: "Send →" }).click();

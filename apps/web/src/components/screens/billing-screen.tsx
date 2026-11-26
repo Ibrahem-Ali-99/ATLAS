@@ -150,8 +150,8 @@ function BillingCard({
           The payment has not been confirmed yet. Refresh this page after the receipt arrives. The current plan stays in place until then.
         </p>
       ) : null}
-      <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[1.25fr_1fr]">
-        <section className="min-w-0 rounded-xl border border-border bg-card p-5" aria-labelledby="billing-heading">
+      <div className="billing-grid">
+        <article className="settings-card current-plan" aria-labelledby="billing-heading">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex items-start gap-3">
               <div className="grid size-9 place-items-center rounded-md bg-primary/10 text-primary"><CreditCard className="size-4" aria-hidden="true" /></div>
@@ -224,7 +224,7 @@ function BillingCard({
           {message ? (
             <p className={`mt-3 text-xs ${messageIsError ? "text-destructive" : "text-muted-foreground"}`} role={messageIsError ? "alert" : "status"}>{message}</p>
           ) : null}
-        </section>
+        </article>
         <BillingUsage billing={billing.data} />
       </div>
     </div>
@@ -294,7 +294,7 @@ function formatUsage(value: number, bytes: boolean) {
 
 function BillingUsage({ billing }: { billing: BillingStatus }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-5" aria-labelledby="billing-usage">
+    <section className="settings-card" aria-labelledby="billing-usage">
       <h2 id="billing-usage" className="flex items-center gap-2 text-base font-semibold"><CircleGauge className="size-4 text-primary" aria-hidden="true" />Usage availability</h2>
       <p className="mt-1 text-xs text-muted-foreground">Workspace usage and the limits applied by your plan.</p>
       <dl className="mt-4 grid gap-4">

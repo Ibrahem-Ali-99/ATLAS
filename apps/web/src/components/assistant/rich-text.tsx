@@ -8,7 +8,7 @@ type Block =
 export function RichText({ text, id, lead = false }: { text: string; id: string; lead?: boolean }) {
   const blocks = parseMarkdown(text);
   return (
-    <div className="space-y-3 text-[15px] leading-6 text-muted-foreground">
+    <div className="assistant-copy">
       {blocks.map((block, index) => (
         <BlockView key={`${id}-${index}`} block={block} lead={lead && index === 0} />
       ))}
@@ -50,29 +50,11 @@ function BlockView({ block, lead = false }: { block: Block; lead?: boolean }) {
   }
   if (block.type === "table") {
     return (
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-left text-sm">
-          <thead>
-            <tr>
-              {block.headers.map((header, index) => (
-                <th key={index} className="border border-border px-2 py-1 font-medium">
-                  <Inline text={header} />
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {block.rows.map((row, rowIndex) => (
-              <tr key={rowIndex}>
-                {row.map((cell, cellIndex) => (
-                  <td key={cellIndex} className="border border-border px-2 py-1">
-                    <Inline text={cell} />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="assistant-table" style={{ ["--table-columns" as string]: block.headers.length }}>
+        <div>{block.headers.map((header, index) => <b key={index}><Inline text={header} /></b>)}</div>
+        {block.rows.map((row, rowIndex) => (
+          <div key={rowIndex}>{row.map((cell, cellIndex) => <span key={cellIndex}><Inline text={cell} /></span>)}</div>
+        ))}
       </div>
     );
   }

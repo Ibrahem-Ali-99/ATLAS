@@ -1,80 +1,48 @@
 import { Badge } from "@/components/ui/badge";
+import { CalendarDays, CreditCard, Globe2, Mail, MessageCircle, Search, Send, Sparkles, Workflow } from "lucide-react";
 
 const gallery = [
-  {
-    name: "Email",
-    purpose: "Deliver approved replies and campaign messages.",
-    capabilities: "A workspace can use sandbox mail or a connected relay. This demonstration keeps messages inside the session.",
-    status: "Simulated",
-  },
-  {
-    name: "Website chat",
-    purpose: "Bring website conversations into Inbox.",
-    capabilities: "Sample website messages are included. Connecting a site stays with an administrator.",
-    status: "Included",
-  },
-  {
-    name: "WhatsApp",
-    purpose: "Receive WhatsApp messages and send approved replies.",
-    capabilities: "Supported with a Meta Business account. This demonstration is not connected to WhatsApp.",
-    status: "Not connected",
-  },
-  {
-    name: "Google Calendar",
-    purpose: "Place approved appointments on a calendar.",
-    capabilities: "This demonstration stores the appointment in ATLAS. It does not create a Google event.",
-    status: "Simulated",
-  },
-  {
-    name: "n8n",
-    purpose: "Continue a lead in an external workflow.",
-    capabilities: "A workspace can connect its own n8n instance. This demonstration does not call one.",
-    status: "Not connected",
-  },
-  {
-    name: "Language model",
-    purpose: "Answer from the records in the workspace.",
-    capabilities: "Answers in this demonstration use the included records. A paid model is not called.",
-    status: "Demonstration",
-  },
-  {
-    name: "Document search",
-    purpose: "Find passages in uploaded company documents.",
-    capabilities: "Search stays inside this demonstration. A paid embedding service is not called.",
-    status: "Demonstration",
-  },
-  {
-    name: "Stripe",
-    purpose: "Manage the workspace subscription.",
-    capabilities: "Billing is available on a subscribed workspace. This demonstration does not open a payment account.",
-    status: "Not connected",
-  },
-  {
-    name: "Resend",
-    purpose: "Send campaigns and record delivery feedback.",
-    capabilities: "Optional for live campaigns. Not connected in this demonstration.",
-    status: "Not connected",
-  },
+  { name: "Email", purpose: "Deliver approved replies and campaign messages.", note: "This demonstration keeps messages inside the session.", status: "Simulated", color: "#1a73e8", icon: Mail },
+  { name: "Website chat", purpose: "Bring website conversations into Inbox.", note: "Sample website messages are included.", status: "Included", color: "#2856d7", icon: Globe2 },
+  { name: "WhatsApp", purpose: "Receive WhatsApp messages and send approved replies.", note: "Not connected to WhatsApp in this demonstration.", status: "Not connected", color: "#25D366", icon: MessageCircle },
+  { name: "Google Calendar", purpose: "Place approved appointments on a calendar.", note: "Appointments stay in ATLAS during this demonstration.", status: "Simulated", color: "#4285F4", icon: CalendarDays },
+  { name: "n8n", purpose: "Continue a lead in an external workflow.", note: "This demonstration does not call an external workflow.", status: "Not connected", color: "#EA4B71", icon: Workflow },
+  { name: "Assistant", purpose: "Answer from the records in the workspace.", note: "Answers use the included records.", status: "Demonstration", color: "#10a37f", icon: Sparkles },
+  { name: "Document search", purpose: "Find passages in uploaded company documents.", note: "Search stays inside this demonstration.", status: "Demonstration", color: "#5b4bdb", icon: Search },
+  { name: "Stripe", purpose: "Manage the workspace subscription.", note: "This demonstration does not open a payment account.", status: "Not connected", color: "#635BFF", icon: CreditCard },
+  { name: "Resend", purpose: "Send campaigns and record delivery feedback.", note: "Not connected in this demonstration.", status: "Not connected", color: "#111111", icon: Send },
 ] as const;
 
 export function IntegrationGallery() {
   return (
-    <section className="space-y-4" aria-label="Supported integrations">
-      <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-        Credentials and connection settings stay with a workspace administrator. A simulated service is not shown as connected.
-      </p>
-      <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {gallery.map((item) => (
-          <li key={item.name} className="flex min-w-0 flex-col rounded-xl border border-border bg-card p-5">
-            <div className="flex items-start justify-between gap-3">
-              <h2 className="font-semibold">{item.name}</h2>
+    <section aria-label="Supported integrations">
+      <div className="integration-toolbar">
+        <p>Connection settings stay with a workspace administrator.</p>
+        <div className="integration-legend">
+          <Badge>Included</Badge>
+          <Badge variant="secondary">Simulated</Badge>
+          <Badge variant="secondary">Not connected</Badge>
+        </div>
+      </div>
+      <div className="integration-grid">
+        {gallery.map((item) => {
+          const Icon = item.icon;
+          return (
+            <article className="integration-card" key={item.name}>
+              <span className="integration-icon" style={{ background: item.color, color: "#fff" }}><Icon size={18} aria-hidden /></span>
+              <span>
+                <strong>{item.name}</strong>
+                <small>{item.purpose}</small>
+              </span>
               <Badge variant="secondary">{item.status}</Badge>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-foreground">{item.purpose}</p>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.capabilities}</p>
-          </li>
-        ))}
-      </ul>
+              <details>
+                <summary>Details</summary>
+                <p>{item.note}</p>
+              </details>
+            </article>
+          );
+        })}
+      </div>
     </section>
   );
 }

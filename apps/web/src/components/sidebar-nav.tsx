@@ -2,81 +2,113 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ChevronDown, ChevronRight, X } from "lucide-react";
 
 import { navigationGroups } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 const demoHidden = new Set(["/billing", "/settings", "/setup"]);
 
+function mark(name: string): string {
+  const letters = name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("");
+  return letters || "AT";
+}
+
 export function SidebarNav({
   organizationName,
+  memberships,
+  organizationId,
+  onOrganizationChange,
   onNavigate,
   collapsed = false,
   onToggleCollapse,
+  onClose,
   demo = false,
 }: {
   organizationName?: string | null;
+  memberships?: { organization_id: string; organization_name: string }[];
+  organizationId?: string | null;
+  onOrganizationChange?: (organizationId: string) => void;
   onNavigate?: () => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  onClose?: () => void;
   demo?: boolean;
 }) {
   const pathname = usePathname();
   const groups = demo
     ? navigationGroups
-        .map((group) => ({
-          ...group,
-          items: group.items.filter((item) => !demoHidden.has(item.href)),
-        }))
+        .map((group) => ({ ...group, items: group.items.filter((item) => !demoHidden.has(item.href)) }))
         .filter((group) => group.items.length > 0)
     : navigationGroups;
+  const orgs = memberships ?? [];
+  const current = organizationName ?? "ATLAS";
 
   return (
-    <div className={cn("flex h-full flex-col bg-sidebar text-foreground", collapsed ? "items-center" : "")}>
-      <div className={cn("flex h-[60px] w-full shrink-0 items-center gap-2.5 border-b border-border", collapsed ? "justify-center" : "px-4")}>
-        <span className="grid size-7 shrink-0 place-items-center rounded-md bg-primary text-xs font-bold text-primary-foreground" aria-label="ATLAS">A</span>
-        {!collapsed ? <span className="text-sm font-bold tracking-[0.16em]">ATLAS</span> : null}
+    <>
+      <div className="brand-row">
+        <div className="brand-mark" aria-hidden="true">A</div>
+        {!collapsed ? <span className="brand-name">ATLAS</span> : null}
+        {onClose ? (
+          <button type="button" className="button button-ghost button-icon sidebar-close" aria-label="Close navigation" onClick={onClose}>
+            <X size={18} />
+          </button>
+        ) : null}
       </div>
-      <div className={cn("mx-2.5 mt-3 flex min-h-11 shrink-0 items-center rounded-md px-2", collapsed ? "justify-center" : "gap-2.5")}>
-        <span className="grid size-7 shrink-0 place-items-center rounded-md bg-foreground text-[10px] font-bold text-background">{(organizationName ?? "AT").slice(0, 2).toUpperCase()}</span>
-        {!collapsed ? <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{organizationName ?? "ATLAS"}</p><p className="mt-0.5 truncate text-[10px] text-muted-foreground">{demo ? "Demonstration" : "Workspace"}</p></div> : null}
+      <div className="org-wrap">
+        <label className={cn("org-switcher", collapsed && "justify-center")}>
+          <span className="org-logo" aria-hidden="true">{mark(current)}</span>
+          {!collapsed ? (
+            <span className="org-copy">
+              <select
+                aria-label="Organization"
+                value={organizationId ?? ""}
+                onChange={(event) => onOrganizationChange?.(event.target.value)}
+                disabled={orgs.length < 2}
+              >
+                {orgs.length === 0 ? <option value={organizationId ?? ""}>{current}</option> : null}
+                {orgs.map((membership) => (
+                  <option key={membership.organization_id} value={membership.organization_id}>{membership.organization_name}</option>
+                ))}
+              </select>
+              <small>{demo ? "Demonstration" : "Workspace"}</small>
+            </span>
+          ) : null}
+          {!collapsed ? <ChevronDown size={15} aria-hidden="true" /> : null}
+        </label>
       </div>
-      <nav className="mt-3 flex w-full flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-3" aria-label="Workspace">
+      <nav className="sidebar-nav" aria-label="Workspace">
         {groups.map((group) => (
-          <div key={group.label} className="flex flex-col gap-1">
-            {!collapsed ? <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{group.label}</p> : null}
-            <div className="flex flex-col gap-1">
-              {group.items.map((item) => {
-                const active = pathname === item.href || (item.href !== "/overview" && pathname.startsWith(`${item.href}/`));
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    aria-current={active ? "page" : undefined}
-                    onClick={onNavigate}
-                    title={collapsed ? item.label : undefined}
-                    className={cn(
-                      "flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-                      collapsed && "justify-center px-0",
-                      active && "bg-accent font-medium text-accent-foreground hover:bg-accent",
-                    )}
-                  >
-                    <Icon className="size-4 shrink-0" aria-hidden="true" />
-                    {!collapsed ? <span className="truncate">{item.label}</span> : null}
-                  </Link>
-                );
-              })}
-            </div>
+          <div key={group.label}>
+            {!collapsed ? <p className="nav-section">{group.label}</p> : null}
+            {group.items.map((item) => {
+              const active = pathname === item.href || (item.href !== "/overview" && pathname.startsWith(`${item.href}/`));
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  onClick={onNavigate}
+                  title={collapsed ? item.label : undefined}
+                  className={cn("nav-item", active && "nav-item-active")}
+                >
+                  <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
+                  {!collapsed ? <span>{item.label}</span> : null}
+                </Link>
+              );
+            })}
           </div>
         ))}
       </nav>
-      <div className={cn("w-full border-t border-border px-2.5 py-2", collapsed ? "flex justify-center" : "")}>
-        {onToggleCollapse ? <button type="button" onClick={onToggleCollapse} className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
-          {collapsed ? <PanelLeftOpen className="size-4" /> : <><PanelLeftClose className="size-4" /><span>Collapse sidebar</span></>}
-        </button> : null}
+      <div className="sidebar-footer">
+        {onToggleCollapse ? (
+          <button type="button" className="collapse-button" onClick={onToggleCollapse} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+            <ChevronRight size={16} className={collapsed ? "" : "rotate-180"} />
+            {!collapsed ? <span>Collapse sidebar</span> : null}
+          </button>
+        ) : null}
       </div>
-    </div>
+    </>
   );
 }

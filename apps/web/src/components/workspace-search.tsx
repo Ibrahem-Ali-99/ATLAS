@@ -4,7 +4,6 @@ import { Search } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { navigation } from "@/lib/navigation";
@@ -30,11 +29,11 @@ export function WorkspaceSearch() {
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="h-8 gap-2 px-2 text-xs text-muted-foreground lg:min-w-44 lg:justify-start" aria-label="Search workspace" aria-keyshortcuts="Control+K Meta+K">
-          <Search className="size-4" aria-hidden="true" />
-          <span className="hidden lg:block">Search workspace</span>
-          <kbd className="ml-auto hidden rounded border border-border px-1 text-[10px] xl:block">Ctrl K</kbd>
-        </Button>
+        <button type="button" className="command-search" aria-label="Search workspace" aria-keyshortcuts="Control+K Meta+K">
+          <Search size={15} aria-hidden="true" />
+          <span>Search workspace</span>
+          <kbd>Ctrl K</kbd>
+        </button>
       </DialogTrigger>
       <DialogContent className="max-h-[75dvh] overflow-y-auto">
         <DialogTitle>Search workspace</DialogTitle>

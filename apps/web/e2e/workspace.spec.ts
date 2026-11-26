@@ -131,7 +131,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await expect(documentRow.getByRole("cell", { name: "ready" })).toBeVisible({ timeout: 30_000 });
   await shot(page, "03-knowledge.png");
 
-  await page.getByRole("link", { name: "AI Assistant" }).click();
+  await page.getByRole("link", { name: "Assistant" }).click();
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.getByPlaceholder("Ask about records, documents or your organization…").fill(`bonded-yard-${stamp}`);
   await page.getByRole("button", { name: "Send" }).click();
@@ -324,7 +324,7 @@ test("narrow viewport opens every page without a missing chunk", async ({ page }
     ["Inbox", "/inbox"],
     ["Campaigns", "/campaigns"],
     ["Knowledge", "/knowledge"],
-    ["AI Assistant", "/assistant"],
+    ["Assistant", "/assistant"],
     ["Agent Runs", "/agent-runs"],
     ["Approvals", "/approvals"],
     ["Workflows", "/workflows"],

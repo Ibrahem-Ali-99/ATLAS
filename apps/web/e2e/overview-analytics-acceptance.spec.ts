@@ -99,8 +99,8 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   console.log(JSON.stringify({ activeLeadsBefore }));
   await allRecords(page);
   await expect(page.getByRole("link", { name: /Companies/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Customer activity" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Pipeline overview" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent customer activity" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Lead pipeline" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Open inquiries" })).toBeVisible();
   await screenshot(page, "overview-before.png");
 

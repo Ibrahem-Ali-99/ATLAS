@@ -5,7 +5,7 @@ import {
   Settings,
   ListChecks,
   Plug,
-  Sparkles,
+  Activity,
   Users,
   Workflow,
   Inbox,
@@ -29,12 +29,12 @@ export type NavGroup = {
 };
 
 const overview = { href: "/overview", label: "Overview", icon: LayoutDashboard };
-const assistant = { href: "/assistant", label: "AI Assistant", icon: Sparkles };
+const assistant = { href: "/assistant", label: "Assistant", icon: Bot };
 const crm = { href: "/crm", label: "CRM", icon: Users };
 const knowledge = { href: "/knowledge", label: "Knowledge", icon: BookOpen };
 const inbox = { href: "/inbox", label: "Inbox", icon: Inbox };
 const campaigns = { href: "/campaigns", label: "Campaigns", icon: Megaphone };
-const agentRuns = { href: "/agent-runs", label: "Agent Runs", icon: Bot };
+const agentRuns = { href: "/agent-runs", label: "Agent Runs", icon: Activity };
 const approvals = { href: "/approvals", label: "Approvals", icon: BadgeCheck };
 const automations = { href: "/workflows", label: "Workflows", icon: Workflow };
 const integrations = { href: "/integrations", label: "Integrations", icon: Plug };

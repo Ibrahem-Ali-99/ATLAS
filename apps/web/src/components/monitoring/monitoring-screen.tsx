@@ -84,7 +84,7 @@ function MonitoringWorkspace({ organizationId, isAdmin }: { organizationId: stri
         {data.activity?.notice ?? "Current health is the latest stored state. Earlier records stay in the history below."}
         {platform ? " Infrastructure diagnostics are limited to administrators." : ""}
       </PageHeader>
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="health-grid" aria-label="Recorded outcomes">
         <Stat label="Recorded failures" value={String(data.failed_runs.length)} detail="Open one to see what was stored. A listed failure is not still running." />
         <Stat label="Uncertain outcomes" value={String(data.retries)} detail="Attempts whose result could not be confirmed." />
       </div>
@@ -419,11 +419,10 @@ function workerPresentation(status: string): { label: string; tone: string } {
 
 function Stat({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <section className="rounded-[10px] bg-muted p-4">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground">{detail}</p>
-    </section>
+    <article className="panel health-card">
+      <div><strong>{label}</strong><small>{detail}</small></div>
+      <span className="badge badge-neutral">{value}</span>
+    </article>
   );
 }
 

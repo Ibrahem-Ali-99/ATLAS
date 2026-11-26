@@ -185,6 +185,13 @@ export type MessageSource = {
   record_id: string | null;
 };
 
+export type AssistantStep = {
+  tool_name: string;
+  status: "succeeded" | "failed" | "recovered";
+  duration_ms: number;
+  detail: string;
+};
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -192,6 +199,7 @@ export type ChatMessage = {
   created_at: string;
   sources: MessageSource[];
   proposals?: AssistantProposal[];
+  steps?: AssistantStep[];
 };
 
 export type ConversationDetail = Conversation & {

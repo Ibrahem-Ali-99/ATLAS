@@ -1,13 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, FileText, MessageSquare, PanelLeft, Sparkles, X } from "lucide-react";
+import { AlertCircle, ArrowRight, Bot, Building2, CheckCircle2, ChevronDown, FileText, PanelLeft, Send, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ConfirmButton } from "@/components/confirm-button";
-import { ProviderNotice } from "@/components/provider-notice";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -186,6 +185,8 @@ function AssistantWorkspace({
     return messages.flatMap((message) => message.sources);
   }, [detail.data?.messages]);
   const focused = sources.find((source) => sourceKey(source) === focusSource) ?? sources[0] ?? null;
+  const recordSources = sources.filter((source) => source.kind === "crm");
+  const documentSources = sources.filter((source) => source.kind === "document");
 
   async function submit(content = draft.trim()) {
     if (!content || send.isPending || create.isPending) return;
@@ -238,133 +239,127 @@ function AssistantWorkspace({
         clearThreadControls();
         router.replace(`/assistant?conversation=${id}`);
       }}
+      onClose={() => setHistoryOpen(false)}
     />
   );
 
   return (
-    <div className="flex h-full min-h-0 gap-2 bg-background p-2">
-      <aside className="hidden w-[300px] shrink-0 flex-col rounded-[14px] border border-border bg-card lg:flex">{history}</aside>
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col px-2 sm:px-6">
-        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border py-4">
+    <div className="assistant-layout">
+      <aside className={`assistant-history ${historyOpen ? "mobile-open" : ""}`} aria-label="Assistant conversation history">{history}</aside>
+      <section className="assistant-chat" aria-label={threadTitle}>
+        <header className="assistant-chat-header">
+          <button type="button" className="button button-ghost button-icon history-toggle" aria-label="Open conversation history" onClick={() => setHistoryOpen(true)}><PanelLeft size={17} /></button>
           <div className="min-w-0">
             {titleDraft === null ? (
-              <h1 className="truncate text-xl font-semibold leading-tight text-foreground">{threadTitle}</h1>
+              <h1>{threadTitle}</h1>
             ) : (
               <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); if (titleDraft.trim()) rename.mutate(titleDraft.trim()); }}>
-                <Input aria-label="Conversation title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} className="h-9 max-w-xs" />
-                <Button type="submit" size="sm" disabled={!titleDraft.trim() || rename.isPending}>Save title</Button>
+                <Input aria-label="Conversation title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} className="h-8 max-w-xs" />
+                <Button type="submit" size="sm" disabled={!titleDraft.trim() || rename.isPending}>Save</Button>
                 <Button type="button" size="sm" variant="ghost" onClick={() => setTitleDraft(null)}>Cancel</Button>
               </form>
             )}
-            <p className="mt-1 text-sm text-muted-foreground">
-              {demonstration
-                ? "Demonstration mode. Answers use the Harbor & Co. records in this session and do not call a paid model."
-                : "Ask ATLAS about your workspace, then follow the evidence."}
-            </p>
+            <p>{demonstration ? "Answers use this workspace’s records" : "ATLAS Assistant · Sources enabled"}</p>
           </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {conversationId && titleDraft === null ? (
-              <Button type="button" size="sm" variant="outline" onClick={() => setTitleDraft(threadTitle)}>Rename</Button>
-            ) : null}
-            {conversationId && archivedAt ? (
-              <Button type="button" size="sm" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate()}>Restore</Button>
-            ) : conversationId ? (
-              <ConfirmButton size="sm" label="Archive" confirmLabel="Archive and keep messages" pendingLabel="Archiving…" pending={archive.isPending} onConfirm={() => archive.mutate()} />
-            ) : null}
-            <Button type="button" size="sm" variant="outline" className="lg:hidden" onClick={() => setHistoryOpen(true)}>
-              <PanelLeft size={15} /> History
-            </Button>
-            {sources.length > 0 ? (
-              <Button type="button" size="sm" variant="outline" aria-expanded={panelOpen || sourcesDialog} onClick={revealSources}>
-                <FileText size={15} /> Sources
-              </Button>
-            ) : null}
-          </div>
-          {demonstration ? null : <div className="basis-full break-words"><ProviderNotice organizationId={organizationId} compact /></div>}
+          <span className="badge badge-green"><span className="live-dot" /> Available</span>
+          {conversationId && titleDraft === null ? <Button type="button" size="sm" variant="ghost" onClick={() => setTitleDraft(threadTitle)}>Rename</Button> : null}
+          {conversationId && archivedAt ? (
+            <Button type="button" size="sm" variant="ghost" disabled={restore.isPending} onClick={() => restore.mutate()}>Restore</Button>
+          ) : conversationId ? (
+            <ConfirmButton size="sm" label="Archive" confirmLabel="Archive and keep messages" pendingLabel="Archiving…" pending={archive.isPending} onConfirm={() => archive.mutate()} />
+          ) : null}
+          <button type="button" className="button button-ghost button-icon context-toggle force" aria-label="Open workspace context" aria-expanded={panelOpen} onClick={() => setPanelOpen((value) => !value)}><FileText size={16} /></button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-4">
-            {!conversationId ? <EmptyThread organizationName={organizationName} onPrompt={setDraft} /> : null}
-            {conversationId && detail.data && detail.data.messages.length === 0 && !send.isPending ? (
-              <EmptyThread organizationName={organizationName} onPrompt={setDraft} />
-            ) : null}
-            {detail.isPending && conversationId ? (
-              <div className="space-y-3">
-                <Skeleton className="h-16 w-2/3" />
-                <Skeleton className="ml-auto h-12 w-1/2" />
+        <div className="assistant-thread">
+          {!conversationId ? <EmptyThread organizationName={organizationName} onPrompt={setDraft} /> : null}
+          {conversationId && detail.data && detail.data.messages.length === 0 && !send.isPending ? (
+            <EmptyThread organizationName={organizationName} onPrompt={setDraft} />
+          ) : null}
+          {detail.isPending && conversationId ? <Skeleton className="h-16 w-2/3" /> : null}
+          {detail.isError ? <RequestError error={detail.error} /> : null}
+          {detail.data?.messages.map((message) => (
+            <MessageView
+              key={message.id}
+              userInitials={personInitials(session.data?.user.full_name ?? "You")}
+              message={message}
+              proposalPending={proposalAction.isPending}
+              onSource={(source) => {
+                setFocusSource(sourceKey(source));
+                setPanelOpen(true);
+              }}
+              onProposal={(proposalId, times) => proposalAction.mutate({ proposalId, times })}
+              onDismiss={(proposalId) => proposalAction.mutate({ proposalId, dismiss: true })}
+            />
+          ))}
+          {send.isPending ? (
+            <article className="assistant-message" aria-live="polite">
+              <span className="assistant-avatar"><Bot size={16} /></span>
+              <div>
+                <strong>ATLAS Assistant</strong>
+                <div className="streaming-line">{streamStatus(phases, streaming)}</div>
+                {streaming ? <RichText id="streaming" text={streaming} /> : null}
+                <Button type="button" size="sm" variant="ghost" onClick={() => abortRef.current?.abort()}>Stop</Button>
               </div>
-            ) : null}
-            {detail.isError ? <RequestError error={detail.error} /> : null}
-            {detail.data?.messages.map((message) => (
-              <MessageView
-                key={message.id}
-                demonstration={demonstration}
-                message={message}
-                proposalPending={proposalAction.isPending}
-                onSource={(source) => {
-                  setFocusSource(sourceKey(source));
-                  revealSources();
-                }}
-                onProposal={(proposalId, times) => proposalAction.mutate({ proposalId, times })}
-                onDismiss={(proposalId) => proposalAction.mutate({ proposalId, dismiss: true })}
-              />
-            ))}
-            {send.isPending ? (
-              <article className="text-sm" aria-live="polite">
-                <p className="text-xs font-medium text-muted-foreground">{streamStatus(phases, streaming)}</p>
-                {streaming ? <div className="mt-2"><RichText id="streaming" text={streaming} /></div> : null}
-              </article>
-            ) : null}
-          </div>
+            </article>
+          ) : null}
+          {notice ? <StatusNote>{notice}</StatusNote> : null}
+          {send.isError && !(send.error instanceof ApiError && send.error.code === "cancelled") ? <FailureNotice error={send.error} onRetry={() => submit()} canRetry={draft.trim().length > 0} /> : null}
+          {rename.error || archive.error || restore.error || proposalAction.error ? <RequestError error={rename.error ?? archive.error ?? restore.error ?? proposalAction.error} /> : null}
         </div>
-        <div className="py-4">
-          <div className="mx-auto w-full max-w-3xl space-y-3">
-            {notice ? <StatusNote>{notice}</StatusNote> : null}
-            {send.isError && !(send.error instanceof ApiError && send.error.code === "cancelled") ? <FailureNotice error={send.error} onRetry={() => submit()} canRetry={draft.trim().length > 0} /> : null}
-            {rename.error || archive.error || restore.error || proposalAction.error ? <RequestError error={rename.error ?? archive.error ?? restore.error ?? proposalAction.error} /> : null}
-            <form
-              className="rounded-2xl border border-border bg-card px-4 py-3 shadow-sm"
-              onSubmit={(event) => {
+        <form className="assistant-composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+          <Textarea
+            aria-label="Ask ATLAS Assistant"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 submit();
-              }}
-            >
-              <Textarea
-                aria-label="Message to ATLAS"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    submit();
-                  }
-                }}
-                placeholder="Ask about records, documents or your organization…"
-                disabled={send.isPending || create.isPending}
-                className="min-h-12 border-0 bg-transparent px-0 py-1 shadow-none focus-visible:ring-0"
-              />
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <p className="text-[10px] uppercase tracking-[0.14em] text-subtle">
-                  Enter to send · Shift + Enter for a new line
-                </p>
-                {send.isPending ? (
-                  <Button type="button" variant="outline" className="rounded-[10px]" onClick={() => abortRef.current?.abort()}>Stop</Button>
-                ) : (
-                  <Button type="submit" className="rounded-[10px]" disabled={create.isPending || draft.trim().length === 0}>Send →</Button>
-                )}
-              </div>
-            </form>
+              }
+            }}
+            placeholder="Ask about customers, work, or knowledge…"
+            disabled={send.isPending || create.isPending}
+          />
+          <div>
+            <span>ATLAS can make mistakes. Verify important information.</span>
+            {send.isPending ? (
+              <Button type="button" size="icon" variant="ghost" aria-label="Stop" onClick={() => abortRef.current?.abort()}>Stop</Button>
+            ) : (
+              <button type="submit" className="button button-primary button-icon" aria-label="Send question" disabled={create.isPending || draft.trim().length === 0}><Send size={15} /></button>
+            )}
           </div>
-        </div>
+        </form>
       </section>
-      {panelOpen && focused ? (
-        <aside className="hidden w-80 shrink-0 flex-col overflow-y-auto rounded-xl border border-border bg-card xl:flex" aria-label="Supporting sources">
-          <div className="flex justify-end border-b border-border px-3 py-2">
-            <Button type="button" size="icon" variant="ghost" aria-label="Close sources" onClick={() => setPanelOpen(false)}><X size={16} /></Button>
-          </div>
-          <SourcePanel source={focused} sources={sources} onSelect={(source) => setFocusSource(sourceKey(source))} />
-        </aside>
-      ) : null}
+      <aside className={`assistant-context ${panelOpen ? "mobile-open" : ""}`} aria-label="CRM context">
+        <header>
+          <h2>CRM context</h2>
+          <span className="badge badge-blue">{recordSources.length} records</span>
+          <button type="button" className="button button-ghost button-icon context-close" aria-label="Close workspace context" onClick={() => setPanelOpen(false)}><X size={16} /></button>
+        </header>
+        <div className="assistant-context-content">
+          {recordSources.length === 0 && documentSources.length === 0 ? (
+            <div className="context-note"><AlertCircle size={15} /><p><strong>Context appears with an answer</strong><small>Customer records and document passages cited in this conversation show up here.</small></p></div>
+          ) : null}
+          {recordSources.map((source) => (
+            <Link key={sourceKey(source)} href={source.record_id ? crmRecordHref(source) : "/crm"} className="context-record">
+              <Building2 size={15} />
+              <span><strong>{source.title}</strong><small>{recordLabel(source)}</small></span>
+              <ArrowRight size={14} />
+            </Link>
+          ))}
+          {documentSources.length > 0 ? (
+            <div className="citation-list">
+              {documentSources.map((source) => (
+                <details key={sourceKey(source)} open={sourceKey(source) === focusSource}>
+                  <summary>{source.title}</summary>
+                  <p>{source.excerpt}</p>
+                </details>
+              ))}
+            </div>
+          ) : null}
+          <div className="context-note"><AlertCircle size={15} /><p><strong>Context is read-only</strong><small>Proposed changes require explicit approval.</small></p></div>
+        </div>
+      </aside>
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
         <DialogContent className="max-h-[80vh] overflow-y-auto">
           <DialogHeader>
@@ -403,6 +398,7 @@ function ConversationHistory({
   busy,
   onCreate,
   onOpen,
+  onClose,
 }: {
   organizationName: string;
   conversations: Conversation[] | undefined;
@@ -417,23 +413,26 @@ function ConversationHistory({
   busy: boolean;
   onCreate: () => void;
   onOpen: (id: string) => void;
+  onClose: () => void;
 }) {
   const filtered = (conversations ?? []).filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
   const customer = filtered.filter((item) => !isEvaluationConversation(item));
   return (
-    <div className="flex h-full min-h-0 flex-col p-4">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-lg text-foreground">Conversations</h2>
-        <Button type="button" size="sm" disabled={creating || busy} onClick={onCreate}>
-          {creating ? "Starting…" : "New chat"}
-        </Button>
-      </div>
+    <>
+      <header>
+        <div><h2>Assistant</h2><p>Workspace conversations</p></div>
+        <button type="button" className="button button-ghost button-icon history-close" aria-label="Close conversation history" onClick={onClose}><X size={16} /></button>
+      </header>
+      <button type="button" className="button button-primary button-md" disabled={creating || busy} onClick={onCreate}>{creating ? "Starting…" : "New conversation"}</button>
       <p className="sr-only">Stored for {organizationName}. A new chat takes its title from the first question.</p>
-      <Input className="mt-4 h-10 rounded-[10px] border-0 bg-secondary" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search conversations…" aria-label="Search conversations" />
-      <select aria-label="Conversation retention" className="mt-2 h-10 w-full rounded-[10px] border-0 bg-secondary px-3 text-sm" value={retention} onChange={(event) => onRetention(event.target.value)}>
-        <option value="active">Active conversations</option>
-        <option value="archived">Archived conversations</option>
-      </select>
+      <label className="module-search"><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search conversations" aria-label="Search assistant conversations" /></label>
+      <label className="toolbar-select">
+        <span className="sr-only">Conversation retention</span>
+        <select aria-label="Conversation retention" value={retention} onChange={(event) => onRetention(event.target.value)}>
+          <option value="active">Active</option>
+          <option value="archived">Archived</option>
+        </select>
+      </label>
       {pending ? <Skeleton className="mt-4 h-16 w-full" /> : null}
       {error ? <div className="mt-4"><RequestError error={error} /></div> : null}
       {conversations && customer.length === 0 ? (
@@ -441,45 +440,23 @@ function ConversationHistory({
           {query.trim() ? "No conversations match this search." : retention === "archived" ? "No archived conversations." : "No conversations yet."}
         </p>
       ) : null}
-      <ul className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
+      <div className="assistant-history-list">
         {customer.map((conversation) => (
-          <ConversationButton
+          <button
+            type="button"
             key={conversation.id}
-            conversation={conversation}
-            selected={conversation.id === conversationId}
+            className={conversation.id === conversationId ? "active" : ""}
+            aria-current={conversation.id === conversationId ? "true" : undefined}
             disabled={creating || busy}
-            onOpen={onOpen}
-          />
+            onClick={() => onOpen(conversation.id)}
+          >
+            <span><Bot size={14} /><strong>{conversation.title}</strong></span>
+            <small>{new Date(conversation.updated_at).toLocaleDateString()}</small>
+          </button>
         ))}
-      </ul>
-    </div>
-  );
-}
-
-function ConversationButton({
-  conversation,
-  selected,
-  disabled,
-  onOpen,
-}: {
-  conversation: Conversation;
-  selected: boolean;
-  disabled: boolean;
-  onOpen: (id: string) => void;
-}) {
-  return (
-    <li>
-      <button
-        type="button"
-        className={`w-full rounded-[10px] px-3 py-2 text-left transition-colors ${selected ? "bg-accent text-foreground" : "hover:bg-accent/60"}`}
-        aria-current={selected ? "true" : undefined}
-        disabled={disabled}
-        onClick={() => onOpen(conversation.id)}
-      >
-        <span className="flex items-center gap-2 text-[13px] text-foreground"><MessageSquare size={14} className="shrink-0 text-muted-foreground" /><span className="truncate">{conversation.title}</span></span>
-        <span className="mt-1 block text-[10px] text-subtle">{new Date(conversation.updated_at).toLocaleString()}</span>
-      </button>
-    </li>
+      </div>
+      <div className="assistant-privacy"><Sparkles size={14} /><p><strong>Grounded in your workspace</strong><small>Answers cite accessible CRM and knowledge records.</small></p></div>
+    </>
   );
 }
 
@@ -491,30 +468,21 @@ function EmptyThread({
   onPrompt: (value: string) => void;
 }) {
   const prompts = [
-    "What can you help me with?",
-    "What information do you have?",
-    "Which companies are in my CRM?",
-    "What documents are available?",
-    "Summarize the lead ",
-    "Draft a follow-up for ",
-    "Request an appointment for ",
-    "Create a follow-up task for ",
+    "Who are our customers?",
+    "Who works in this workspace?",
+    "Which leads should I prioritize?",
+    "How is the business doing?",
+    "What does our warehousing note say?",
+    "Draft a follow-up for a qualified lead",
   ];
   return (
-    <div className="rounded-xl border border-border bg-card px-4 py-6 text-center sm:px-6 sm:py-8">
-      <span className="mx-auto grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><Sparkles size={19} /></span>
-      <h2 className="mt-3 text-lg font-semibold tracking-tight">How can I help?</h2>
-      <p className="mt-1 text-sm leading-5 text-muted-foreground">Ask about customer activity or documents in {organizationName}.</p>
-      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+    <div className="assistant-welcome">
+      <span className="assistant-logo"><Sparkles size={22} /></span>
+      <h2>How can I help?</h2>
+      <p>Ask about customer activity, open work, or trusted knowledge in {organizationName}.</p>
+      <div>
         {prompts.map((prompt) => (
-          <button
-            key={prompt}
-            type="button"
-            className="rounded-lg border border-border bg-background px-3 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:bg-accent hover:text-foreground"
-            onClick={() => onPrompt(prompt)}
-          >
-            {prompt}
-          </button>
+          <button key={prompt} type="button" onClick={() => onPrompt(prompt)}>{prompt}<ArrowRight size={14} /></button>
         ))}
       </div>
     </div>
@@ -522,14 +490,14 @@ function EmptyThread({
 }
 
 function MessageView({
-  demonstration,
+  userInitials,
   message,
   proposalPending,
   onSource,
   onProposal,
   onDismiss,
 }: {
-  demonstration: boolean;
+  userInitials: string;
   message: ChatMessage;
   proposalPending: boolean;
   onSource: (source: MessageSource) => void;
@@ -537,88 +505,99 @@ function MessageView({
   onDismiss: (proposalId: string) => void;
 }) {
   const documents = message.sources.filter((source) => source.kind === "document");
-  const records = message.sources.filter((source) => source.kind === "crm");
   const refused = message.role === "assistant" && message.content.includes(NO_RECORDS);
   if (message.role === "user") {
     return (
-      <article>
-        <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">You</p>
-        <p className="mt-2 whitespace-pre-wrap rounded-[10px] bg-secondary px-4 py-4 text-[15px] leading-6 text-foreground">{message.content}</p>
+      <article className="assistant-message user">
+        <span className="avatar avatar-blue avatar-sm">{userInitials}</span>
+        <div><strong>You</strong><p>{message.content}</p></div>
       </article>
     );
   }
   return (
-    <article>
-      <p className="flex items-center gap-2 text-xs font-medium text-primary"><Bot size={16} /> {demonstration ? "Demonstration assistant" : "ATLAS Assistant"}</p>
-      {refused ? (
-        <div className="mt-3 rounded-[10px] bg-muted px-4 py-3">
-          <p className="text-[10px] uppercase tracking-[0.14em] text-subtle">No supporting evidence</p>
-          <p className="mt-2 whitespace-pre-wrap text-[15px] leading-7">{message.content}</p>
-        </div>
-      ) : (
-        <div className="mt-3 text-[15px] leading-7 text-muted-foreground">
-          <RichText id={message.id} text={message.content} lead />
-        </div>
-      )}
-      {documents.length > 0 ? <SourceList kind="document" sources={documents} onSource={onSource} /> : null}
-      {records.length > 0 ? <SourceList kind="crm" sources={records} onSource={onSource} /> : null}
-      {message.proposals?.map((proposal) => (
-        <ProposalCard key={proposal.id} proposal={proposal} pending={proposalPending} onSubmit={onProposal} onDismiss={onDismiss} />
-      ))}
-      {documents.length > 0 || records.length > 0 ? (
-        <div className="mt-5">
-          <p className="text-sm text-muted-foreground">Relevant actions</p>
-          <div className="mt-3 flex flex-wrap gap-3">
-            {records.map((record) => {
-              const href = record.record_id ? crmRecordHref(record) : "/crm";
-              return (
-                <Link key={`${sourceKey(record)}-action`} href={href} className="rounded-[10px] bg-muted px-4 py-3 text-xs text-primary">
-                  View {recordLabel(record)} →
-                </Link>
-              );
-            })}
-            {documents.length > 0 ? (
-              <Link href="/knowledge" className="rounded-[10px] bg-muted px-4 py-3 text-xs text-primary">
-                Browse knowledge →
-              </Link>
-            ) : null}
+    <article className="assistant-message">
+      <span className="assistant-avatar"><Bot size={16} /></span>
+      <div className="assistant-response">
+        <strong>ATLAS Assistant</strong>
+        {refused ? <p>{message.content}</p> : <RichText id={message.id} text={message.content} />}
+        {message.steps && message.steps.length > 0 ? (
+          <div className="evidence-list">
+            {message.steps.map((step, index) => (
+              <div key={`${message.id}-step-${index}`}>
+                <span>
+                  <strong>{stepLabel(step.tool_name)}</strong>
+                  <small>{step.detail || stepStatus(step.status)}</small>
+                </span>
+              </div>
+            ))}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+        {documents.length > 0 ? <SourceList sources={documents} onSource={onSource} /> : null}
+        {message.proposals?.map((proposal) => (
+          <ProposalCard key={proposal.id} proposal={proposal} pending={proposalPending} onSubmit={onProposal} onDismiss={onDismiss} />
+        ))}
+      </div>
     </article>
   );
 }
 
+function stepStatus(status: string): string {
+  if (status === "succeeded" || status === "completed" || status === "ok") return "Completed";
+  if (status === "failed" || status === "error") return "Needs attention";
+  return status.replaceAll("_", " ");
+}
+
+function stepLabel(tool: string): string {
+  const labels: Record<string, string> = {
+    list_companies: "Companies",
+    list_contacts: "Contacts",
+    list_leads: "Leads",
+    list_members: "Workspace members",
+    list_opportunities: "Pipeline",
+    list_tasks: "Tasks",
+    search_inbox: "Inbox",
+    business_analytics: "Analytics",
+    search_knowledge: "Knowledge",
+    check_availability: "Calendar",
+    list_workflow_runs: "Workflow runs",
+    draft_customer_message: "Draft",
+    propose_appointment: "Appointment proposal",
+    propose_task: "Task proposal",
+    respond: "Reply",
+    clarify: "Clarifying question",
+  };
+  return labels[tool] ?? tool.replaceAll("_", " ");
+}
+
+function personInitials(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "Y";
+}
+
 function SourceList({
-  kind,
   sources,
   onSource,
 }: {
-  kind: "document" | "crm";
   sources: MessageSource[];
   onSource: (source: MessageSource) => void;
 }) {
-  const eyebrow = kind === "document" ? "Company knowledge" : "CRM record";
+  const [open, setOpen] = useState(true);
   return (
-    <div className="mt-4 flex flex-col gap-2">
-      {sources.map((source, index) => (
-        <div key={sourceKey(source)} className="rounded-[10px] bg-muted px-4 py-4">
-          <p className="text-[11px] uppercase tracking-[0.12em] text-success">
-            Source {String(index + 1).padStart(2, "0")} / {eyebrow}
-          </p>
-          <div className="mt-2 flex items-center justify-between gap-4">
-            <p className="min-w-0 truncate text-sm text-foreground">{source.title}</p>
-            <button type="button" className="shrink-0 text-xs text-primary" onClick={() => onSource(source)}>
-              View exact excerpt →
-            </button>
-          </div>
-          <details className="mt-2">
-            <summary className="cursor-pointer text-xs text-muted-foreground">Preview</summary>
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{source.excerpt}</p>
-          </details>
+    <>
+      <button type="button" className="source-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <FileText size={14} /> {sources.length} sources <ChevronDown size={14} className={open ? "rotate-180" : ""} />
+      </button>
+      {open ? (
+        <div className="citation-list">
+          {sources.map((source) => (
+            <details key={sourceKey(source)}>
+              <summary>Knowledge · {source.title}</summary>
+              <p>{source.excerpt}</p>
+              <button type="button" className="text-button" onClick={() => onSource(source)}>Preview in context <ArrowRight size={12} /></button>
+            </details>
+          ))}
         </div>
-      ))}
-    </div>
+      ) : null}
+    </>
   );
 }
 
@@ -748,6 +727,7 @@ function streamStatus(phases: string[], streaming: string): string {
 
 function phaseLabel(phase: string): string | null {
   if (phase === "preparing") return "Preparing";
+  if (phase === "selecting_tools") return "Choosing what to look up";
   if (phase === "searching_crm") return "Searching company records";
   if (phase === "retrieving_documents") return "Retrieving documents";
   if (phase === "verifying") return "Checking the answer against company records";
@@ -801,10 +781,11 @@ function ProposalCard({
         : null;
   const linkLabel = proposal.approval_id ? "Open approval" : proposal.task_id ? "Open tasks" : proposal.lead_id ? "Open lead" : null;
   return (
-    <section className="mt-4 rounded-[10px] border border-border bg-card px-4 py-4">
-      <p className="text-[10px] uppercase tracking-[0.14em] text-primary">Proposed action</p>
-      <h3 className="mt-2 text-sm font-semibold text-foreground">{proposal.title}</h3>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{proposal.summary}</p>
+    <section className="proposed-action">
+      <span><CheckCircle2 size={16} /></span>
+      <div>
+      <strong>Proposed action</strong>
+      <p>{proposal.title}. {proposal.summary}</p>
       <p className="mt-2 text-sm font-medium text-foreground">{proposal.result_label}</p>
       {proposal.status === "proposed" && proposal.kind === "appointment" ? (
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -825,7 +806,8 @@ function ProposalCard({
             <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => onDismiss(proposal.id)}>Dismiss</Button>
           </>
         ) : null}
-        {href && linkLabel ? <Link href={href} className="rounded-[10px] bg-muted px-4 py-2 text-xs text-primary">{linkLabel} →</Link> : null}
+        {href && linkLabel ? <Link href={href} className="text-button">{linkLabel} <ArrowRight size={12} /></Link> : null}
+      </div>
       </div>
     </section>
   );

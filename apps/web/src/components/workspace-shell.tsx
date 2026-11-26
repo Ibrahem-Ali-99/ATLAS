@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Menu, Moon, Sun } from "lucide-react";
+import { ChevronDown, ChevronRight, Menu, Moon, Settings, Sun, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -11,15 +11,6 @@ import { SidebarNav } from "@/components/sidebar-nav";
 import { WorkspaceSearch } from "@/components/workspace-search";
 import { SignOutDialog } from "@/components/sign-out-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, sessionQueryOptions } from "@/lib/api";
 import { isDemoSession } from "@/lib/demo-session";
@@ -33,6 +24,22 @@ function initials(name: string): string {
   return parts.map((part) => part[0]?.toUpperCase() ?? "").join("") || "A";
 }
 
+function mainClass(pathname: string): string {
+  if (pathname.startsWith("/assistant")) return "assistant-main";
+  if (pathname.startsWith("/inbox")) return "inbox-main";
+  if (pathname.startsWith("/crm")) return "crm-main";
+  if (pathname.startsWith("/knowledge")) return "knowledge-main";
+  if (pathname.startsWith("/approvals") || pathname.startsWith("/agent-runs")) return "operations-main";
+  if (pathname.startsWith("/workflows")) return "workflows-main";
+  if (pathname.startsWith("/analytics")) return "analytics-main";
+  if (pathname.startsWith("/campaigns")) return "campaigns-main";
+  if (pathname.startsWith("/monitoring")) return "monitoring-main";
+  if (pathname.startsWith("/integrations")) return "integrations-main";
+  if (pathname.startsWith("/billing")) return "billing-main";
+  if (pathname.startsWith("/settings") || pathname.startsWith("/setup")) return "settings-main";
+  return "";
+}
+
 export function WorkspaceShell({ children }: { children: ReactNode }) {
   return <WorkspaceProvider><WorkspaceShellContent>{children}</WorkspaceShellContent></WorkspaceProvider>;
 }
@@ -42,6 +49,7 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const session = useQuery(sessionQueryOptions);
   const [navOpen, setNavOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const demoRestart = useDemoRestart();
   const [collapsed, setCollapsed] = useState(false);
@@ -93,114 +101,78 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
 
   const user = session.data.user;
   const organizationName = workspace.organizationName;
-  const immersive = pathname === "/assistant";
   const demo = isDemoSession(session.data);
   const accountName = user.full_name;
   const accountDetail = demo ? "Demonstration" : user.email;
+  const crumb = titleForPath(pathname);
 
   return (
-    <div className={cn("min-h-screen bg-background md:grid", collapsed ? "md:grid-cols-[68px_minmax(0,1fr)]" : "md:grid-cols-[240px_minmax(0,1fr)]")}>
-      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-card focus:px-3 focus:py-2 focus:text-sm focus:shadow-sm">Skip to content</a>
-      <aside className="hidden border-r border-border bg-sidebar md:block">
-        <div className="sticky top-0 flex h-screen flex-col">
-          <SidebarNav organizationName={organizationName} collapsed={collapsed} demo={demo} onToggleCollapse={() => setCollapsed((value) => !value)} />
-        </div>
+    <div className={cn("app-shell", collapsed && "sidebar-collapsed")}>
+      <a href="#main" className="sr-only">Skip to content</a>
+      {navOpen ? <button type="button" className="mobile-backdrop" aria-label="Close navigation" onClick={() => setNavOpen(false)} /> : null}
+      <aside className={cn("sidebar", collapsed && "sidebar-collapsed", navOpen && "sidebar-mobile-open")}>
+        <SidebarNav
+          organizationName={organizationName}
+          memberships={workspace.memberships}
+          organizationId={workspace.organizationId}
+          onOrganizationChange={workspace.setOrganizationId}
+          collapsed={collapsed}
+          demo={demo}
+          onToggleCollapse={() => setCollapsed((value) => !value)}
+          onClose={() => setNavOpen(false)}
+          onNavigate={() => setNavOpen(false)}
+        />
       </aside>
-      <div className="flex min-h-screen min-w-0 flex-col">
-        <header className="sticky top-0 z-20 flex h-[60px] shrink-0 items-center justify-between gap-2 border-b border-border bg-card/95 px-3 backdrop-blur md:px-7">
-          <div className="flex min-w-0 items-center gap-1.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="md:hidden"
-              aria-label="Open navigation"
-              onClick={() => setNavOpen(true)}
-            >
-              <Menu className="size-4" />
-            </Button>
-            <p aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-              <span className="hidden max-w-44 truncate md:inline">{organizationName ?? "ATLAS"}</span>
-              <ChevronRight className="hidden size-3 shrink-0 md:block" aria-hidden="true" />
-              <span className="truncate font-medium text-foreground">{titleForPath(pathname)}</span>
-            </p>
+      <div className="main-column">
+        <header className="topbar">
+          <div className="topbar-left">
+            <button type="button" className="button button-ghost button-icon mobile-menu" aria-label="Open navigation" onClick={() => { setCollapsed(false); setNavOpen(true); }}>
+              <Menu size={19} />
+            </button>
+            <div className="breadcrumbs" aria-label="Breadcrumb">
+              <span>{organizationName ?? "ATLAS"}</span>
+              <ChevronRight size={13} aria-hidden="true" />
+              <strong>{crumb}</strong>
+            </div>
             <DemoSessionBadge session={session.data} />
           </div>
-          {workspace.memberships.length > 1 ? (
-            <label className="sr-only" htmlFor="organization-selector">Organization</label>
-          ) : null}
-          {workspace.memberships.length > 1 ? (
-            <select
-              id="organization-selector"
-              aria-label="Organization"
-              value={workspace.organizationId ?? ""}
-              onChange={(event) => workspace.setOrganizationId(event.target.value)}
-              className="min-w-0 max-w-24 rounded-md border border-border bg-background px-1.5 py-1 text-xs sm:max-w-48 sm:px-2"
-            >
-              {workspace.memberships.map((membership) => <option key={membership.organization_id} value={membership.organization_id}>{membership.organization_name}</option>)}
-            </select>
-          ) : null}
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="topbar-actions">
             <WorkspaceSearch />
-            <Button variant="ghost" size="icon" onClick={theme.toggleTheme} aria-label={`Switch to ${theme.theme === "dark" ? "light" : "dark"} theme`} title={`Switch to ${theme.theme === "dark" ? "light" : "dark"} theme`}>
-              {theme.theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
-            </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-haspopup="menu"
-                className="flex items-center gap-3 rounded-md px-2 py-1 text-left hover:bg-accent"
-              >
-                <span className="flex size-8 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-                  {initials(accountName)}
-                </span>
-                <span className="hidden max-w-48 sm:block">
-                  <span className="block truncate text-sm font-medium">{accountName}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{accountDetail}</span>
-                </span>
+            <button type="button" className="button button-ghost button-icon" onClick={theme.toggleTheme} aria-label={`Switch to ${theme.theme === "dark" ? "light" : "dark"} theme`}>
+              {theme.theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+            <div className="profile-wrap">
+              <button type="button" className="profile-button" aria-label="Open profile menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((value) => !value)}>
+                <span className="avatar avatar-blue avatar-sm">{initials(accountName)}</span>
+                <ChevronDown size={13} />
               </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>{accountDetail}</DropdownMenuLabel>
-              {demo ? (
-                <DropdownMenuItem disabled={demoRestart.pending} onSelect={(event) => { event.preventDefault(); void demoRestart.restart(); }}>
-                  {demoRestart.pending ? "Restarting…" : "Restart demonstration"}
-                </DropdownMenuItem>
+              {profileOpen ? (
+                <div className="menu profile-menu">
+                  <div className="profile-summary">
+                    <span className="avatar avatar-blue avatar-sm">{initials(accountName)}</span>
+                    <span><strong>{accountName}</strong><small>{accountDetail}</small></span>
+                  </div>
+                  <div className="menu-separator" />
+                  {demo ? (
+                    <button type="button" disabled={demoRestart.pending} onClick={() => void demoRestart.restart()}>
+                      <span>{demoRestart.pending ? "Restarting…" : "Restart demonstration"}</span>
+                    </button>
+                  ) : (
+                    <>
+                      <Link href="/settings#settings-account" onClick={() => setProfileOpen(false)}><Users size={16} /><span>Profile and preferences</span></Link>
+                      <Link href="/settings" onClick={() => setProfileOpen(false)}><Settings size={16} /><span>Workspace settings</span></Link>
+                    </>
+                  )}
+                  {demo && demoRestart.error ? <p role="alert" className="px-2 py-1 text-xs text-destructive">{demoRestart.error}</p> : null}
+                  <div className="menu-separator" />
+                  <button type="button" onClick={() => { setProfileOpen(false); setSignOutOpen(true); }}><span>Sign out</span></button>
+                </div>
               ) : null}
-              {demo && demoRestart.error ? <p role="alert" className="px-2 py-1.5 text-xs text-destructive">{demoRestart.error}</p> : null}
-              {demo ? null : <DropdownMenuSeparator />}
-              {demo ? null : <DropdownMenuItem asChild><Link href="/settings#settings-account">Profile and preferences</Link></DropdownMenuItem>}
-              {demo ? null : <DropdownMenuItem asChild><Link href="/settings">Workspace settings</Link></DropdownMenuItem>}
-              {demo ? null : <DropdownMenuSeparator />}
-              <DropdownMenuItem
-                onSelect={(event) => {
-                  event.preventDefault();
-                  setSignOutOpen(true);
-                }}
-              >
-                Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </div>
           </div>
         </header>
-        <main
-          id="main"
-          className={
-            immersive
-              ? "h-[calc(100dvh-60px)] min-w-0 overflow-hidden"
-              : "mx-auto min-w-0 w-full max-w-[1320px] flex-1 overflow-x-hidden px-4 py-5 md:px-6 md:py-6"
-          }
-        >
-          {children}
-        </main>
+        <main id="main" className={mainClass(pathname)}>{children}</main>
       </div>
-      <Sheet open={navOpen} onOpenChange={setNavOpen}>
-        <SheetContent aria-describedby={undefined}>
-          <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <SidebarNav organizationName={organizationName} demo={demo} onNavigate={() => setNavOpen(false)} />
-        </SheetContent>
-      </Sheet>
       <SignOutDialog open={signOutOpen} onOpenChange={setSignOutOpen} />
     </div>
   );

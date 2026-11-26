@@ -4,6 +4,7 @@ import { Inter } from "next/font/google";
 import { Providers } from "@/components/providers";
 
 import "./globals.css";
+import "@/styles/atlas-reference.css";
 
 const inter = Inter({ subsets: ["latin"], display: "swap" });
 

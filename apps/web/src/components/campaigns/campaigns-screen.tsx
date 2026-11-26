@@ -63,8 +63,8 @@ function CampaignWorkspace({ organizationId }: { organizationId: string }) {
       }>
         Build audiences and prepare campaign drafts for review.
       </PageHeader>
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)]">
-        <section aria-labelledby="campaign-drafts" className="min-w-0 rounded-xl border border-border bg-card">
+      <div className="campaign-layout">
+        <section aria-labelledby="campaign-drafts" className="panel campaign-library">
           <div className="border-b border-border p-5">
             <h2 id="campaign-drafts" className="font-semibold">Campaigns</h2>
             <div className="relative mt-3">
@@ -75,10 +75,10 @@ function CampaignWorkspace({ organizationId }: { organizationId: string }) {
           {campaigns.isPending ? <div className="p-5"><Skeleton className="h-16" /></div> : campaigns.isError ? (
             <div className="p-5"><RequestError error={campaigns.error} /></div>
           ) : visibleCampaigns.length ? (
-            <ul className="divide-y divide-border">
+            <ul className="campaign-list">
               {visibleCampaigns.map((campaign) => (
                 <li key={campaign.id}>
-                  <button aria-current={selected?.id === campaign.id || undefined} className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-muted aria-current:bg-accent" type="button" onClick={() => setSelectedId(campaign.id)}>
+                  <button aria-current={selected?.id === campaign.id || undefined} className={selected?.id === campaign.id ? "active" : ""} type="button" onClick={() => setSelectedId(campaign.id)}>
                     <span className="flex min-w-0 items-center gap-3">
                       <Mail size={18} className="shrink-0 text-primary" />
                       <span className="min-w-0">
@@ -179,7 +179,7 @@ function CampaignReview({ organizationId, campaign, segment, edit }: {
   });
 
   return (
-    <section aria-label="Campaign review" className="min-w-0 rounded-xl border border-border bg-card">
+    <section aria-label="Campaign review" className="panel campaign-detail">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-5">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

@@ -515,15 +515,19 @@ function EmbeddingGuide({ status }: { status?: { embedding_ready: boolean; embed
       </p>
       {status ? (
         <p className="mt-2 text-sm leading-6">
-          {status.embedding_provider === "double" || status.embedding_model === "demonstration"
-            ? "Search uses the documents in this workspace. A paid search service is not called."
-            : status.embedding_ready
-              ? status.embedding_detail
-              : `An administrator needs to finish document search setup before new files can be indexed. ${status.embedding_detail}`}
+          {status.embedding_ready
+            ? "Search uses the documents in this workspace."
+            : "An administrator needs to finish document search before new files can be indexed."}
           {" "}
           <Link href="/integrations" className="font-medium text-primary underline">Open Integrations</Link>
         </p>
       ) : <p className="mt-2 text-sm text-muted-foreground">Checking document search…</p>}
+      {status ? (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs text-muted-foreground">Administrator diagnostics</summary>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{status.embedding_detail}</p>
+        </details>
+      ) : null}
       {status && status.incompatible_documents > 0 ? (
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {status.incompatible_documents} ready {status.incompatible_documents === 1 ? "document was" : "documents were"} indexed with a different model. Reindex {status.incompatible_documents === 1 ? "it" : "them"} so search uses the current model. The files stay in place.

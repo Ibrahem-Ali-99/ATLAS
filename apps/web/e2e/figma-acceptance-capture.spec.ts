@@ -36,7 +36,7 @@ test("capture populated Overview, CRM, and Assistant screens", async ({ page }) 
     await capture(page, "crm-detail-desktop.png");
   }
 
-  await page.getByRole("link", { name: "AI Assistant", exact: true }).click();
+  await page.getByRole("link", { name: "Assistant", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Assistant", exact: true })).toBeVisible();
   await capture(page, "assistant-desktop.png");
 

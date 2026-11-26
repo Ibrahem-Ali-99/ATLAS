@@ -5,7 +5,7 @@ import { AssistantScreen } from "@/components/assistant/assistant-screen";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export const metadata: Metadata = {
-  title: "AI Assistant",
+  title: "Assistant",
 };
 export const instant = false;
 
