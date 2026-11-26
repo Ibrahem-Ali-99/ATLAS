@@ -2,7 +2,7 @@
 
 ATLAS is one API process and one Next.js app. Training, document ingestion, workflow recovery, and LangGraph checkpoint setup run inside the API process. Do not start a second copy of the API as a worker. Both processes would recover the same rows.
 
-No public host was created for this release. The commands below are the deployment configuration. They do not provision paid accounts.
+No public host was created for this release. The commands below are the deployment configuration. They do not provision paid accounts. The production host, backup, and recovery procedure is in [production.md](production.md).
 
 ## Local Windows workflow
 

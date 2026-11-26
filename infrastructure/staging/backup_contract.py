@@ -12,7 +12,7 @@ from pathlib import Path
 ARCHIVE_RE = re.compile(r"^atlas-\d{8}T\d{6}Z(?:\.tar\.gz|\.tar\.gz\.enc)$")
 PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 BACKUP_PROJECTS_REFUSED = frozenset({"atlas", "infrastructure", "titan", "legalstats"})
-RESTORE_PROJECTS_REFUSED = BACKUP_PROJECTS_REFUSED | {"atlas-staging"}
+RESTORE_PROJECTS_REFUSED = BACKUP_PROJECTS_REFUSED | {"atlas-staging", "atlas-production"}
 REQUIRED_FILES = (
     "globals.sql",
     "uploads.tar",
@@ -116,6 +116,7 @@ def build_manifest(
     created_at: str,
     project: str,
     records: dict[str, dict[str, object]],
+    keys_not_in_archive: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
     for name in REQUIRED_FILES:
         if name not in records:
@@ -123,6 +124,7 @@ def build_manifest(
     postgres = [record for key, record in sorted(records.items()) if key.startswith("postgres-")]
     if not postgres:
         raise BackupContractError("backup_refused missing=postgres")
+    keys = KEYS_NOT_IN_ARCHIVE if keys_not_in_archive is None else keys_not_in_archive
     return {
         "format": 1,
         "created_at": created_at,
@@ -133,7 +135,7 @@ def build_manifest(
         "models": records["models.tar"],
         "n8n": records["n8n.tar"],
         "excluded": list(EXCLUDED),
-        "keys_not_in_archive": list(KEYS_NOT_IN_ARCHIVE),
+        "keys_not_in_archive": list(keys),
     }
 
 

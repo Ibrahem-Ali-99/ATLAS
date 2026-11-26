@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily ATLAS production backup
+
+[Timer]
+OnCalendar=*-*-* 02:40:00 UTC
+Persistent=true
+Unit=atlas-production-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -117,15 +117,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate development and staging Compose configuration
+      - name: Validate development, staging, and production Compose configuration
         run: |
           docker compose --env-file .env.example -f infrastructure/compose.yaml config --quiet
           docker compose --env-file infrastructure/staging/.env.example -f infrastructure/compose.staging.yaml config --quiet
+          docker compose --env-file infrastructure/production/.env.example -f infrastructure/compose.production.yaml config --quiet
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - name: Verify staging preflight rules
-        run: uv run --project apps/api --frozen pytest -c apps/api/pyproject.toml -o addopts= -q infrastructure/staging/test_preflight.py
+      - name: Verify staging and production preflight rules
+        run: uv run --project apps/api --frozen pytest -c apps/api/pyproject.toml -o addopts= -q infrastructure/staging/test_preflight.py infrastructure/production/test_preflight.py infrastructure/production/test_compose_contract.py infrastructure/production/test_migration_contract.py
       - name: Build the API image
         run: docker build -t atlas-api:ci apps/api
       - name: Build the web image

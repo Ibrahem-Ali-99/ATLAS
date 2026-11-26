@@ -1,5 +1,7 @@
 # Staging backup and recovery
 
+Production backup, restore, and incident recovery are in [production.md](production.md). Staging uses the same archive format on its own Compose project.
+
 The backup is a logical Postgres dump plus the upload, model, and n8n directories. It is not a copy of the Postgres data volume. Ollama weights are not included. `nomic-embed-text:v1.5` is pulled again by the embedding provision command. Mailpit mail and Caddy certificates are not included. Let's Encrypt issues a new certificate when Caddy starts with the public name.
 
 The archive does not contain `infrastructure/staging/.env`. Keep that file, or the same values, in a password manager:

@@ -41,7 +41,15 @@ def test_offhost_upload_requires_encryption_and_credentials() -> None:
 
 
 def test_restore_refuses_the_live_projects() -> None:
-    for name in ("atlas", "atlas-staging", "infrastructure", "titan", "legalstats"):
+    protected = (
+        "atlas",
+        "atlas-staging",
+        "atlas-production",
+        "infrastructure",
+        "titan",
+        "legalstats",
+    )
+    for name in protected:
         try:
             backup_contract.assert_project(name, restore=True)
         except backup_contract.BackupContractError as exc:
@@ -49,6 +57,7 @@ def test_restore_refuses_the_live_projects() -> None:
         else:
             raise AssertionError(f"{name} was accepted for restore")
     backup_contract.assert_project("atlas-staging", restore=False)
+    backup_contract.assert_project("atlas-production", restore=False)
 
 
 def test_dpapi_store_persists_and_retrieves_without_plaintext_file(

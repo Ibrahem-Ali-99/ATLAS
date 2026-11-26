@@ -1,8 +1,21 @@
 # One public origin. FastAPI routes are /api/v1, so the prefix is forwarded as-is.
 # A *.localhost name gets Caddy's local CA. A public name gets Let's Encrypt.
-{$STAGING_HOST:atlas.localhost} {
+# Staging sets ATLAS_SITE_HOST from STAGING_HOST. Production sets it from PRODUCTION_HOST.
+{$ATLAS_SITE_HOST:atlas.localhost} {
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options DENY
+		Content-Security-Policy "frame-ancestors 'none'"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		-Server
+	}
+	@public not host localhost *.localhost 127.0.0.1
+	header @public Strict-Transport-Security "max-age=15552000"
+
 	@api expression `{http.request.uri.path}.startsWith("/api/") || {http.request.uri.path} == "/api"`
 	handle @api {
+		header Cache-Control "no-store"
 		reverse_proxy api:8000 {
 			flush_interval -1
 			transport http {

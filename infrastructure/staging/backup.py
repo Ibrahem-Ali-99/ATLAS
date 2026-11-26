@@ -85,7 +85,9 @@ def cipher_file(
     dest: Path,
     passphrase: str,
     env: dict[str, str],
+    compose_file: Path | None = None,
 ) -> None:
+    selected = compose_file or COMPOSE_FILE
     command = [
         "docker",
         "compose",
@@ -96,7 +98,7 @@ def cipher_file(
         "--env-file",
         str(env_file),
         "-f",
-        str(COMPOSE_FILE),
+        str(selected),
         "run",
         "-T",
         "--rm",
@@ -143,11 +145,19 @@ def read_env_file(path: Path) -> dict[str, str]:
 
 
 class DockerBackup:
-    def __init__(self, project: str, env_file: Path, env: dict[str, str]) -> None:
+    def __init__(
+        self,
+        project: str,
+        env_file: Path,
+        env: dict[str, str],
+        compose_file: Path | None = None,
+        postgres_user_key: str = "STAGING_POSTGRES_USER",
+    ) -> None:
         self.project = project
         self.env_file = env_file
         self.env = env
-        self.user = env.get("STAGING_POSTGRES_USER", "atlas")
+        self.compose_file = compose_file or COMPOSE_FILE
+        self.user = env.get(postgres_user_key, "atlas")
 
     def databases(self) -> list[str]:
         result = self._compose(
@@ -232,7 +242,16 @@ class DockerBackup:
         self._stream(args, path, f"{service}_archive_failed")
 
     def encrypt(self, source: Path, dest: Path, passphrase: str) -> None:
-        cipher_file(self.project, self.env_file, "enc", source, dest, passphrase, self.env)
+        cipher_file(
+            self.project,
+            self.env_file,
+            "enc",
+            source,
+            dest,
+            passphrase,
+            self.env,
+            compose_file=self.compose_file,
+        )
 
     def upload(self, archive: Path, uri: str, endpoint: str) -> None:
         key = uri[len("s3://") :]
@@ -298,7 +317,7 @@ class DockerBackup:
             "--env-file",
             str(self.env_file),
             "-f",
-            str(COMPOSE_FILE),
+            str(self.compose_file),
             *args,
         ]
         result = subprocess.run(
@@ -335,6 +354,9 @@ def create_backup(
     access_key: str,
     secret_key: str,
     now: datetime | None = None,
+    compose_file: Path | None = None,
+    postgres_user_key: str = "STAGING_POSTGRES_USER",
+    keys_not_in_archive: tuple[str, ...] | None = None,
 ) -> str:
     assert_project(project, restore=False)
     decision = offhost_decision(s3_uri, passphrase, access_key, secret_key)
@@ -347,7 +369,13 @@ def create_backup(
     work = backup_dir / f"{stamp}.partial"
     plain = backup_dir / f"{stamp}.tar.gz"
     encrypted = backup_dir / f"{stamp}.tar.gz.enc"
-    docker = DockerBackup(project, env_file, env)
+    docker = DockerBackup(
+        project,
+        env_file,
+        env,
+        compose_file=compose_file,
+        postgres_user_key=postgres_user_key,
+    )
     n8n_stopped = False
     try:
         work.mkdir()
@@ -375,6 +403,7 @@ def create_backup(
             created_at=moment.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
             project=project,
             records=records,
+            keys_not_in_archive=keys_not_in_archive,
         )
         write_manifest(work / "manifest.json", manifest)
         pack(work, plain)

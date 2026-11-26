@@ -42,3 +42,4 @@ infrastructure/staging/local-ca.crt
 infrastructure/staging/accept-ca.crt
 infrastructure/staging/backup-proof-ca.crt
 infrastructure/staging/backups/
+infrastructure/production/backups/

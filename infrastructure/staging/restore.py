@@ -41,11 +41,19 @@ class RestoreFailed(Exception):
 
 
 class DockerRestore:
-    def __init__(self, project: str, env_file: Path, env: dict[str, str]) -> None:
+    def __init__(
+        self,
+        project: str,
+        env_file: Path,
+        env: dict[str, str],
+        compose_file: Path | None = None,
+        postgres_user_key: str = "STAGING_POSTGRES_USER",
+    ) -> None:
         self.project = project
         self.env_file = env_file
         self.env = env
-        self.user = env.get("STAGING_POSTGRES_USER", "atlas")
+        self.compose_file = compose_file or COMPOSE_FILE
+        self.user = env.get(postgres_user_key, "atlas")
 
     def compose(
         self, args: list[str], stdin: bytes | None = None
@@ -60,7 +68,7 @@ class DockerRestore:
             "--env-file",
             str(self.env_file),
             "-f",
-            str(COMPOSE_FILE),
+            str(self.compose_file),
             *args,
         ]
         result = subprocess.run(
@@ -270,9 +278,19 @@ def decrypt(
     dest: Path,
     passphrase: str,
     env: dict[str, str],
+    compose_file: Path | None = None,
 ) -> None:
     try:
-        cipher_file(project, env_file, "dec", source, dest, passphrase, env)
+        cipher_file(
+            project,
+            env_file,
+            "dec",
+            source,
+            dest,
+            passphrase,
+            env,
+            compose_file=compose_file,
+        )
     except BackupFailed as exc:
         raise RestoreFailed(exc.reason) from exc
 
@@ -350,12 +368,24 @@ def compare_upload_trees(expected: Path, actual: dict[str, str]) -> str:
 
 
 def verify_restored_uploads(
-    *, project: str, env_file: Path, archive: Path, passphrase: str
+    *,
+    project: str,
+    env_file: Path,
+    archive: Path,
+    passphrase: str,
+    compose_file: Path | None = None,
+    postgres_user_key: str = "STAGING_POSTGRES_USER",
 ) -> str:
     """Compare restored storage with the uploaded-files archive, read-only."""
     assert_project(project, restore=True)
     env = read_env_file(env_file)
-    docker = DockerRestore(project, env_file, env)
+    docker = DockerRestore(
+        project,
+        env_file,
+        env,
+        compose_file=compose_file,
+        postgres_user_key=postgres_user_key,
+    )
     with tempfile.TemporaryDirectory(prefix="atlas-upload-verify-") as temporary:
         root = Path(temporary)
         tar_path = root / "archive.tar.gz"
@@ -416,12 +446,26 @@ def database_name(record_file: str) -> str:
     return name
 
 
-def restore_backup(*, project: str, env_file: Path, archive: Path, passphrase: str) -> str:
+def restore_backup(
+    *,
+    project: str,
+    env_file: Path,
+    archive: Path,
+    passphrase: str,
+    compose_file: Path | None = None,
+    postgres_user_key: str = "STAGING_POSTGRES_USER",
+) -> str:
     assert_project(project, restore=True)
     env = read_env_file(env_file)
     if archive.suffix == ".enc" and not passphrase:
         raise BackupContractError("backup_refused passphrase_required")
-    docker = DockerRestore(project, env_file, env)
+    docker = DockerRestore(
+        project,
+        env_file,
+        env,
+        compose_file=compose_file,
+        postgres_user_key=postgres_user_key,
+    )
     with tempfile.TemporaryDirectory(prefix="atlas-restore-") as temporary:
         root = Path(temporary)
         tar_path = archive

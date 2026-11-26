@@ -1,7 +1,11 @@
 node_modules
 .next
-.next-e2e
+.next*
 e2e
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
 playwright-report
 test-results
 *.log
