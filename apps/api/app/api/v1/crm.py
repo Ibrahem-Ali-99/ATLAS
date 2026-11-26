@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Query, Response
@@ -179,32 +179,33 @@ def reorder_pipeline_stages(
     ]
 
 
+def _opportunity_payload(row: Opportunity) -> dict[str, object]:
+    return {
+        "id": row.id,
+        "title": row.title,
+        "value": row.value,
+        "currency": row.currency,
+        "stage": row.stage,
+        "probability": row.probability,
+        "owner_user_id": row.owner_user_id,
+        "company_id": row.company_id,
+        "contact_id": row.contact_id,
+        "lead_id": row.lead_id,
+        "expected_close_date": row.expected_close_date,
+        "loss_reason": row.loss_reason,
+        "archived_at": row.archived_at,
+    }
+
+
 @router.get("/opportunities")
-def list_opportunities(member: Member, db: DbSession) -> list[dict[str, object]]:
-    rows = db.scalars(
-        select(Opportunity)
-        .where(
-            Opportunity.organization_id == member.organization.id, Opportunity.archived_at.is_(None)
-        )
-        .order_by(Opportunity.updated_at.desc())
-    ).all()
-    return [
-        {
-            "id": row.id,
-            "title": row.title,
-            "value": row.value,
-            "currency": row.currency,
-            "stage": row.stage,
-            "probability": row.probability,
-            "owner_user_id": row.owner_user_id,
-            "company_id": row.company_id,
-            "contact_id": row.contact_id,
-            "lead_id": row.lead_id,
-            "expected_close_date": row.expected_close_date,
-            "loss_reason": row.loss_reason,
-        }
-        for row in rows
-    ]
+def list_opportunities(
+    member: Member, db: DbSession, include_archived: bool = False
+) -> list[dict[str, object]]:
+    query = select(Opportunity).where(Opportunity.organization_id == member.organization.id)
+    if not include_archived:
+        query = query.where(Opportunity.archived_at.is_(None))
+    rows = db.scalars(query.order_by(Opportunity.updated_at.desc())).all()
+    return [_opportunity_payload(row) for row in rows]
 
 
 @router.post("/opportunities", status_code=201)
@@ -313,6 +314,41 @@ def update_opportunity(
     else:
         db.commit()
     return {"id": row.id, "title": row.title, "stage": row.stage, "loss_reason": row.loss_reason}
+
+
+@router.delete("/opportunities/{opportunity_id}", status_code=204)
+def archive_opportunity(
+    opportunity_id: uuid.UUID, member: CsrfMember, db: DbSession
+) -> Response:
+    row = db.scalar(
+        select(Opportunity).where(
+            Opportunity.id == opportunity_id,
+            Opportunity.organization_id == member.organization.id,
+            Opportunity.archived_at.is_(None),
+        )
+    )
+    if row is None:
+        raise AppError(404, "opportunity_not_found", "Opportunity not found")
+    row.archived_at = datetime.now(UTC)
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.post("/opportunities/{opportunity_id}/restore")
+def restore_opportunity(
+    opportunity_id: uuid.UUID, member: CsrfMember, db: DbSession
+) -> dict[str, object]:
+    row = db.scalar(
+        select(Opportunity).where(
+            Opportunity.id == opportunity_id,
+            Opportunity.organization_id == member.organization.id,
+        )
+    )
+    if row is None:
+        raise AppError(404, "opportunity_not_found", "Opportunity not found")
+    row.archived_at = None
+    db.commit()
+    return _opportunity_payload(row)
 
 
 @router.delete("/pipeline/stages/{stage_key}", status_code=204)

@@ -32,8 +32,9 @@ export function OverviewScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
   const [scopeByOrganization, setScopeByOrganization] = useState<Record<string, DataScope>>({});
+  const [period, setPeriod] = useState("30d");
   const scope = organizationId ? scopeByOrganization[organizationId] ?? storedScope(organizationId) : "all";
-  const analytics = useQuery({ queryKey: ["analytics", organizationId, scope], queryFn: () => getAnalytics(organizationId ?? "", scope), enabled: Boolean(organizationId) });
+  const analytics = useQuery({ queryKey: ["analytics", organizationId, scope, period], queryFn: () => getAnalytics(organizationId ?? "", scope, { period }), enabled: Boolean(organizationId) });
   const companies = useQuery({ queryKey: ["overview-companies", organizationId], queryFn: () => listCompanies(organizationId ?? "", { pageSize: 100 }), enabled: Boolean(organizationId) });
   const leads = useQuery({ queryKey: ["overview-leads", organizationId], queryFn: () => listLeads(organizationId ?? "", { pageSize: 100 }), enabled: Boolean(organizationId) });
   const inquiries = useQuery({ queryKey: ["overview-inquiries", organizationId], queryFn: () => listInquiries(organizationId ?? "", { pageSize: 100 }), enabled: Boolean(organizationId) });
@@ -58,6 +59,7 @@ export function OverviewScreen() {
       </header>
       {empty ? <EmptyWorkspace /> : <>
         <Kpis data={analytics.data} />
+        <PeriodSummary data={analytics.data} period={period} onPeriod={setPeriod} />
         <div className="grid gap-4 xl:grid-cols-[1.35fr_0.9fr]" data-testid="overview-top-content">
           <Pipeline data={analytics.data} />
           <Attention approvals={approvals.data?.items ?? []} pending={approvals.isPending} error={approvals.error} />
@@ -135,6 +137,56 @@ function NewOpportunity({ organizationId, companies }: { organizationId: string;
       {created ? <p role="status" className="text-xs text-success">Opportunity created. <Link href="/crm?tab=opportunities" className="underline">Open pipeline</Link></p> : null}
     </>
   );
+}
+
+function PeriodSummary({ data, period, onPeriod }: { data: AnalyticsSnapshot; period: string; onPeriod: (value: string) => void }) {
+  const sales = data.sales;
+  const comparison = data.comparison;
+  const money = sales?.currencies ?? [];
+  return (
+    <section className="rounded-xl border border-border bg-card p-4" aria-label="Period performance" data-testid="overview-period">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold">This period</h2>
+          <p className="mt-1 text-xs text-muted-foreground">{data.period ? `${data.period.start} to ${data.period.end}` : "Selected dates"}{comparison ? ` · previous ${comparison.previous_period.start} to ${comparison.previous_period.end}` : ""}</p>
+        </div>
+        <label className="grid gap-1 text-sm">Date range
+          <select aria-label="Overview date range" className="h-9 rounded-md border border-border bg-background px-2" value={period} onChange={(event) => onPeriod(event.target.value)}>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="90d">Last 90 days</option>
+          </select>
+        </label>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <PeriodLink href="/crm?tab=leads" label="Leads created" value={comparison?.leads_created.current ?? 0} delta={comparison?.leads_created} />
+        <PeriodLink href="/crm?tab=opportunities" label="Opportunities" value={sales?.opportunities_total ?? 0} delta={comparison?.opportunities_created} />
+        <PeriodLink href="/inbox" label="Conversations" value={comparison?.conversations.current ?? 0} delta={comparison?.conversations} />
+        <PeriodLink href="/workflows" label="Overdue tasks" value={sales?.tasks_overdue ?? 0} detail={`${sales?.tasks_completed ?? 0} completed in this period`} />
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div>
+          <h3 className="text-sm font-medium">Pipeline value</h3>
+          {money.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No opportunity amounts are stored for this period.</p> : (
+            <ul className="mt-2 space-y-1 text-sm">{money.map((item) => <li key={item.currency} className="flex justify-between"><span>{item.currency}</span><span className="tabular-nums">{item.value == null ? "No amount stored" : item.value.toLocaleString()}</span></li>)}</ul>
+          )}
+          <p className="mt-2 text-xs text-muted-foreground">{sales?.win_rate == null ? "No won or lost opportunities in this period." : `${Math.round(sales.win_rate * 100)}% won, ${sales.loss_rate == null ? "" : `${Math.round(sales.loss_rate * 100)}% lost`}. Amounts stay in their own currency.`}</p>
+          <Link className="mt-2 inline-block text-xs font-medium text-primary" href="/analytics">Open analytics</Link>
+        </div>
+        <div>
+          <h3 className="text-sm font-medium">Appointments and approvals</h3>
+          <p className="mt-2 text-sm">{data.calendar.booked} booked, {data.calendar.cancelled} cancelled.</p>
+          <p className="mt-1 text-sm">{data.approvals.pending} approvals waiting now.</p>
+          <div className="mt-2 flex flex-wrap gap-3 text-xs font-medium"><Link className="text-primary" href="/crm?tab=leads">Leads</Link><Link className="text-primary" href="/approvals">Approvals</Link><Link className="text-primary" href="/workflows">Workflows</Link></div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PeriodLink({ href, label, value, delta, detail }: { href: string; label: string; value: number; delta?: { delta: number; previous: number; change_rate: number | null }; detail?: string }) {
+  const change = !delta ? null : delta.change_rate == null ? "No earlier activity" : `${delta.delta > 0 ? "+" : ""}${Math.round(delta.change_rate * 1000) / 10}% vs previous`;
+  return <Link href={href} className="rounded-lg border border-border p-3 hover:bg-accent/40"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>{change ? <p className="mt-1 text-xs text-muted-foreground">{change}</p> : null}{detail ? <p className="mt-1 text-xs text-muted-foreground">{detail}</p> : null}</Link>;
 }
 
 function Kpis({ data }: { data: AnalyticsSnapshot }) {

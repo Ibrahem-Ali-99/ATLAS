@@ -1,14 +1,14 @@
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.core.errors import AppError
-from app.domains.analytics.service import snapshot
+from app.domains.analytics.service import report_csv, snapshot
 from app.domains.crm import service as crm
 from app.domains.evaluation.service import list_evaluations, start_evaluation
 from app.domains.identity.dependencies import CsrfAdmin, CsrfMember, DbSession, Member
@@ -49,30 +49,8 @@ def get_analytics(
     owner_user_id: uuid.UUID | None = None,
     channel: str | None = None,
 ) -> dict[str, Any]:
-    if period not in {"7d", "30d", "90d", "custom"}:
-        raise AppError(422, "invalid_analytics_period", "Unsupported analytics period")
-    if period == "custom":
-        if start_date is None or end_date is None or not 0 <= (end_date - start_date).days <= 365:
-            raise AppError(
-                422, "invalid_analytics_dates", "Choose an ordered date range of up to 366 days"
-            )
-        days = (end_date - start_date).days + 1
-    else:
-        days = int(period[:-1])
-        start_date = end_date = None
-    if channel is not None and channel not in {"email", "whatsapp", "webchat", "website", "sms"}:
-        raise AppError(422, "invalid_analytics_channel", "Unsupported conversation channel")
-    if (
-        owner_user_id is not None
-        and db.scalar(
-            select(Membership.id).where(
-                Membership.organization_id == member.organization.id,
-                Membership.user_id == owner_user_id,
-            )
-        )
-        is None
-    ):
-        raise AppError(404, "owner_not_found", "Opportunity owner is not in this organization")
+    days, start_date, end_date = _analytics_window(period, start_date, end_date)
+    _analytics_filters(db, member.organization.id, owner_user_id, channel)
     return snapshot(
         db,
         member.organization.id,
@@ -83,6 +61,87 @@ def get_analytics(
         owner_user_id=owner_user_id,
         channel=channel,
     )
+
+
+@router.get("/analytics/export")
+def export_analytics(
+    member: Member,
+    db: DbSession,
+    report: str = "opportunities",
+    scope: DataScope = DataScope.operational,
+    period: str = "30d",
+    start_date: date | None = None,
+    end_date: date | None = None,
+    owner_user_id: uuid.UUID | None = None,
+    channel: str | None = None,
+) -> Response:
+    reports = {
+        "leads",
+        "opportunities",
+        "conversations",
+        "tasks",
+        "appointments",
+        "campaigns",
+        "workflows",
+        "approvals",
+    }
+    if report not in reports:
+        raise AppError(422, "invalid_analytics_report", "Unsupported analytics report")
+    _days, start_date, end_date = _analytics_window(period, start_date, end_date)
+    _analytics_filters(db, member.organization.id, owner_user_id, channel)
+    assert start_date is not None and end_date is not None
+    filename, text = report_csv(
+        db,
+        member.organization.id,
+        scope,
+        report,
+        datetime.combine(start_date, datetime.min.time(), UTC),
+        datetime.combine(end_date, datetime.max.time(), UTC),
+        owner_user_id,
+        channel,
+    )
+    return Response(
+        content=text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _analytics_window(
+    period: str, start_date: date | None, end_date: date | None
+) -> tuple[int, date | None, date | None]:
+    if period not in {"7d", "30d", "90d", "custom"}:
+        raise AppError(422, "invalid_analytics_period", "Unsupported analytics period")
+    if period == "custom":
+        if start_date is None or end_date is None or not 0 <= (end_date - start_date).days <= 365:
+            raise AppError(
+                422, "invalid_analytics_dates", "Choose an ordered date range of up to 366 days"
+            )
+        return (end_date - start_date).days + 1, start_date, end_date
+    days = int(period[:-1])
+    today = datetime.now(UTC).date()
+    return days, today - timedelta(days=days - 1), today
+
+
+def _analytics_filters(
+    db: DbSession,
+    organization_id: uuid.UUID,
+    owner_user_id: uuid.UUID | None,
+    channel: str | None,
+) -> None:
+    if channel is not None and channel not in {"email", "whatsapp", "webchat", "website", "sms"}:
+        raise AppError(422, "invalid_analytics_channel", "Unsupported conversation channel")
+    if (
+        owner_user_id is not None
+        and db.scalar(
+            select(Membership.id).where(
+                Membership.organization_id == organization_id,
+                Membership.user_id == owner_user_id,
+            )
+        )
+        is None
+    ):
+        raise AppError(404, "owner_not_found", "Opportunity owner is not in this organization")
 
 
 @router.get("/ml/model")

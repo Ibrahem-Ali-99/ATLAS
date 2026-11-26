@@ -74,6 +74,21 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   return payload as T;
 }
 
+export async function apiText(path: string): Promise<{ text: string; filename: string | null }> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { credentials: "include", cache: "no-store" });
+  } catch {
+    throw new ApiError(0, "network_error", "The API is unreachable. Start the backend and try again.");
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as ErrorEnvelope | null;
+    throw new ApiError(response.status, payload?.error?.code ?? "request_failed", payload?.error?.message ?? "Request failed");
+  }
+  const match = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") ?? "");
+  return { text: await response.text(), filename: match?.[1] ?? null };
+}
+
 export async function getSession(): Promise<AuthSession> {
   const session = await apiFetch<AuthSession>("/api/v1/auth/me");
   setCsrfToken(session.csrf_token);

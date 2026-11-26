@@ -3,13 +3,14 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
-import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { DataScopeControl } from "@/components/data-scope";
 import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getAnalytics, type AnalyticsSnapshot, type StatusCount } from "@/lib/intelligence";
+import { downloadAnalyticsReport, getAnalytics, type AnalyticsSnapshot, type PeriodDelta, type StatusCount } from "@/lib/intelligence";
 import { listTeam } from "@/lib/organization";
 import { isDataScope, type DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
@@ -26,6 +27,9 @@ function AnalyticsWorkspace({ organizationId }: { organizationId: string }) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [ownerUserId, setOwnerUserId] = useState("");
+  const [report, setReport] = useState("opportunities");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<Error | null>(null);
   const team = useQuery({ queryKey: ["analytics-team", organizationId], queryFn: () => listTeam(organizationId) });
   const custom = period === "custom";
   const span = (Date.parse(endDate) - Date.parse(startDate)) / 86_400_000;
@@ -61,7 +65,27 @@ function AnalyticsWorkspace({ organizationId }: { organizationId: string }) {
               <option value="">All owners</option>{team.data?.filter((item) => item.is_active).map((item) => <option key={item.user_id} value={item.user_id}>{item.full_name}</option>)}
             </select>
           </label>
+          <label>Export
+            <select aria-label="Analytics report" value={report} onChange={(event) => setReport(event.target.value)}>
+              <option value="opportunities">Opportunities</option>
+              <option value="leads">Leads</option>
+              <option value="conversations">Conversations</option>
+              <option value="tasks">Tasks</option>
+              <option value="appointments">Appointments</option>
+              <option value="campaigns">Campaigns</option>
+              <option value="workflows">Workflows</option>
+              <option value="approvals">Approvals</option>
+            </select>
+          </label>
+          <Button type="button" variant="outline" disabled={!valid || exporting} onClick={() => {
+            setExporting(true);
+            setExportError(null);
+            void downloadAnalyticsReport(organizationId, scope, report, filters)
+              .catch((error: unknown) => setExportError(error instanceof Error ? error : new Error("Export failed")))
+              .finally(() => setExporting(false));
+          }}>{exporting ? "Exporting…" : "Download CSV"}</Button>
         </div>
+        {exportError ? <RequestError error={exportError} /> : null}
         <DataScopeControl value={scope} advanced onChange={(next) => {
           setScope(next);
           window.localStorage.setItem(`atlas.dashboard.scope.${organizationId}`, next);
@@ -89,24 +113,26 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
           No leads or inquiries are stored in this scope.
         </p>
       ) : null}
+      {data.comparison ? <Comparison comparison={data.comparison} /> : null}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <Metric label="Active companies" value={String(data.companies_total)} detail="Customer accounts in the selected scope." />
-        <Metric label="Leads" value={String(data.leads_total)} detail="Leads in the selected scope." />
-        <Metric label="Open inquiries" value={String(data.open_inquiries)} detail="Customer requests in the selected scope." />
+        <Metric label="Active companies" value={String(data.companies_total)} detail="Customer accounts in the selected scope." href="/crm?tab=companies" />
+        <Metric label="Leads" value={String(data.leads_total)} detail="Leads in the selected scope." href="/crm?tab=leads" />
+        <Metric label="Open inquiries" value={String(data.open_inquiries)} detail="Customer requests in the selected scope." href="/crm?tab=inquiries" />
         <Metric
           label="Won or lost"
           value={rate}
           detail={`${data.conversion.won} won, ${data.conversion.lost} lost. ${data.conversion.definition}`}
+          href="/crm?tab=leads"
         />
-        <Metric label="Automation" value={automation} detail={data.automation.success_rate === null ? "No completed or failed runs" : data.automation.definition} />
+        <Metric label="Automation" value={data.workflow_performance?.success_rate == null ? automation : `${Math.round(data.workflow_performance.success_rate * 1000) / 10}%`} detail={data.workflow_performance ? `${data.workflow_performance.successful} successful of ${data.workflow_performance.denominator} finished runs in this period.` : data.automation.definition} href="/workflows" />
       </div>
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         {data.customer_activity ? <CustomerActivity rows={data.customer_activity} /> : null}
         <LeadPipeline data={data} />
       </div>
       {data.sales ? <OpportunityAnalytics sales={data.sales} /> : null}
-      {data.support ? <Metric label="First response" value={data.support.average_first_response_seconds === null ? "Unavailable" : responseTime(data.support.average_first_response_seconds)} detail={`${data.support.first_response_sample_size} conversations with a persisted response.`} /> : null}
-      {data.sales ? <TrendSection title="Pipeline value by stage and currency" rows={data.sales.stage_trend.map((item) => ({ day: item.day, label: `${item.stage} · ${item.currency}`, value: item.value }))} unit="value" /> : null}
+      {data.support ? <div className="grid gap-3 md:grid-cols-2"><Metric label="First response" value={data.support.average_first_response_seconds === null ? "Unavailable" : responseTime(data.support.average_first_response_seconds)} detail={`${data.support.first_response_sample_size} conversations with a persisted response.`} href="/inbox" /><Metric label="Resolution" value={data.support.average_resolution_seconds == null ? "Unavailable" : responseTime(data.support.average_resolution_seconds)} detail={data.support.resolution_definition ?? "No resolved conversations in this period."} href="/inbox" /></div> : null}
+      {data.sales ? <TrendSection title="Pipeline value by stage and currency" rows={data.sales.stage_trend.filter((item) => item.value != null).map((item) => ({ day: item.day, label: `${item.stage} · ${item.currency}`, value: item.value ?? 0 }))} unit="value" /> : null}
       {data.support ? <TrendSection title="Conversation volume by channel" rows={data.support.volume_trend.map((item) => ({ day: item.day, label: item.channel, value: item.count }))} unit="conversations" /> : null}
       {data.ai ? <TrendSection title="AI requests and failures" rows={data.ai.trend.map((item) => ({ day: item.day, label: item.status, value: item.count }))} unit="requests" /> : null}
       {data.workflow_performance ? <section className="rounded-xl border border-border bg-card p-4" aria-label="Workflow performance"><h2 className="text-base text-foreground">Workflow performance</h2><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3"><Metric label="Executions" value={String(data.workflow_performance.total)} detail={`${data.workflow_performance.pending} pending · ${data.workflow_performance.running} running.`} /><Metric label="Workflow success" value={data.workflow_performance.success_rate === null ? "Unavailable" : `${Math.round(data.workflow_performance.success_rate * 100)}%`} detail={`${data.workflow_performance.successful} successful / ${data.workflow_performance.denominator} terminal executions.`} /><Metric label="Failed workflows" value={String(data.workflow_performance.failed)} detail="Failed and needs-attention terminal runs." /></div><TrendSection title="Successful versus failed executions" rows={data.workflow_performance.trend.filter((item) => ["completed", "failed", "needs_attention"].includes(item.status)).map((item) => ({ day: item.day, label: item.status, value: item.count }))} unit="runs" /></section> : null}
@@ -123,16 +149,20 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
               <XAxis dataKey="day" tickFormatter={shortDay} minTickGap={28} tick={{ fill: "var(--muted-foreground)", fontSize: 12 }} axisLine={false} tickLine={false} />
               <YAxis allowDecimals={false} width={28} tick={{ fill: "var(--muted-foreground)", fontSize: 12 }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={chartTooltip} />
-              <Line type="monotone" dataKey="count" stroke="var(--primary)" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Legend />
+              <Line type="monotone" dataKey="count" name="Leads" stroke="var(--primary)" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
       </section>
+      {data.qualification_trend ? <QualificationTrend rows={data.qualification_trend} /> : null}
+      {data.campaigns ? <Campaigns campaigns={data.campaigns} /> : null}
       <div className="grid gap-3 md:grid-cols-3">
         <Metric
           label="Approvals"
           value={String(data.approvals.pending)}
-          detail={`${data.approvals.pending} pending, ${data.approvals.approved} approved, ${data.approvals.completed} completed, ${data.approvals.needs_attention} need attention.`}
+          detail={`${data.approvals.pending} pending now. ${data.approval_activity ? `${data.approval_activity.created} created in this period. ${data.approval_activity.definition}` : ""}`}
+          href="/approvals"
         />
         <Metric
           label="Follow-ups"
@@ -142,7 +172,8 @@ function AnalyticsBody({ data }: { data: AnalyticsSnapshot }) {
         <Metric
           label="Delivery"
           value={String(data.email.sandbox_sent)}
-          detail={`${data.email.sandbox_sent} sandbox emails, ${data.email.live_sent} live emails, ${data.email.failed} failed. Calendar booked ${data.calendar.booked}, cancelled ${data.calendar.cancelled}. ${data.calendar.notice}`}
+          detail={`${data.email.sandbox_sent} sandbox emails, ${data.email.live_sent} live emails, ${data.email.failed} failed in this period. Appointments booked ${data.calendar.booked}, cancelled ${data.calendar.cancelled}. ${data.calendar.notice}`}
+          href="/crm?tab=leads"
         />
       </div>
       <p className="text-xs leading-5 text-subtle">
@@ -227,7 +258,7 @@ function OpportunityAnalytics({ sales }: { sales: NonNullable<AnalyticsSnapshot[
   const conversion = sales.lead_to_opportunity;
   const won = new Map<string, { count: number; value: number }>();
   for (const item of sales.stage_trend) {
-    if (item.stage !== "won") continue;
+    if (item.stage !== "won" || item.value == null) continue;
     const currency = won.get(item.currency) ?? { count: 0, value: 0 };
     won.set(item.currency, { count: currency.count + item.count, value: currency.value + item.value });
   }
@@ -236,15 +267,17 @@ function OpportunityAnalytics({ sales }: { sales: NonNullable<AnalyticsSnapshot[
       <h2 className="font-semibold">Opportunity pipeline</h2>
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         <Metric label="Opportunities" value={String(sales.opportunities_total)} detail={`${sales.won.count} won · ${sales.lost.count} lost`} />
-        <Metric label="Win rate" value={sales.win_rate === null ? "Unavailable" : `${Math.round(sales.win_rate * 100)}%`} detail="Won opportunities as a share of all opportunities created in this period." />
-        <Metric label="Lead conversion" value={conversion.rate === null ? "Unavailable" : `${Math.round(conversion.rate * 100)}%`} detail={`${conversion.converted_leads} of ${conversion.eligible_leads} eligible leads converted.`} />
+        <Metric label="Win rate" value={sales.win_rate === null ? "Unavailable" : `${Math.round(sales.win_rate * 100)}%`} detail={sales.loss_rate == null ? "No won or lost opportunities in this period." : `${Math.round(sales.loss_rate * 100)}% lost. Won divided by won plus lost. Open opportunities are excluded.`} href="/crm?tab=opportunities" />
+        <Metric label="Lead conversion" value={conversion.rate === null ? "Unavailable" : `${Math.round(conversion.rate * 100)}%`} detail={`${conversion.converted_leads} of ${conversion.eligible_leads} eligible leads converted.`} href="/crm?tab=leads" />
       </div>
+      <p className="mt-3 text-sm text-muted-foreground">{sales.tasks_overdue} overdue tasks now. {sales.tasks_completed} completed in this period. <Link className="text-primary underline" href="/workflows">Open tasks</Link></p>
+      {sales.tasks_definition ? <p className="mt-1 text-xs text-muted-foreground">{sales.tasks_definition}</p> : null}
       {sales.by_stage.length ? (
         <ul className="mt-4 divide-y divide-border">
           {sales.by_stage.map((stage) => (
-            <li key={stage.stage} className="flex justify-between gap-3 py-2 text-sm">
-              <span className="capitalize">{stage.stage.replaceAll("_", " ")}</span>
-              <span className="tabular-nums text-muted-foreground">{stage.count}</span>
+            <li key={`${stage.stage}-${stage.currency}`} className="flex justify-between gap-3 py-2 text-sm">
+              <Link className="capitalize text-primary underline" href="/crm?tab=opportunities">{stage.stage.replaceAll("_", " ")} · {stage.currency}</Link>
+              <span className="tabular-nums text-muted-foreground">{stage.count}{stage.value == null ? "" : ` · ${stage.value.toLocaleString()}`}</span>
             </li>
           ))}
         </ul>
@@ -259,7 +292,7 @@ function OpportunityAnalytics({ sales }: { sales: NonNullable<AnalyticsSnapshot[
                 const totals = won.get(currency);
                 return (
                   <tr key={currency} className="border-t border-border">
-                    <td className="py-2 pr-3 font-medium">{currency}</td><td className="pr-3">{value.toLocaleString()}</td>
+                    <td className="py-2 pr-3 font-medium">{currency}</td><td className="pr-3">{value == null ? "No amount stored" : value.toLocaleString()}</td>
                     <td className="pr-3">{(totals?.value ?? 0).toLocaleString()}</td>
                     <td>{totals?.count ? (totals.value / totals.count).toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}</td>
                   </tr>
@@ -313,13 +346,76 @@ function storedScope(organizationId: string): DataScope {
   return isDataScope(saved) ? saved : "all";
 }
 
-function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
+function Metric({ label, value, detail, href }: { label: string; value: string; detail: string; href?: string }) {
   const slug = label.toLowerCase().replaceAll(" ", "-");
   return (
     <section data-testid={`analytics-metric-${slug}`} className="rounded-xl border border-border bg-card p-4">
       <p className="text-xs uppercase tracking-[0.12em] text-subtle">{label}</p>
       <p data-testid={`analytics-metric-${slug}-value`} className="mt-3 text-2xl tabular-nums text-foreground">{value}</p>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">{detail}</p>
+      {href ? <Link className="mt-3 inline-block text-xs font-medium text-primary" href={href}>Open records</Link> : null}
+    </section>
+  );
+}
+
+function Comparison({ comparison }: { comparison: NonNullable<AnalyticsSnapshot["comparison"]> }) {
+  const rows = [
+    ["Leads created", comparison.leads_created],
+    ["Opportunities", comparison.opportunities_created],
+    ["Conversations", comparison.conversations],
+    ["Opportunities won", comparison.opportunities_won],
+  ] as const;
+  return (
+    <section className="rounded-xl border border-border bg-card p-4" aria-label="Period comparison">
+      <h2 className="text-base text-foreground">Compared with the previous period</h2>
+      <p className="mt-1 text-xs text-muted-foreground">{comparison.previous_period.start} to {comparison.previous_period.end}</p>
+      <ul className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {rows.map(([label, item]) => <ComparisonItem key={label} label={label} item={item} />)}
+      </ul>
+    </section>
+  );
+}
+
+function ComparisonItem({ label, item }: { label: string; item: PeriodDelta }) {
+  const change = item.change_rate == null ? "No earlier activity to compare" : `${item.delta > 0 ? "+" : ""}${Math.round(item.change_rate * 1000) / 10}%`;
+  return <li className="rounded-lg bg-muted/50 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl tabular-nums">{item.current}</p><p className="mt-1 text-xs text-muted-foreground">{change} · previous {item.previous}</p></li>;
+}
+
+function QualificationTrend({ rows }: { rows: NonNullable<AnalyticsSnapshot["qualification_trend"]> }) {
+  const empty = rows.every((row) => row.created === 0);
+  return (
+    <section className="rounded-xl border border-border bg-card p-4" aria-label="Qualification trend">
+      <h2 className="text-base text-foreground">Lead acquisition and qualification</h2>
+      <p className="mt-1 text-xs text-muted-foreground">Leads created each day, and how many of those leads are currently qualified. This is not a history of status changes.</p>
+      {empty ? <p className="mt-3 text-sm text-muted-foreground">No leads were created in this period.</p> : (
+        <div className="mt-4 h-56 min-w-0">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={rows}>
+              <XAxis dataKey="day" tickFormatter={shortDay} minTickGap={28} tick={{ fill: "var(--muted-foreground)", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis allowDecimals={false} width={28} tick={{ fill: "var(--muted-foreground)", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={chartTooltip} />
+              <Legend />
+              <Line type="monotone" dataKey="created" name="Created" stroke="var(--primary)" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="qualified" name="Currently qualified" stroke="var(--muted-foreground)" strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+      <Link className="mt-3 inline-block text-sm text-primary underline" href="/crm?tab=leads">Open leads</Link>
+    </section>
+  );
+}
+
+function Campaigns({ campaigns }: { campaigns: NonNullable<AnalyticsSnapshot["campaigns"]> }) {
+  return (
+    <section className="rounded-xl border border-border bg-card p-4" aria-label="Campaign delivery">
+      <h2 className="text-base text-foreground">Campaign delivery</h2>
+      <p className="mt-1 text-xs text-muted-foreground">{campaigns.definition}</p>
+      <p className="mt-3 text-sm">{campaigns.campaigns} campaigns created in this period.</p>
+      {campaigns.deliveries.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No delivery outcomes are stored.</p> : (
+        <ul className="mt-3 space-y-2 text-sm">{campaigns.deliveries.map((item) => <li key={item.status} className="flex justify-between"><span className="capitalize">{item.status}</span><span className="tabular-nums">{item.count}</span></li>)}</ul>
+      )}
+      <Link className="mt-3 inline-block text-sm text-primary underline" href="/campaigns">Open campaigns</Link>
     </section>
   );
 }

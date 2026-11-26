@@ -1,3 +1,5 @@
+import csv
+import io
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -15,8 +17,9 @@ from app.domains.automation.models import (
     WorkflowStatus,
     WorkflowTask,
 )
+from app.domains.campaigns.models import Campaign, CampaignDelivery
 from app.domains.crm.models import Company, Inquiry, Interaction, Lead, LeadStatus, Opportunity
-from app.domains.inbox.models import InboxConversation, InboxMessage
+from app.domains.inbox.models import InboxConversation, InboxMessage, InboxStatus
 from app.domains.observability.models import EvaluationRun, OperationTrace
 from app.domains.provenance.origin import DataScope, Origin, provenance_notice, scope_clause
 
@@ -73,8 +76,14 @@ def snapshot(
         "approvals": _approvals(db, organization_id, scope),
         "automation": _automation(db, organization_id, scope),
         "follow_ups": _follow_ups(db, organization_id, scope),
-        "email": _email(db, organization_id, scope),
-        "calendar": _calendar(db, organization_id, scope),
+        "email": _email(db, organization_id, scope, start, end),
+        "calendar": _calendar(db, organization_id, scope, start, end),
+        "campaigns": _campaigns(db, organization_id, start, end),
+        "qualification_trend": _qualification_trend(db, organization_id, scope, start, end),
+        "comparison": _comparison(
+            db, organization_id, scope, selected_start, selected_end, owner_user_id, channel
+        ),
+        "approval_activity": _approval_activity(db, organization_id, scope, start, end),
         "recent_interactions": _recent_interactions(db, organization_id, scope),
         "recent_agent_activity": _recent_agent_activity(db, organization_id, scope),
         "sales": _sales(db, organization_id, scope, owner_user_id, start, end),
@@ -103,10 +112,16 @@ def _sales(
         db.scalar(select(func.count()).select_from(Opportunity).where(*filters)) or 0
     )
     rows = db.execute(
-        select(Opportunity.stage, func.count(), func.coalesce(func.sum(Opportunity.value), 0))
+        select(
+            Opportunity.stage,
+            Opportunity.currency,
+            func.count(),
+            func.count(Opportunity.value),
+            func.coalesce(func.sum(Opportunity.value), 0),
+        )
         .where(*filters)
-        .group_by(Opportunity.stage)
-        .order_by(Opportunity.stage)
+        .group_by(Opportunity.stage, Opportunity.currency)
+        .order_by(Opportunity.stage, Opportunity.currency)
     ).all()
     won = db.execute(
         select(func.count(), func.coalesce(func.sum(Opportunity.value), 0)).where(
@@ -125,6 +140,7 @@ def _sales(
             .where(
                 WorkflowTask.organization_id == organization_id,
                 WorkflowTask.status != "completed",
+                WorkflowTask.due_at.is_not(None),
                 WorkflowTask.due_at < datetime.now(UTC),
             )
         )
@@ -135,27 +151,45 @@ def _sales(
             select(func.count())
             .select_from(WorkflowTask)
             .where(
-                WorkflowTask.organization_id == organization_id, WorkflowTask.status == "completed"
+                WorkflowTask.organization_id == organization_id,
+                WorkflowTask.status == "completed",
+                WorkflowTask.updated_at >= start,
+                WorkflowTask.updated_at <= end,
             )
         )
         or 0
     )
+    won_count = int(won[0])
+    lost_count = int(lost[0])
+    closed = won_count + lost_count
+    won_currencies = _won_currencies(db, filters)
     return {
         "opportunities_total": opportunities_total,
         "lead_to_opportunity": _lead_conversion(db, organization_id, scope, start, end),
-        "win_rate": None
-        if opportunities_total == 0
-        else round(int(won[0]) / opportunities_total, 6),
-        "average_won_value": None if not won[0] else float(won[1] or 0) / int(won[0]),
+        "win_rate": None if closed == 0 else round(won_count / closed, 6),
+        "loss_rate": None if closed == 0 else round(lost_count / closed, 6),
+        "average_won_value": _single_currency_average(won_currencies),
         "currencies": _currency_totals(db, filters),
+        "won_by_currency": won_currencies,
         "stage_trend": _stage_trend(db, filters),
         "by_stage": [
-            {"stage": row[0], "count": int(row[1]), "value": float(row[2] or 0)} for row in rows
+            {
+                "stage": stage,
+                "currency": currency,
+                "count": int(count),
+                "value": None if int(valued) == 0 else float(total or 0),
+            }
+            for stage, currency, count, valued, total in rows
         ],
-        "won": {"count": int(won[0]), "value": float(won[1] or 0)},
-        "lost": {"count": int(lost[0]), "value": float(lost[1] or 0)},
+        "won": {"count": won_count, "value": None},
+        "lost": {"count": lost_count, "value": None},
         "tasks_completed": completed,
         "tasks_overdue": overdue,
+        "tasks_definition": (
+            "Completed tasks are those marked completed whose record was last updated "
+            "in the selected period. Overdue tasks are incomplete tasks whose deadline "
+            "is already past, regardless of the selected period."
+        ),
     }
 
 
@@ -175,6 +209,7 @@ def _lead_conversion(
         db.scalar(
             select(func.count(func.distinct(Opportunity.lead_id))).where(
                 Opportunity.organization_id == organization_id,
+                Opportunity.archived_at.is_(None),
                 Opportunity.lead_id.in_(select(eligible.c.id)),
                 Opportunity.created_at >= start,
                 Opportunity.created_at <= end,
@@ -193,14 +228,49 @@ def _lead_conversion(
 
 def _currency_totals(db: Session, filters: list[Any]) -> list[dict[str, Any]]:
     rows = db.execute(
-        select(Opportunity.currency, func.count(), func.coalesce(func.sum(Opportunity.value), 0))
+        select(
+            Opportunity.currency,
+            func.count(),
+            func.count(Opportunity.value),
+            func.coalesce(func.sum(Opportunity.value), 0),
+        )
         .where(*filters)
         .group_by(Opportunity.currency)
     ).all()
     return [
-        {"currency": currency, "count": int(count), "value": float(value or 0)}
-        for currency, count, value in rows
+        _currency_row(currency, count, valued, total) for currency, count, valued, total in rows
     ]
+
+
+def _won_currencies(db: Session, filters: list[Any]) -> list[dict[str, Any]]:
+    rows = db.execute(
+        select(
+            Opportunity.currency,
+            func.count(),
+            func.count(Opportunity.value),
+            func.coalesce(func.sum(Opportunity.value), 0),
+        )
+        .where(*filters, Opportunity.stage == "won")
+        .group_by(Opportunity.currency)
+    ).all()
+    return [
+        _currency_row(currency, count, valued, total) for currency, count, valued, total in rows
+    ]
+
+
+def _currency_row(currency: str, count: Any, valued: Any, total: Any) -> dict[str, Any]:
+    return {
+        "currency": currency,
+        "count": int(count),
+        "value": None if int(valued) == 0 else float(total or 0),
+    }
+
+
+def _single_currency_average(rows: list[dict[str, Any]]) -> float | None:
+    valued = [row for row in rows if row["value"] is not None and row["count"]]
+    if len(valued) != 1:
+        return None
+    return float(valued[0]["value"]) / int(valued[0]["count"])
 
 
 def _stage_trend(db: Session, filters: list[Any]) -> list[dict[str, Any]]:
@@ -211,6 +281,7 @@ def _stage_trend(db: Session, filters: list[Any]) -> list[dict[str, Any]]:
             Opportunity.stage,
             Opportunity.currency,
             func.count(),
+            func.count(Opportunity.value),
             func.coalesce(func.sum(Opportunity.value), 0),
         )
         .where(*filters)
@@ -223,9 +294,9 @@ def _stage_trend(db: Session, filters: list[Any]) -> list[dict[str, Any]]:
             "stage": stage,
             "currency": currency,
             "count": int(count),
-            "value": float(value or 0),
+            "value": None if int(valued) == 0 else float(total or 0),
         }
-        for item, stage, currency, count, value in rows
+        for item, stage, currency, count, valued, total in rows
     ]
 
 
@@ -294,6 +365,23 @@ def _support(
     average_response, response_count = db.execute(
         select(func.avg(responses.c.seconds), func.count()).select_from(responses)
     ).one()
+    resolved = (
+        select(
+            func.extract(
+                "epoch", InboxConversation.updated_at - InboxConversation.created_at
+            ).label("seconds")
+        )
+        .where(
+            *filters,
+            InboxConversation.status == InboxStatus.resolved,
+            InboxConversation.updated_at >= start,
+            InboxConversation.updated_at <= end,
+        )
+        .subquery()
+    )
+    average_resolution, resolution_count = db.execute(
+        select(func.avg(resolved.c.seconds), func.count()).select_from(resolved)
+    ).one()
     return {
         "by_channel": [
             {
@@ -322,6 +410,15 @@ def _support(
         if average_response is None
         else round(float(average_response), 1),
         "first_response_sample_size": int(response_count),
+        "average_resolution_seconds": None
+        if average_resolution is None
+        else round(float(average_resolution), 1),
+        "resolution_sample_size": int(resolution_count),
+        "resolution_definition": (
+            "Average of last update minus creation for conversations whose current "
+            "status is resolved and whose last update is in the selected period. "
+            "A later edit changes this duration."
+        ),
     }
 
 
@@ -594,10 +691,16 @@ def _follow_ups(db: Session, organization_id: uuid.UUID, scope: DataScope) -> di
     return {"approval_requests": requested, "interactions": interactions}
 
 
-def _email(db: Session, organization_id: uuid.UUID, scope: DataScope) -> dict[str, int]:
+def _email(
+    db: Session, organization_id: uuid.UUID, scope: DataScope, start: datetime, end: datetime
+) -> dict[str, int]:
     rows = db.execute(
         select(EmailMessage.mode, EmailMessage.status, func.count())
-        .where(*_filters(EmailMessage, organization_id, scope))
+        .where(
+            *_filters(EmailMessage, organization_id, scope),
+            EmailMessage.created_at >= start,
+            EmailMessage.created_at <= end,
+        )
         .group_by(EmailMessage.mode, EmailMessage.status)
     ).all()
     sandbox = 0
@@ -614,10 +717,16 @@ def _email(db: Session, organization_id: uuid.UUID, scope: DataScope) -> dict[st
     return {"sandbox_sent": sandbox, "live_sent": live, "failed": failed}
 
 
-def _calendar(db: Session, organization_id: uuid.UUID, scope: DataScope) -> dict[str, Any]:
+def _calendar(
+    db: Session, organization_id: uuid.UUID, scope: DataScope, start: datetime, end: datetime
+) -> dict[str, Any]:
     rows = db.execute(
         select(CalendarBooking.provider, CalendarBooking.status, func.count())
-        .where(*_filters(CalendarBooking, organization_id, scope))
+        .where(
+            *_filters(CalendarBooking, organization_id, scope),
+            CalendarBooking.starts_at >= start,
+            CalendarBooking.starts_at <= end,
+        )
         .group_by(CalendarBooking.provider, CalendarBooking.status)
     ).all()
     booked = 0
@@ -690,5 +799,343 @@ def _recent_agent_activity(
             "inquiry_id": str(item.inquiry_id),
             "updated_at": item.updated_at.isoformat(),
         }
+        for item in rows
+    ]
+
+
+def _comparison(
+    db: Session,
+    organization_id: uuid.UUID,
+    scope: DataScope,
+    start_date: date,
+    end_date: date,
+    owner_user_id: uuid.UUID | None,
+    channel: str | None,
+) -> dict[str, Any]:
+    length = (end_date - start_date).days
+    previous_end = start_date - timedelta(days=1)
+    previous_start = previous_end - timedelta(days=length)
+    current = _window_counts(
+        db, organization_id, scope, start_date, end_date, owner_user_id, channel
+    )
+    previous = _window_counts(
+        db, organization_id, scope, previous_start, previous_end, owner_user_id, channel
+    )
+    return {
+        "previous_period": {"start": previous_start.isoformat(), "end": previous_end.isoformat()},
+        "leads_created": _delta(current["leads_created"], previous["leads_created"]),
+        "opportunities_created": _delta(
+            current["opportunities_created"], previous["opportunities_created"]
+        ),
+        "conversations": _delta(current["conversations"], previous["conversations"]),
+        "opportunities_won": _delta(current["opportunities_won"], previous["opportunities_won"]),
+    }
+
+
+def _window_counts(
+    db: Session,
+    organization_id: uuid.UUID,
+    scope: DataScope,
+    start_date: date,
+    end_date: date,
+    owner_user_id: uuid.UUID | None,
+    channel: str | None,
+) -> dict[str, int]:
+    start = datetime.combine(start_date, datetime.min.time(), UTC)
+    end = datetime.combine(end_date, datetime.max.time(), UTC)
+    opportunity_filters = [
+        *_filters(Opportunity, organization_id, scope),
+        Opportunity.created_at >= start,
+        Opportunity.created_at <= end,
+    ]
+    if owner_user_id is not None:
+        opportunity_filters.append(Opportunity.owner_user_id == owner_user_id)
+    conversation_filters = [
+        InboxConversation.organization_id == organization_id,
+        InboxConversation.created_at >= start,
+        InboxConversation.created_at <= end,
+    ]
+    if channel:
+        conversation_filters.append(InboxConversation.channel == channel)
+    return {
+        "leads_created": _bounded_count(db, Lead, organization_id, scope, start, end),
+        "opportunities_created": int(
+            db.scalar(select(func.count()).select_from(Opportunity).where(*opportunity_filters))
+            or 0
+        ),
+        "conversations": int(
+            db.scalar(
+                select(func.count()).select_from(InboxConversation).where(*conversation_filters)
+            )
+            or 0
+        ),
+        "opportunities_won": int(
+            db.scalar(
+                select(func.count())
+                .select_from(Opportunity)
+                .where(*opportunity_filters, Opportunity.stage == "won")
+            )
+            or 0
+        ),
+    }
+
+
+def _bounded_count(
+    db: Session,
+    model: Any,
+    organization_id: uuid.UUID,
+    scope: DataScope,
+    start: datetime,
+    end: datetime,
+) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(model)
+            .where(
+                *_filters(model, organization_id, scope),
+                model.created_at >= start,
+                model.created_at <= end,
+            )
+        )
+        or 0
+    )
+
+
+def _delta(current: int, previous: int) -> dict[str, int | float | None]:
+    return {
+        "current": current,
+        "previous": previous,
+        "delta": current - previous,
+        "change_rate": None if previous == 0 else round((current - previous) / previous, 6),
+    }
+
+
+def _qualification_trend(
+    db: Session, organization_id: uuid.UUID, scope: DataScope, start: datetime, end: datetime
+) -> list[dict[str, str | int]]:
+    bucket = func.date_trunc("day", func.timezone("UTC", Lead.created_at))
+    rows = db.execute(
+        select(bucket, Lead.status, func.count())
+        .where(
+            *_filters(Lead, organization_id, scope),
+            Lead.created_at >= start,
+            Lead.created_at <= end,
+        )
+        .group_by(bucket, Lead.status)
+    ).all()
+    created: dict[date, int] = {}
+    qualified: dict[date, int] = {}
+    for value, status, count in rows:
+        if value is None:
+            continue
+        day = value.date()
+        created[day] = created.get(day, 0) + int(count)
+        if _value(status) == LeadStatus.qualified.value:
+            qualified[day] = qualified.get(day, 0) + int(count)
+    days = (start.date() + timedelta(days=index) for index in range((end - start).days + 1))
+    return [
+        {"day": day.isoformat(), "created": created.get(day, 0), "qualified": qualified.get(day, 0)}
+        for day in days
+    ]
+
+
+def _campaigns(
+    db: Session, organization_id: uuid.UUID, start: datetime, end: datetime
+) -> dict[str, Any]:
+    campaign_ids = select(Campaign.id).where(
+        Campaign.organization_id == organization_id,
+        Campaign.created_at >= start,
+        Campaign.created_at <= end,
+    )
+    campaigns = int(db.scalar(select(func.count()).select_from(campaign_ids.subquery())) or 0)
+    rows = db.execute(
+        select(CampaignDelivery.status, func.count())
+        .where(CampaignDelivery.campaign_id.in_(campaign_ids))
+        .group_by(CampaignDelivery.status)
+        .order_by(CampaignDelivery.status)
+    ).all()
+    return {
+        "campaigns": campaigns,
+        "deliveries": [{"status": str(status), "count": int(count)} for status, count in rows],
+        "definition": (
+            "Delivery outcomes for campaigns created in the selected period. "
+            "Open and click events are not stored."
+        ),
+    }
+
+
+def _approval_activity(
+    db: Session, organization_id: uuid.UUID, scope: DataScope, start: datetime, end: datetime
+) -> dict[str, Any]:
+    rows = db.execute(
+        select(Approval.status, func.count())
+        .where(
+            *_filters(Approval, organization_id, scope),
+            Approval.created_at >= start,
+            Approval.created_at <= end,
+        )
+        .group_by(Approval.status)
+        .order_by(Approval.status)
+    ).all()
+    by_status = [{"status": _value(status), "count": int(count)} for status, count in rows]
+    return {
+        "created": sum(item["count"] for item in by_status),
+        "by_status": by_status,
+        "definition": "Approvals created in the selected period. Pending now is the current queue.",
+    }
+
+
+def report_csv(
+    db: Session,
+    organization_id: uuid.UUID,
+    scope: DataScope,
+    report: str,
+    start: datetime,
+    end: datetime,
+    owner_user_id: uuid.UUID | None,
+    channel: str | None,
+) -> tuple[str, str]:
+    headers, rows = _report_rows(
+        db, organization_id, scope, report, start, end, owner_user_id, channel
+    )
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(headers)
+    writer.writerows(rows)
+    filename = f"atlas-{report}-{start.date().isoformat()}-{end.date().isoformat()}.csv"
+    return filename, buffer.getvalue()
+
+
+def _report_rows(
+    db: Session,
+    organization_id: uuid.UUID,
+    scope: DataScope,
+    report: str,
+    start: datetime,
+    end: datetime,
+    owner_user_id: uuid.UUID | None,
+    channel: str | None,
+) -> tuple[list[str], list[list[str]]]:
+    if report == "leads":
+        rows = db.scalars(
+            select(Lead)
+            .where(
+                *_filters(Lead, organization_id, scope),
+                Lead.created_at >= start,
+                Lead.created_at <= end,
+            )
+            .order_by(Lead.created_at)
+            .limit(5000)
+        ).all()
+        return ["title", "status", "source", "created_at"], [
+            [item.title, item.status.value, item.source or "", item.created_at.isoformat()]
+            for item in rows
+        ]
+    if report == "opportunities":
+        filters = [
+            *_filters(Opportunity, organization_id, scope),
+            Opportunity.created_at >= start,
+            Opportunity.created_at <= end,
+        ]
+        if owner_user_id is not None:
+            filters.append(Opportunity.owner_user_id == owner_user_id)
+        rows = db.scalars(
+            select(Opportunity).where(*filters).order_by(Opportunity.created_at).limit(5000)
+        ).all()
+        return ["title", "stage", "currency", "value", "created_at"], [
+            [
+                item.title,
+                item.stage,
+                item.currency,
+                "" if item.value is None else str(item.value),
+                item.created_at.isoformat(),
+            ]
+            for item in rows
+        ]
+    if report == "conversations":
+        filters = [
+            InboxConversation.organization_id == organization_id,
+            InboxConversation.created_at >= start,
+            InboxConversation.created_at <= end,
+        ]
+        if channel:
+            filters.append(InboxConversation.channel == channel)
+        rows = db.scalars(
+            select(InboxConversation)
+            .where(*filters)
+            .order_by(InboxConversation.created_at)
+            .limit(5000)
+        ).all()
+        return ["subject", "channel", "status", "created_at"], [
+            [item.subject, item.channel, item.status.value, item.created_at.isoformat()]
+            for item in rows
+        ]
+    if report == "tasks":
+        rows = db.scalars(
+            select(WorkflowTask)
+            .where(
+                WorkflowTask.organization_id == organization_id,
+                WorkflowTask.created_at >= start,
+                WorkflowTask.created_at <= end,
+            )
+            .order_by(WorkflowTask.created_at)
+            .limit(5000)
+        ).all()
+        return ["title", "status", "priority", "due_at"], [
+            [
+                item.title,
+                item.status,
+                item.priority,
+                "" if item.due_at is None else item.due_at.isoformat(),
+            ]
+            for item in rows
+        ]
+    if report == "appointments":
+        rows = db.scalars(
+            select(CalendarBooking)
+            .where(
+                *_filters(CalendarBooking, organization_id, scope),
+                CalendarBooking.starts_at >= start,
+                CalendarBooking.starts_at <= end,
+            )
+            .order_by(CalendarBooking.starts_at)
+            .limit(5000)
+        ).all()
+        return ["status", "starts_at", "ends_at"], [
+            [item.status.value, item.starts_at.isoformat(), item.ends_at.isoformat()]
+            for item in rows
+        ]
+    if report == "campaigns":
+        payload = _campaigns(db, organization_id, start, end)
+        return ["status", "count"], [
+            [str(item["status"]), str(item["count"])] for item in payload["deliveries"]
+        ]
+    if report == "workflows":
+        rows = db.scalars(
+            select(WorkflowRun)
+            .where(
+                WorkflowRun.organization_id == organization_id,
+                WorkflowRun.created_at >= start,
+                WorkflowRun.created_at <= end,
+            )
+            .order_by(WorkflowRun.created_at)
+            .limit(5000)
+        ).all()
+        return ["status", "created_at"], [
+            [_value(item.status), item.created_at.isoformat()] for item in rows
+        ]
+    rows = db.scalars(
+        select(Approval)
+        .where(
+            *_filters(Approval, organization_id, scope),
+            Approval.created_at >= start,
+            Approval.created_at <= end,
+        )
+        .order_by(Approval.created_at)
+        .limit(5000)
+    ).all()
+    return ["action", "status", "created_at"], [
+        [_value(item.action_type), _value(item.status), item.created_at.isoformat()]
         for item in rows
     ]

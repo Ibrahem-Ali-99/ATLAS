@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/api";
+import { apiFetch, apiText } from "@/lib/api";
 import type { DataScope } from "@/lib/provenance";
 
 function organizationPath(organizationId: string, path: string): string {
@@ -6,12 +6,14 @@ function organizationPath(organizationId: string, path: string): string {
 }
 
 export type StatusCount = { status: string; count: number };
+export type PeriodDelta = { current: number; previous: number; delta: number; change_rate: number | null };
 export type DayCount = { day: string; count: number };
 export type RecentInteraction = { id: string; lead_id: string; kind: string; summary: string; created_at: string };
 export type RecentAgentActivity = { id: string; status: string; inquiry_id: string; updated_at: string };
 
 export type AnalyticsSnapshot = {
   window_days: number;
+  period?: { start: string; end: string };
   scope: string;
   lead_origins: { operational: number; demo: number; evaluation: number; unknown: number };
   provenance_notice: string;
@@ -55,10 +57,20 @@ export type AnalyticsSnapshot = {
   follow_ups: { approval_requests: number; interactions: number };
   email: { sandbox_sent: number; live_sent: number; failed: number };
   calendar: { booked: number; cancelled: number; providers: string[]; notice: string };
+  campaigns?: { campaigns: number; deliveries: { status: string; count: number }[]; definition: string };
+  qualification_trend?: { day: string; created: number; qualified: number }[];
+  comparison?: {
+    previous_period: { start: string; end: string };
+    leads_created: PeriodDelta;
+    opportunities_created: PeriodDelta;
+    conversations: PeriodDelta;
+    opportunities_won: PeriodDelta;
+  };
+  approval_activity?: { created: number; by_status: StatusCount[]; definition: string };
   recent_interactions: RecentInteraction[];
   recent_agent_activity: RecentAgentActivity[];
-  sales?: { opportunities_total: number; by_stage: { stage: string; count: number; value: number }[]; stage_trend: { day: string; stage: string; currency: string; count: number; value: number }[]; won: { count: number; value: number }; lost: { count: number; value: number }; tasks_completed: number; tasks_overdue: number; win_rate: number | null; average_won_value: number | null; currencies: { currency: string; count: number; value: number }[]; lead_to_opportunity: { eligible_leads: number; converted_leads: number; rate: number | null; definition: string } };
-  support?: { by_channel: { channel: string; status: string; count: number }[]; handoffs: number; volume_trend: { day: string; channel: string; count: number }[]; average_first_response_seconds: number | null; first_response_sample_size: number };
+  sales?: { opportunities_total: number; by_stage: { stage: string; currency: string; count: number; value: number | null }[]; stage_trend: { day: string; stage: string; currency: string; count: number; value: number | null }[]; won: { count: number; value: number | null }; lost: { count: number; value: number | null }; tasks_completed: number; tasks_overdue: number; tasks_definition?: string; win_rate: number | null; loss_rate?: number | null; average_won_value: number | null; currencies: { currency: string; count: number; value: number | null }[]; won_by_currency?: { currency: string; count: number; value: number | null }[]; lead_to_opportunity: { eligible_leads: number; converted_leads: number; rate: number | null; definition: string } };
+  support?: { by_channel: { channel: string; status: string; count: number }[]; handoffs: number; volume_trend: { day: string; channel: string; count: number }[]; average_first_response_seconds: number | null; first_response_sample_size: number; average_resolution_seconds?: number | null; resolution_sample_size?: number; resolution_definition?: string };
   ai?: { requests: number; failed: number; failure_rate: number | null; trend: { day: string; status: string; count: number }[] };
   evaluation?: { executed: number; passed: number; pass_rate: number | null };
   workflow_performance?: { total: number; successful: number; failed: number; pending: number; running: number; success_rate: number | null; denominator: number; trend: { day: string; status: string; count: number }[] };
@@ -140,6 +152,27 @@ export function getAnalytics(
   if (filters.ownerUserId) query.set("owner_user_id", filters.ownerUserId);
   if (filters.channel) query.set("channel", filters.channel);
   return apiFetch(organizationPath(organizationId, `/analytics?${query.toString()}`));
+}
+
+export async function downloadAnalyticsReport(
+  organizationId: string,
+  scope: DataScope,
+  report: string,
+  filters: { period?: string; startDate?: string; endDate?: string; ownerUserId?: string; channel?: string } = {},
+): Promise<void> {
+  const query = new URLSearchParams({ scope, period: filters.period ?? "30d", report });
+  if (filters.startDate) query.set("start_date", filters.startDate);
+  if (filters.endDate) query.set("end_date", filters.endDate);
+  if (filters.ownerUserId) query.set("owner_user_id", filters.ownerUserId);
+  if (filters.channel) query.set("channel", filters.channel);
+  const file = await apiText(organizationPath(organizationId, `/analytics/export?${query.toString()}`));
+  const blob = new Blob([file.text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.filename ?? `atlas-${report}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export function scoreLead(organizationId: string, leadId: string): Promise<LeadPrediction> {

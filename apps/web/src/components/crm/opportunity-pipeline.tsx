@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { ConfirmButton } from "@/components/confirm-button";
 import { RequestError } from "@/components/request-error";
 import { Skeleton } from "@/components/ui/skeleton";
-import { createOpportunity, createPipelineStage, deletePipelineStage, listOpportunities, listPipelineStages, reorderPipelineStages, updateOpportunity, type Opportunity } from "@/lib/opportunities";
+import { archiveOpportunity, createOpportunity, createPipelineStage, deletePipelineStage, listOpportunities, listPipelineStages, reorderPipelineStages, restoreOpportunity, updateOpportunity, type Opportunity } from "@/lib/opportunities";
 import { listOpportunityTasks, createOpportunityTask, updateWorkflowTask, type WorkflowTask } from "@/lib/workflow-definitions";
 import { listTeam } from "@/lib/organization";
 import { listCompanies, listContacts, listLeads } from "@/lib/records-api";
@@ -21,7 +21,8 @@ export function OpportunityPipeline({ selectedId, onSelect }: {
   const client = useQueryClient();
   const id = organizationId ?? "";
   const stages = useQuery({ queryKey: ["pipeline-stages", id], queryFn: () => listPipelineStages(id), enabled: Boolean(id) });
-  const opportunities = useQuery({ queryKey: ["opportunities", id], queryFn: () => listOpportunities(id), enabled: Boolean(id) });
+  const [includeArchived, setIncludeArchived] = useState(false);
+  const opportunities = useQuery({ queryKey: ["opportunities", id, includeArchived], queryFn: () => listOpportunities(id, includeArchived), enabled: Boolean(id) });
   const [title, setTitle] = useState("");
   const [stageName, setStageName] = useState("");
   const selected = opportunities.data?.find((item) => item.id === selectedId);
@@ -39,6 +40,14 @@ export function OpportunityPipeline({ selectedId, onSelect }: {
     mutationFn: ({ item, stage }: { item: Opportunity; stage: string }) => updateOpportunity(id, item.id, { stage }),
     onSuccess: refresh,
   });
+  const archive = useMutation({
+    mutationFn: (opportunityId: string) => archiveOpportunity(id, opportunityId),
+    onSuccess: () => { refresh(); onSelect(null); },
+  });
+  const restore = useMutation({
+    mutationFn: (opportunityId: string) => restoreOpportunity(id, opportunityId),
+    onSuccess: refresh,
+  });
   const addStage = useMutation({
     mutationFn: () => createPipelineStage(id, { label: stageName.trim(), position: stages.data?.length ?? 0 }),
     onSuccess: () => { setStageName(""); refreshStages(); },
@@ -49,7 +58,7 @@ export function OpportunityPipeline({ selectedId, onSelect }: {
   const items = opportunities.data ?? [];
   const columns = stages.data ?? [];
   const firstStage = columns[0]?.key;
-  const error = create.error ?? move.error ?? addStage.error ?? removeStage.error;
+  const error = create.error ?? move.error ?? addStage.error ?? removeStage.error ?? archive.error ?? restore.error;
   return (
     <section className="min-w-0 rounded-xl border border-border bg-card p-4 sm:p-5" aria-label="Sales pipeline" data-testid="sales-pipeline">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -64,6 +73,7 @@ export function OpportunityPipeline({ selectedId, onSelect }: {
           <Input aria-label="New opportunity title" placeholder="New opportunity" className="min-w-0" maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} />
           <Button type="submit" disabled={!firstStage || !title.trim() || create.isPending}>{create.isPending ? "Creating…" : "Create"}</Button>
         </form>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} /> Show archived, excluded from analytics</label>
       </div>
       {error ? <div className="mt-3"><RequestError error={error} /></div> : null}
       {!items.length ? <p className="mt-4 rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground">No opportunities yet. Add one to start tracking your pipeline.</p> : null}
@@ -76,7 +86,7 @@ export function OpportunityPipeline({ selectedId, onSelect }: {
               onDrop={(event) => {
                 event.preventDefault();
                 const item = items.find((candidate) => candidate.id === event.dataTransfer.getData("text/opportunity"));
-                if (item && item.stage !== stage.key && !move.isPending) move.mutate({ item, stage: stage.key });
+                if (item && !item.archived_at && item.stage !== stage.key && !move.isPending) move.mutate({ item, stage: stage.key });
               }}>
               <div className="flex items-center justify-between gap-2">
                 <h3 className="min-w-0 break-words text-xs font-semibold uppercase tracking-wide text-muted-foreground">{stage.label}</h3>
@@ -88,15 +98,17 @@ export function OpportunityPipeline({ selectedId, onSelect }: {
                   const previous = index > 0 ? columns[index - 1] : undefined;
                   const next = index >= 0 && index < columns.length - 1 ? columns[index + 1] : undefined;
                   return <li key={item.id}>
-                  <button type="button" draggable={!move.isPending} onDragStart={(event) => event.dataTransfer.setData("text/opportunity", item.id)}
+                  <button type="button" draggable={!move.isPending && !item.archived_at} onDragStart={(event) => event.dataTransfer.setData("text/opportunity", item.id)}
                     onClick={() => onSelect(item.id)} className="block w-full cursor-pointer rounded-md border border-border bg-card p-3 text-left shadow-sm hover:border-primary/50">
                     <span className="block break-words text-sm font-medium">{item.title}</span>
                     <span className="mt-1 block text-xs text-muted-foreground">{item.value == null ? "Value not set" : `${item.currency} ${item.value.toLocaleString()}`}</span>
                     {item.expected_close_date ? <span className="mt-1 block text-xs text-muted-foreground">Close {new Date(item.expected_close_date).toLocaleDateString()}</span> : null}
+                    {item.archived_at ? <span className="mt-1 block text-xs text-muted-foreground">Archived</span> : null}
                   </button>
                   <div className="mt-1 flex flex-wrap gap-1">
-                    {previous ? <button type="button" className="rounded border border-border bg-card px-2 py-1 text-[11px]" disabled={move.isPending} onClick={() => move.mutate({ item, stage: previous.key })}>Move to {previous.label}</button> : null}
-                    {next ? <button type="button" className="rounded border border-border bg-card px-2 py-1 text-[11px]" disabled={move.isPending} onClick={() => move.mutate({ item, stage: next.key })}>Move to {next.label}</button> : null}
+                    {item.archived_at ? <button type="button" className="rounded border border-border bg-card px-2 py-1 text-[11px]" disabled={restore.isPending} onClick={() => restore.mutate(item.id)}>Restore</button> : null}
+                    {!item.archived_at && previous ? <button type="button" className="rounded border border-border bg-card px-2 py-1 text-[11px]" disabled={move.isPending} onClick={() => move.mutate({ item, stage: previous.key })}>Move to {previous.label}</button> : null}
+                    {!item.archived_at && next ? <button type="button" className="rounded border border-border bg-card px-2 py-1 text-[11px]" disabled={move.isPending} onClick={() => move.mutate({ item, stage: next.key })}>Move to {next.label}</button> : null}
                   </div>
                 </li>;
                 })}
@@ -120,9 +132,16 @@ export function OpportunityPipeline({ selectedId, onSelect }: {
       <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) onSelect(null); }}>
         {selected ? <DialogContent className="max-h-[85dvh] max-w-2xl overflow-y-auto">
           <DialogTitle className="break-words">{selected.title}</DialogTitle>
-          <DialogDescription>Update this opportunity and manage its follow-up tasks.</DialogDescription>
-          <OpportunityEditor key={selected.id} organizationId={id} opportunity={selected} stages={columns} onClose={() => onSelect(null)}
-            onSave={(body) => save.mutate({ opportunityId: selected.id, body }, { onSuccess: () => onSelect(null) })} saving={save.isPending} />
+          <DialogDescription>{selected.archived_at ? "This opportunity is archived and is left out of pipeline metrics." : "Update this opportunity and manage its follow-up tasks."}</DialogDescription>
+          {selected.archived_at ? (
+            <Button type="button" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate(selected.id)}>{restore.isPending ? "Restoring…" : "Restore opportunity"}</Button>
+          ) : (
+            <>
+              <OpportunityEditor key={selected.id} organizationId={id} opportunity={selected} stages={columns} onClose={() => onSelect(null)}
+                onSave={(body) => save.mutate({ opportunityId: selected.id, body }, { onSuccess: () => onSelect(null) })} saving={save.isPending} />
+              <div className="mt-3"><ConfirmButton label="Archive opportunity" confirmLabel="Confirm archive" pendingLabel="Archiving…" pending={archive.isPending} onConfirm={() => archive.mutate(selected.id)} /></div>
+            </>
+          )}
           {save.error ? <div className="mt-3"><RequestError error={save.error} /></div> : null}
         </DialogContent> : null}
       </Dialog>
