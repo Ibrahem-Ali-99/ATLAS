@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { createCompany, getCompany, deleteCompany, listCompanies, listContacts, listInquiries, listLeads, restoreCompany, updateCompany } from "@/lib/records-api";
+import { createCompany, getCompany, deleteCompany, listCompanies, restoreCompany, updateCompany } from "@/lib/records-api";
 import { blankToNull, type Company } from "@/lib/records";
 
 const schema = z.object({
@@ -57,17 +57,12 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
   const [includeArchived, setIncludeArchived] = useState(false);
   const [sort, setSort] = useState("name");
   const [open, setOpen] = useState(false);
+  const [held, setHeld] = useState<Company | null>(null);
   const selectedId = requestedId ?? null;
   const companies = useQuery({
     queryKey: ["companies", organizationId, query, page, includeArchived, sort],
     queryFn: () => listCompanies(organizationId, { q: query, page, includeArchived, sort }),
   });
-  const related = useQuery({
-    queryKey: ["company-relations", organizationId, selectedId],
-    queryFn: async () => Promise.all([listContacts(organizationId, { pageSize: 100 }), listLeads(organizationId, { pageSize: 100 }), listInquiries(organizationId, { pageSize: 100 })]),
-    enabled: Boolean(selectedId),
-  });
-
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setQuery(search.trim());
@@ -82,7 +77,11 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
     queryFn: () => getCompany(organizationId, selectedId ?? ""),
     enabled: Boolean(selectedId && !selectedInList),
   });
-  const selected = selectedInList ?? record.data ?? null;
+  const fresh = selectedInList ?? record.data ?? null;
+  const selected = fresh ?? (held?.id === selectedId ? held : null);
+  useEffect(() => {
+    if (fresh && fresh.id === selectedId) setHeld(fresh);
+  }, [fresh, selectedId]);
 
   return (
     <div className={selected ? "grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.8fr)]" : "min-w-0"}>
@@ -153,7 +152,6 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
       <CompanyEditor
         organizationId={organizationId}
         company={selected}
-        related={related.data}
         onNavigate={onNavigate}
         onDeleted={() => {
           onNavigate({ tab: "companies", id: null });
@@ -220,14 +218,12 @@ function CompanyDialog({
 function CompanyEditor({
   organizationId,
   company,
-  related,
   onNavigate,
   onSaved,
   onDeleted,
 }: {
   organizationId: string;
   company: Company | null;
-  related?: [{ items: import("@/lib/records").Contact[] }, { items: import("@/lib/records").Lead[] }, { items: import("@/lib/records").Inquiry[] }];
   onNavigate: Navigate;
   onSaved: () => void;
   onDeleted: () => void;
@@ -244,7 +240,6 @@ function CompanyEditor({
       key={company.id}
       organizationId={organizationId}
       company={company}
-      related={related}
       onNavigate={onNavigate}
       onSaved={onSaved}
       onDeleted={onDeleted}
@@ -255,14 +250,12 @@ function CompanyEditor({
 function CompanyEditorForm({
   organizationId,
   company,
-  related,
   onNavigate,
   onSaved,
   onDeleted,
 }: {
   organizationId: string;
   company: Company;
-  related?: [{ items: import("@/lib/records").Contact[] }, { items: import("@/lib/records").Lead[] }, { items: import("@/lib/records").Inquiry[] }];
   onNavigate: Navigate;
   onSaved: () => void;
   onDeleted: () => void;
@@ -279,15 +272,6 @@ function CompanyEditorForm({
     <aside className="rounded-[10px] bg-muted p-6" data-testid="crm-detail-companies" data-record-id={company.id} data-archived={company.archived_at ? "true" : "false"}>
       <h2 className="text-base font-semibold">{company.name}</h2>
       <p className="mt-1 text-sm text-muted-foreground">Updated {new Date(company.updated_at).toLocaleString()}</p>
-      <div className="mt-4 border-t border-border pt-4">
-        <h3 className="text-sm font-medium">Related records</h3>
-        <div className="mt-2 grid gap-1 text-sm">
-          {related?.[0].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "contacts", id: item.id })}>{item.full_name}</button>)}
-          {related?.[1].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "leads", id: item.id })}>{item.title}</button>)}
-          {related?.[2].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
-          {related && related.every((page) => page.items.every((item) => item.company_id !== company.id)) ? <p className="text-muted-foreground">No linked records yet.</p> : null}
-        </div>
-      </div>
       <CustomerProfile organizationId={organizationId} companyId={company.id} onNavigate={onNavigate} />
       <div className="mt-4">
         <CompanyFields form={form} formId="company-edit" onSubmit={(values) => save.mutate(values)} />

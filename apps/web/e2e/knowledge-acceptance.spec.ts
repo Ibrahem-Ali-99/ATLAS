@@ -12,7 +12,7 @@ test("Knowledge upload, indexing, search, inspection, and removal", async ({ pag
   await expect(page.getByRole("heading", { name: "Company knowledge" })).toBeVisible();
   await page.getByRole("button", { name: "Upload document", exact: true }).click();
   await page.getByLabel("Document origin").selectOption("demo");
-  await page.locator('input[type="file"]').setInputFiles({
+  await page.getByRole("button", { name: "Choose a PDF or TXT file" }).setInputFiles({
     name: `${title}.txt`,
     mimeType: "text/plain",
     buffer: Buffer.from(`DEMO KNOWLEDGE FIXTURE. The warehouse reference is ${token}.`),
@@ -24,9 +24,9 @@ test("Knowledge upload, indexing, search, inspection, and removal", async ({ pag
   await expect(row.getByRole("cell", { name: "Demo" })).toBeVisible();
   await expect(row.getByRole("cell", { name: "ready" })).toBeVisible({ timeout: 30_000 });
 
-  await row.getByRole("button", { name: title }).click();
+  await row.getByRole("button", { name: title, exact: true }).click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  await expect(page.getByText(`DEMO KNOWLEDGE FIXTURE. The warehouse reference is ${token}.`)).toBeVisible();
+  await expect(page.getByText(`DEMO KNOWLEDGE FIXTURE. The warehouse reference is ${token}.`).first()).toBeVisible();
 
   await page.getByLabel("Filter by file type").selectOption("pdf");
   await expect(row).toHaveCount(0);
@@ -35,7 +35,7 @@ test("Knowledge upload, indexing, search, inspection, and removal", async ({ pag
   await page.getByRole("button", { name: "Semantic search" }).click();
   await page.getByLabel("Search documents").fill(token);
   await page.getByRole("button", { name: "Search", exact: true }).click();
-  await expect(page.getByText(`DEMO KNOWLEDGE FIXTURE. The warehouse reference is ${token}.`)).toBeVisible();
+  await expect(page.getByText(`DEMO KNOWLEDGE FIXTURE. The warehouse reference is ${token}.`).first()).toBeVisible();
 
   await page.goto("/assistant");
   await page.getByRole("textbox", { name: "Message to ATLAS" }).fill(token);

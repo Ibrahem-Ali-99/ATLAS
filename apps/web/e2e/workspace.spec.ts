@@ -15,7 +15,7 @@ test("a missing JavaScript chunk is recognized as a stale bundle", () => {
 
 const shotDir = process.env.ATLAS_E2E_ARTIFACT_DIR
   ? path.resolve(process.env.ATLAS_E2E_ARTIFACT_DIR)
-  : path.resolve(process.cwd(), "../../.pytest-tmp/phase2d-screenshots");
+  : path.resolve(process.cwd(), "../../var/e2e-screenshots");
 
 async function shot(page: Page, name: string): Promise<void> {
   mkdirSync(shotDir, { recursive: true });
@@ -75,6 +75,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByLabel("Industry").fill("Warehousing");
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Saved.")).toBeVisible();
+  await expect(page.getByTestId("customer-profile")).toBeVisible();
   await page.getByRole("button", { name: "Archive" }).click();
   await page.getByRole("button", { name: "Confirm archive" }).click();
   await expect(page.getByRole("button", { name: companyName })).toHaveCount(0);
@@ -102,12 +103,12 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByRole("button", { name: "New lead" }).click();
   await page.getByLabel("Title").fill(leadTitle);
   await page.getByRole("button", { name: "Create" }).click();
-  await expect(page.getByRole("button", { name: leadTitle })).toBeVisible();
+  await expect(page.getByRole("row", { name: leadTitle }).getByRole("button", { name: leadTitle })).toBeVisible();
   await shot(page, "02-crm.png");
 
   await page.getByRole("link", { name: "Knowledge" }).click();
   await page.getByRole("button", { name: "Upload document", exact: true }).click();
-  await page.locator('input[type="file"]').setInputFiles({
+  await page.getByRole("button", { name: "Choose a PDF or TXT file" }).setInputFiles({
     name: `${documentTitle}.txt`,
     mimeType: "text/plain",
     buffer: Buffer.from(`Harbor warehousing includes cold storage and bonded-yard-${stamp}.`),
@@ -135,7 +136,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByPlaceholder("Ask about records, documents or your organization…").fill(`bonded-yard-${stamp}`);
   await page.getByRole("button", { name: "Send" }).click();
   const answer = page.getByRole("article").filter({ hasText: documentTitle });
-  await expect(answer.getByText(`Harbor warehousing includes cold storage and bonded-yard-${stamp}.`)).toBeVisible();
+  await expect(answer.getByText(`Harbor warehousing includes cold storage and bonded-yard-${stamp}.`).first()).toBeVisible();
   await expect(answer.getByText(documentTitle, { exact: true })).toBeVisible();
   await shot(page, "04-assistant.png");
 

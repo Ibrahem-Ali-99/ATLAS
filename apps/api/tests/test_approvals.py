@@ -257,7 +257,7 @@ def test_interaction_crash_does_not_commit_the_history_row(db: Session) -> None:
     contact = create_contact(
         db,
         approval.organization_id,
-        {"full_name": "Ada Contact", "email": "ada@example.com"},
+        {"full_name": "Ada Reply", "email": "ada-reply@example.com"},
     )
     lead.contact_id = contact.id
     db.commit()

@@ -68,7 +68,7 @@ test("website chat settings persist and staff can reply to a visitor on mobile",
     await agent.goto("/inbox");
     await expect(agent.getByRole("button", { name: "Website chat settings" })).toHaveCount(0);
     await agent.getByRole("button", { name: /Website chat.*Handoff requested/ }).click();
-    await expect(agent.getByText(visitorMessage, { exact: true })).toBeVisible();
+    await expect(agent.getByRole("log", { name: "Customer messages" }).getByText(visitorMessage, { exact: true })).toBeVisible();
     await agent.getByRole("button", { name: "Show customer context" }).click();
     const context = agent.getByRole("dialog", { name: "Customer context" });
     await expect(context.getByLabel("Conversation assignee")).toBeEnabled();
@@ -77,7 +77,7 @@ test("website chat settings persist and staff can reply to a visitor on mobile",
     await context.getByRole("button", { name: "Close" }).click();
     await agent.getByRole("textbox", { name: "Staff reply" }).fill(staffMessage);
     await agent.getByRole("button", { name: "Send to visitor" }).click();
-    await expect(agent.getByText(staffMessage, { exact: true })).toBeVisible();
+    await expect(agent.getByRole("log", { name: "Customer messages" }).getByText(staffMessage, { exact: true })).toBeVisible();
     await expect(visitorLog.getByText(staffMessage, { exact: false })).toHaveCount(1);
     await expect(visitorLog.getByText(`You: ${visitorMessage}`, { exact: true })).toHaveCount(1);
     await agent.getByRole("button", { name: "Show customer context" }).click();
@@ -117,7 +117,7 @@ test("website chat settings persist and staff can reply to a visitor on mobile",
     const blocked = storefrontPage.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/widget/"));
     await storefrontPage.getByRole("button", { name: "Send", exact: true }).click();
     expect((await blocked).status()).toBe(404);
-    await expect(agent.getByText(staffMessage, { exact: true })).toBeVisible();
+    await expect(agent.getByRole("log", { name: "Customer messages" }).getByText(staffMessage, { exact: true })).toBeVisible();
   } finally {
     await visitor.close();
     await staff.close();

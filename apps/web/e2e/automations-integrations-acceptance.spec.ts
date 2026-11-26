@@ -31,6 +31,7 @@ test("admin can inspect persisted integrations and automation activity", async (
   await expect(page.getByRole("dialog", { name: "Email", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Email delivery", exact: true })).toBeVisible();
   await expect(page.getByText("MAILPIT SANDBOX", { exact: true })).toBeVisible();
+  await page.getByText("Prepare live SMTP and Resend").click();
   await expect(page.getByLabel("Resend API key")).toHaveAttribute("type", "password");
   await page.getByLabel("SMTP security").selectOption("tls");
   await expect(page.getByLabel("SMTP password")).toHaveAttribute("type", "password");

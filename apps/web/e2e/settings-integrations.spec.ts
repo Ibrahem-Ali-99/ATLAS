@@ -15,7 +15,7 @@ test("admin settings expose editable provider controls and fallback state", asyn
   await expect(page.locator("select").first()).toBeEnabled();
   await expect(page.getByLabel("Model").first()).toBeEnabled();
   await expect(page.getByLabel("API key").first()).toHaveAttribute("type", "password");
-  await expect(page.getByText(/Using environment default|Fallback|Key installed/).first()).toBeVisible();
+  await expect(page.getByText(/Using the server default|Environment defaults|Fallback|Key installed/).first()).toBeVisible();
   await page.screenshot({ path: `${screenshots}/settings-admin-desktop.png`, fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
@@ -75,7 +75,7 @@ test.describe("provider configuration", () => {
     await page.goto("/settings");
     page.on("dialog", (dialog) => dialog.accept());
     const settings = chatSettings(page);
-    if (await settings.getByText("Fallback", { exact: true }).isVisible()) {
+    if (await settings.getByText(/Using the server default|Fallback/).isVisible()) {
       await settings.getByLabel("API key").fill("disposable-toggle-fixture");
       await settings.getByRole("button", { name: "Save", exact: true }).click();
       await expect(settings.getByRole("status")).toContainText("Configuration saved");
@@ -106,9 +106,9 @@ test.describe("provider configuration", () => {
     await page.goto("/settings");
     await expect(embeddingSettings(page).getByLabel("Vector dimensions")).toHaveValue("768");
     await embeddingSettings(page).getByLabel("Vector dimensions").selectOption("1536");
-    await expect(page.getByText(/require a full reindex/i)).toBeVisible();
+    await expect(page.getByText(/requires a full reindex/i)).toBeVisible();
     await embeddingSettings(page).getByRole("button", { name: "Save", exact: true }).click();
-    await expect(embeddingSettings(page).getByRole("status")).toContainText(/requires an explicit reindex/i, { timeout: 10_000 });
+    await expect(embeddingSettings(page).getByRole("status")).toContainText(/replacement index/i, { timeout: 10_000 });
     await page.reload();
     await expect(embeddingSettings(page).getByLabel("Vector dimensions")).toHaveValue("768");
     await page.screenshot({ path: `${screenshots}/settings-embedding-rejection.png`, fullPage: true });

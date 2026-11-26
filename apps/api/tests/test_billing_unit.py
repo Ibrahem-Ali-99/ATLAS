@@ -262,7 +262,10 @@ def _deliver(
     )
 
 
-def test_sandbox_plan_change_applies_immediately(client: TestClient, db: Session) -> None:
+def test_sandbox_plan_change_applies_immediately(
+    client: TestClient, db: Session, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "billing_provider", "sandbox")
     org = make_organization(db, "Sandbox billing", "sandbox-billing")
     admin = make_user(db, "sandbox-billing@example.com")
     make_membership(db, admin, org, MembershipRole.admin)
@@ -313,14 +316,21 @@ def test_stripe_checkout_without_keys_does_not_grant_a_plan(
     make_membership(db, admin, org, MembershipRole.admin)
     headers = _csrf(login(client, admin.email, PASSWORD))
     path = f"/api/v1/organizations/{org.id}/billing"
-    monkeypatch.setattr(get_settings(), "billing_provider", "stripe")
+    settings = get_settings()
+    monkeypatch.setattr(settings, "billing_provider", "stripe")
+    monkeypatch.setattr(settings, "stripe_secret_key", "")
+    monkeypatch.setattr(settings, "stripe_webhook_secret", "")
+    monkeypatch.setattr(settings, "billing_public_url", "")
     checkout = client.post(f"{path}/checkout", json={"plan_code": "pro"}, headers=headers)
     assert checkout.status_code == 503
     assert checkout.json()["error"]["code"] == "billing_provider_unavailable"
     assert client.get(path).json()["subscription"]["plan_code"] == "free"
 
 
-def test_stripe_webhook_is_rejected_until_billing_uses_stripe(client: TestClient) -> None:
+def test_stripe_webhook_is_rejected_until_billing_uses_stripe(
+    client: TestClient, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "billing_provider", "sandbox")
     denied = client.post("/api/v1/billing/webhooks/stripe", content=b"{}")
     assert denied.status_code == 503
     assert denied.json()["error"]["code"] == "billing_provider_unavailable"

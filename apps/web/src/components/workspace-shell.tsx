@@ -141,7 +141,7 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                aria-label="Account menu"
+                aria-haspopup="menu"
                 className="flex items-center gap-3 rounded-md px-2 py-1 text-left hover:bg-accent"
               >
                 <span className="flex size-8 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">

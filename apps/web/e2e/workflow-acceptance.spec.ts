@@ -74,7 +74,7 @@ test("a manual test follows the canvas approval gate and leaves inspectable hist
   await expect(details.getByRole("button", { name: "Save changes" })).toBeDisabled();
   await details.getByRole("button", { name: "Runs and approvals" }).click();
   await details.getByRole("button", { name: "Test workflow" }).click();
-  await page.getByRole("dialog", { name: "Test workflow" }).getByRole("button", { name: "Run test" }).click();
+  await page.getByRole("dialog", { name: "Test workflow" }).getByRole("button", { name: "Run on this record" }).click();
   const run = details.getByRole("region", { name: "Run inspection" });
   await expect(run.getByText("Confirm the task is ready.")).toBeVisible();
   await page.goto("/approvals");
