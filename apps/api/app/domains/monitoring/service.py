@@ -30,8 +30,15 @@ _HINTS = {
 }
 
 
+_FRESH_SECONDS = 45
+
+
 def diagnostics(
-    db: Session, organization_id: uuid.UUID, scope: DataScope = DataScope.operational
+    db: Session,
+    organization_id: uuid.UUID,
+    scope: DataScope = DataScope.operational,
+    *,
+    include_platform: bool = True,
 ) -> dict[str, Any]:
     traces = list(
         db.scalars(
@@ -83,7 +90,11 @@ def diagnostics(
     )
     costs = [trace.cost_usd for trace in traces if trace.cost_usd is not None]
     now = datetime.now(UTC)
-    workers = list(db.scalars(select(WorkerHeartbeat).order_by(WorkerHeartbeat.worker_kind)))
+    workers = (
+        list(db.scalars(select(WorkerHeartbeat).order_by(WorkerHeartbeat.worker_kind)))
+        if include_platform
+        else []
+    )
     ingestion = list(
         db.scalars(
             select(IngestionJob)
@@ -99,7 +110,9 @@ def diagnostics(
             {"id": run.id, "error_code": run.error_code, "hint": _HINTS.get(run.error_code or "")}
             for run in failed_runs
         ],
-        "slowest_steps": [
+        "slowest_steps": []
+        if not include_platform
+        else [
             {
                 "operation": trace.operation,
                 "latency_ms": trace.latency_ms,
@@ -122,28 +135,18 @@ def diagnostics(
             }
             for run in workflow_failures
         ],
-        "duration_buckets": _buckets(
-            [trace.latency_ms for trace in traces if trace.latency_ms is not None]
-        ),
-        "cost_usd": None if not costs else round(sum(costs), 8),
-        "cost_notice": (
+        "duration_buckets": []
+        if not include_platform
+        else _buckets([trace.latency_ms for trace in traces if trace.latency_ms is not None]),
+        "cost_usd": None if not include_platform or not costs else round(sum(costs), 8),
+        "cost_notice": ""
+        if not include_platform
+        else (
             "Cost is unavailable unless token prices are configured "
             "and the provider reported usage."
         ),
-        "workers": [
-            {
-                "id": row.worker_id,
-                "kind": row.worker_kind,
-                "status": (
-                    "stalled" if (now - row.heartbeat_at).total_seconds() > 30 else row.status
-                ),
-                "heartbeat_at": row.heartbeat_at,
-                "last_success_at": row.last_success_at,
-                "processed_count": row.processed_count,
-                "last_error_code": row.last_error_code,
-            }
-            for row in workers
-        ],
+        "platform_visible": include_platform,
+        "workers": _present_workers(workers, now) if include_platform else [],
         "ingestion_jobs": [
             {
                 "id": row.id,
@@ -158,6 +161,48 @@ def diagnostics(
             for row in ingestion
         ],
     }
+
+
+def _present_workers(rows: list[WorkerHeartbeat], now: datetime) -> list[dict[str, Any]]:
+    grouped: dict[str, list[WorkerHeartbeat]] = {}
+    for row in rows:
+        grouped.setdefault(row.worker_kind, []).append(row)
+    presented: list[dict[str, Any]] = []
+    for group in grouped.values():
+        group.sort(key=lambda item: _aware(item.heartbeat_at), reverse=True)
+        current = group[0]
+        presented.append(_worker_row(current, _current_status(current, now), "current"))
+        for previous in group[1:]:
+            presented.append(_worker_row(previous, "replaced", "previous"))
+    return presented
+
+
+def _current_status(row: WorkerHeartbeat, now: datetime) -> str:
+    if row.status == "error":
+        return "error"
+    age = (now - _aware(row.heartbeat_at)).total_seconds()
+    if age <= _FRESH_SECONDS:
+        return row.status
+    return "stopped"
+
+
+def _worker_row(row: WorkerHeartbeat, status: str, generation: str) -> dict[str, Any]:
+    return {
+        "id": row.worker_id,
+        "kind": row.worker_kind,
+        "status": status,
+        "generation": generation,
+        "heartbeat_at": row.heartbeat_at,
+        "last_success_at": row.last_success_at,
+        "processed_count": row.processed_count,
+        "last_error_code": row.last_error_code,
+    }
+
+
+def _aware(moment: datetime) -> datetime:
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=UTC)
+    return moment
 
 
 def _scoped(model: Any, organization_id: uuid.UUID, scope: DataScope) -> list[Any]:

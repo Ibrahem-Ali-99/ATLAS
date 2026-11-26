@@ -14,6 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { sessionQueryOptions } from "@/lib/api";
+import { isDemoSession } from "@/lib/demo-session";
 import { getAgentRun, listAgentRuns, resumeAgentRun, startAgentRun } from "@/lib/agent-api";
 import { executionSummary, type AgentEvent, type AgentRunDetail, type RunStatus } from "@/lib/agent";
 import { getDiagnosticRun } from "@/lib/intelligence";
@@ -66,12 +68,15 @@ function AgentRunsBody({
   onOpen: (open: boolean) => void;
 }) {
   const queryClient = useQueryClient();
+  const session = useQuery(sessionQueryOptions);
+  const demonstration = isDemoSession(session.data);
   const [scope, setScope] = useState<DataScope>("operational");
+  const recordScope = demonstration ? "operational" : scope;
   const [page, setPage] = useState(1);
   const [inquiryQuery, setInquiryQuery] = useState("");
   const runs = useQuery({
-    queryKey: ["agent-runs", organizationId, status, page, scope],
-    queryFn: () => listAgentRuns(organizationId, { status, page, scope }),
+    queryKey: ["agent-runs", organizationId, status, page, recordScope],
+    queryFn: () => listAgentRuns(organizationId, { status, page, scope: recordScope }),
   });
   const detail = useQuery({
     queryKey: ["agent-run", organizationId, selectedId],
@@ -94,19 +99,19 @@ function AgentRunsBody({
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-[1240px] min-w-0 flex-col gap-5">
-    <PageHeader title="Agent runs" eyebrow="Agent execution history" actions={
+    <div className="flex w-full min-w-0 flex-col gap-5">
+    <PageHeader title="Agent runs" eyebrow="Inquiry handling" actions={
       <Button type="button" onClick={() => onOpen(true)}>Start from inquiry</Button>
-    }>Inspect inquiry handling, retrieved evidence, approval decisions, and execution results.</PageHeader>
-    <DataScopeControl value={scope} onChange={setScope} advanced />
+    }>Review how an inquiry was handled and what was decided.</PageHeader>
     <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
       <section className="min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="flex flex-col gap-3 p-4 sm:flex-row">
+        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
+          {demonstration ? null : <DataScopeControl value={scope} onChange={(next) => { setScope(next); setPage(1); }} />}
           <Input
             value={inquiryQuery}
             onChange={(event) => setInquiryQuery(event.target.value)}
-            placeholder="Filter loaded inquiries"
-            aria-label="Filter loaded inquiries"
+            placeholder="Search inquiries"
+            aria-label="Search inquiries"
           />
           <select
             className={selectClass}
@@ -126,7 +131,7 @@ function AgentRunsBody({
         </div>
         {runs.isPending ? <div className="px-4 pb-4"><Skeleton className="h-8 w-full" /></div> : null}
         {runs.isError ? <div className="px-4 pb-4"><RequestError error={runs.error} /></div> : null}
-        <p className="px-4 pb-2 text-xs text-subtle">Newest first. The inquiry field filters this page. Status asks the server for another page.</p>
+        <p className="px-4 pb-2 text-xs text-subtle">Newest first.</p>
         {runs.data && visible.length === 0 ? (
           <p className="px-4 pb-6 text-sm text-muted-foreground">No agent runs match this filter.</p>
         ) : null}
@@ -371,12 +376,8 @@ function RunDetail({
           {trace.data.traces.map((item, index) => (
             <p key={`${item.operation}-${index}`} className="text-sm text-muted-foreground">
               {item.operation} {item.status}.
-              {item.latency_ms !== null ? ` ${item.latency_ms} ms.` : " Latency was not recorded."}
-              {item.tokens_in !== null || item.tokens_out !== null
-                ? ` Tokens ${item.tokens_in ?? 0}/${item.tokens_out ?? 0}.`
-                : " Tokens were not recorded."}
-              {item.cost_usd !== null ? ` Cost ${item.cost_usd}.` : ""}
-              {` Langfuse: ${item.langfuse_status}`}
+              {item.latency_ms !== null ? ` ${item.latency_ms} ms.` : ""}
+              {item.error_code ? ` ${item.error_code}.` : ""}
             </p>
           ))}
         </div>

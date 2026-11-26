@@ -259,7 +259,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
 
   await page.getByRole("link", { name: "Workflows" }).click();
   await expect(page.getByRole("heading", { name: "Workflows" })).toBeVisible();
-  await page.getByText("Built-in automation activity", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
   await expect(page.getByText("sandbox", { exact: false }).first()).toBeVisible();
   await shot(page, "07-workflows.png");
   await page.getByRole("link", { name: "Analytics" }).click();

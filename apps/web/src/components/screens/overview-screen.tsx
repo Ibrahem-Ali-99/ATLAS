@@ -5,7 +5,6 @@ import { ArrowUpRight, Building2, Inbox, Plus, ShieldCheck, TrendingUp } from "l
 import Link from "next/link";
 import { useState } from "react";
 
-import { DataScopeControl } from "@/components/data-scope";
 import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -13,11 +12,12 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Approval } from "@/lib/agent";
 import { listApprovals } from "@/lib/agent-api";
+import { sessionQueryOptions } from "@/lib/api";
+import { isDemoSession } from "@/lib/demo-session";
 import { getAnalytics, type AnalyticsSnapshot } from "@/lib/intelligence";
 import { createOpportunity, listPipelineStages } from "@/lib/opportunities";
 import { listCompanies, listInquiries, listLeads } from "@/lib/records-api";
 import type { Company, Inquiry, Lead } from "@/lib/records";
-import { isDataScope, type DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
 
 const STAGES = [
@@ -30,21 +30,16 @@ const STAGES = [
 
 export function OverviewScreen() {
   const workspace = useWorkspace();
+  const session = useQuery(sessionQueryOptions);
   const organizationId = workspace.organizationId;
-  const [scopeByOrganization, setScopeByOrganization] = useState<Record<string, DataScope>>({});
+  const demonstration = isDemoSession(session.data);
   const [period, setPeriod] = useState("30d");
-  const scope = organizationId ? scopeByOrganization[organizationId] ?? storedScope(organizationId) : "all";
+  const scope = "all";
   const analytics = useQuery({ queryKey: ["analytics", organizationId, scope, period], queryFn: () => getAnalytics(organizationId ?? "", scope, { period }), enabled: Boolean(organizationId) });
   const companies = useQuery({ queryKey: ["overview-companies", organizationId], queryFn: () => listCompanies(organizationId ?? "", { pageSize: 100 }), enabled: Boolean(organizationId) });
   const leads = useQuery({ queryKey: ["overview-leads", organizationId], queryFn: () => listLeads(organizationId ?? "", { pageSize: 100 }), enabled: Boolean(organizationId) });
   const inquiries = useQuery({ queryKey: ["overview-inquiries", organizationId], queryFn: () => listInquiries(organizationId ?? "", { pageSize: 100 }), enabled: Boolean(organizationId) });
   const approvals = useQuery({ queryKey: ["overview-approvals", organizationId], queryFn: () => listApprovals(organizationId ?? "", { status: "pending" }), enabled: Boolean(organizationId) });
-
-  const selectScope = (next: DataScope) => {
-    if (!organizationId) return;
-    setScopeByOrganization((current) => ({ ...current, [organizationId]: next }));
-    window.localStorage.setItem(`atlas.dashboard.scope.${organizationId}`, next);
-  };
 
   if (analytics.isPending) return <OverviewSkeleton />;
   if (analytics.isError) return <RequestError error={analytics.error} />;
@@ -52,10 +47,17 @@ export function OverviewScreen() {
   const empty = analytics.data.companies_total === 0 && analytics.data.leads_total === 0 && analytics.data.inquiries_total === 0;
 
   return (
-    <div className="mx-auto flex w-full max-w-[1240px] min-w-0 flex-col gap-5" data-testid="overview-workspace">
+    <div className="flex w-full min-w-0 flex-col gap-5" data-testid="overview-workspace">
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5" data-testid="overview-intro">
-        <div><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"><span className="size-1.5 rounded-full bg-success" /> Live workspace</p><h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-foreground sm:text-[30px]">{timeGreeting()}</h1><p className="mt-2 text-[13px] text-muted-foreground">Here’s what needs your attention across {workspace.organizationName ?? "your workspace"}.</p></div>
-        <div className="flex flex-wrap items-center gap-2"><DataScopeControl value={scope} onChange={selectScope} advanced />{organizationId ? <NewOpportunity key={organizationId} organizationId={organizationId} companies={companies.data?.items ?? []} /> : null}</div>
+        <div>
+          <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            <span className={`size-1.5 rounded-full ${demonstration ? "bg-primary" : "bg-success"}`} />
+            {demonstration ? "Demonstration" : "Workspace"}
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-foreground sm:text-[30px]">{timeGreeting()}</h1>
+          <p className="mt-2 text-[13px] text-muted-foreground">Here’s what needs your attention across {workspace.organizationName ?? "your workspace"}.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">{organizationId ? <NewOpportunity key={organizationId} organizationId={organizationId} companies={companies.data?.items ?? []} /> : null}</div>
       </header>
       {empty ? <EmptyWorkspace /> : <>
         <Kpis data={analytics.data} />
@@ -273,7 +275,6 @@ function Attention({ approvals, pending, error }: { approvals: Approval[]; pendi
 
 function EmptyWorkspace() { return <section className="rounded-lg border border-dashed border-border bg-card px-5 py-8"><h2 className="text-lg font-semibold text-foreground">Your workspace is ready</h2><p className="mt-2 max-w-lg text-sm text-muted-foreground">Create your first company or lead to start tracking customer work here.</p><Link href="/crm?tab=companies" className="mt-4 inline-flex rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">Open CRM</Link></section>; }
 function OverviewSkeleton() { return <div className="space-y-5"><Skeleton className="h-16 w-full" /><div className="grid gap-3 sm:grid-cols-4"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div><Skeleton className="h-64 w-full" /></div>; }
-function storedScope(id: string): DataScope { if (typeof window === "undefined") return "all"; const saved = window.localStorage.getItem(`atlas.dashboard.scope.${id}`); return isDataScope(saved) ? saved : "all"; }
 function timeGreeting(): string { const hour = new Date().getHours(); return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"; }
 function formatDay(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);

@@ -7,7 +7,7 @@ import { navigationGroups } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
-const demoHidden = new Set(["/integrations", "/billing", "/settings", "/setup"]);
+const demoHidden = new Set(["/billing", "/settings", "/setup"]);
 
 export function SidebarNav({
   organizationName,
@@ -40,7 +40,7 @@ export function SidebarNav({
       </div>
       <div className={cn("mx-2.5 mt-3 flex min-h-11 shrink-0 items-center rounded-md px-2", collapsed ? "justify-center" : "gap-2.5")}>
         <span className="grid size-7 shrink-0 place-items-center rounded-md bg-foreground text-[10px] font-bold text-background">{(organizationName ?? "AT").slice(0, 2).toUpperCase()}</span>
-        {!collapsed ? <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{organizationName ?? "ATLAS"}</p><p className="mt-0.5 truncate text-[10px] text-muted-foreground">Workspace</p></div> : null}
+        {!collapsed ? <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{organizationName ?? "ATLAS"}</p><p className="mt-0.5 truncate text-[10px] text-muted-foreground">{demo ? "Demonstration" : "Workspace"}</p></div> : null}
       </div>
       <nav className="mt-3 flex w-full flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-3" aria-label="Workspace">
         {groups.map((group) => (

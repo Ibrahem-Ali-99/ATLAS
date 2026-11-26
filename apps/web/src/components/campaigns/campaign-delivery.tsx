@@ -21,6 +21,7 @@ const outcomes: Record<CampaignDeliveryStatus, string> = {
   failed: "Failed",
   needs_attention: "Needs review",
   cancelled: "Cancelled",
+  simulated: "Simulated — not sent",
 };
 
 function isActive(status?: string) {
@@ -82,7 +83,7 @@ export function CampaignDelivery({ organizationId, campaign, eligible }: {
   return (
     <section aria-label="Campaign delivery" className="grid gap-3 border-t border-border pt-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">{mode === "live" ? "Live delivery" : mode === "sandbox" ? "Sandbox delivery" : "Campaign delivery"}</h3>
+        <h3 className="text-sm font-semibold">{mode === "live" ? "Live delivery" : mode === "sandbox" ? "Workspace delivery" : "Campaign delivery"}</h3>
         {!isDraft ? <span className="text-xs capitalize text-muted-foreground" role="status">{status.replaceAll("_", " ")}</span> : null}
       </div>
       {scheduledAt ? (
@@ -91,7 +92,7 @@ export function CampaignDelivery({ organizationId, campaign, eligible }: {
       {isDraft ? (
         <p className="text-xs text-muted-foreground">
           {role === "admin"
-            ? "Send to the local mail sandbox now or schedule for later. Add a subject, message and 1–1,000 eligible recipients."
+            ? "Send now or schedule for later. Messages stay in this workspace and are not delivered to customers. Add a subject, message, and 1–1,000 eligible recipients."
             : "A workspace admin can schedule this campaign."}
         </p>
       ) : null}

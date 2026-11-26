@@ -63,7 +63,7 @@ test("approved email is delivered once and visible in Email Activity", async ({ 
   expect(executionBody.status).toBe("executing");
 
   await page.getByRole("link", { name: "Workflows" }).click();
-  await page.getByText("Built-in automation activity", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Email activity" })).toBeVisible();
   const delivery = page.getByRole("region", { name: "Email activity" }).locator(`[data-approval-id="${responseApproval?.id}"]`);
   const accepted = delivery.getByText("Accepted by SMTP", { exact: true });
@@ -76,6 +76,6 @@ test("approved email is delivered once and visible in Email Activity", async ({ 
   ).toBe(before + 1);
 
   await page.reload();
-  await page.getByText("Built-in automation activity", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
   await expect(accepted).toBeVisible();
 });

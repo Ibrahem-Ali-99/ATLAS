@@ -138,7 +138,7 @@ function ApprovalsBody({ organizationId, isAdmin }: {
   });
 
   return (
-    <div className="mx-auto flex w-full max-w-[1240px] min-w-0 flex-col gap-5">
+    <div className="flex w-full min-w-0 flex-col gap-5">
     <PageHeader title="Approvals" eyebrow="Governed actions" actions={
       <Button asChild variant="outline"><Link href="/agent-runs">View execution history</Link></Button>
     }>Review proposed workspace changes before applying them.</PageHeader>

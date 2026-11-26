@@ -153,12 +153,12 @@ function KnowledgeWorkspace({
       <PageHeader title="Company knowledge" actions={
         <Button onClick={() => { upload.reset(); setUploadOpen(true); }}><UploadCloud size={16} /> Upload document</Button>
       }>
-        Manage indexed documents and inspect passages used by ATLAS for {organizationName}.
+        Documents ATLAS can search when answering questions for {organizationName}.
       </PageHeader>
       <div role="group" aria-label="Knowledge views" className="flex flex-wrap gap-2">
         <Button variant={view === "library" ? "secondary" : "ghost"} aria-pressed={view === "library"} onClick={() => setView("library")}><FolderOpen size={16} /> Document library</Button>
         <Button variant={view === "search" ? "secondary" : "ghost"} aria-pressed={view === "search"} onClick={() => setView("search")}><Search size={16} /> Semantic search</Button>
-        <Button variant={view === "evaluation" ? "secondary" : "ghost"} aria-pressed={view === "evaluation"} onClick={() => setView("evaluation")}>Retrieval evaluation</Button>
+        <Button variant={view === "evaluation" ? "secondary" : "ghost"} aria-pressed={view === "evaluation"} onClick={() => setView("evaluation")}>Answer checks</Button>
       </div>
       <EmbeddingGuide status={embeddings.data} />
       <Dialog open={uploadOpen} onOpenChange={(open) => {
@@ -287,7 +287,7 @@ function KnowledgeWorkspace({
             ) : null}
           </section>
           {selected ? <ChunkList organizationId={organizationId} document={selected} highlightId={highlightId} /> : (
-            <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Select a document to inspect its metadata and indexed passages.</div>
+            <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Select a document to review its details and extracted text.</div>
           )}
         </div>
       ) : null}
@@ -336,7 +336,7 @@ function KnowledgeWorkspace({
       ) : null}
       {view === "evaluation" ? (
         <section className="rounded-xl border border-border bg-card p-5">
-          <h2 className="font-medium">Retrieval evaluation</h2>
+          <h2 className="font-medium">Answer checks</h2>
           <p className="mt-1 text-xs text-muted-foreground">Run an organization-scoped evidence check against indexed documents.</p>
           <div className="mt-3 grid gap-2">
             <select aria-label="Evaluation mode" value={evaluationMode} onChange={(event) => setEvaluationMode(event.target.value)} className="h-10 rounded-md border border-border bg-background px-3 text-sm">
@@ -398,7 +398,7 @@ function DocumentRow({
   return (
     <TableRow className={selected ? "bg-accent/40" : undefined}>
       <TableCell>
-        <button type="button" aria-pressed={selected} className="flex items-start gap-2 break-all text-left font-medium hover:text-primary" onClick={onSelect}>
+        <button type="button" aria-pressed={selected} className="flex min-w-[12rem] items-start gap-2 break-words text-left font-medium hover:text-primary" onClick={onSelect}>
           <FileText className="mt-0.5 shrink-0 text-primary" size={16} /> {document.title}
         </button>
         <p className="mt-1 pl-6 text-xs text-muted-foreground">{Math.ceil(document.byte_size / 1024)} KB</p>
@@ -417,7 +417,7 @@ function DocumentRow({
       </TableCell>
       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{new Date(document.updated_at).toLocaleDateString()}</TableCell>
       <TableCell>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-nowrap gap-2">
           {archived ? (
             <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button>
           ) : (
@@ -465,7 +465,7 @@ function ChunkList({
   });
   return (
     <section className="min-w-0 rounded-xl border border-border bg-card p-4">
-      <h2 className="break-all text-base font-medium text-foreground">{document.title}</h2>
+      <h2 className="break-words text-base font-medium text-foreground">{document.title}</h2>
       <p className={`mt-2 text-xs uppercase tracking-[0.12em] ${statusClass(status)}`}>{archived ? "Archived. Search and assistant answers skip this document until it is restored." : statusCopy(status)}</p>
       <dl className="mt-4 space-y-2 text-xs text-muted-foreground">
         <div><dt className="text-subtle">File</dt><dd>{document.filename}</dd></div>
@@ -481,7 +481,7 @@ function ChunkList({
         {preview.isError ? <div className="mt-2"><RequestError error={preview.error} /></div> : null}
         {preview.data ? <p className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{preview.data.excerpt || "This file has no readable text."}{preview.data.truncated ? "…" : ""}</p> : null}
       </div>
-      <h3 className="mt-4 text-sm font-medium">Indexed passages</h3>
+      <h3 className="mt-4 text-sm font-medium">Extracted text</h3>
       {chunks.isPending ? <Skeleton className="mt-3 h-16 w-full" /> : null}
       {chunks.isError ? <div className="mt-3"><RequestError error={chunks.error} /></div> : null}
       {chunks.data && chunks.data.items.length === 0 ? (
@@ -495,7 +495,7 @@ function ChunkList({
         {chunks.data?.items.map((chunk) => (
           <li key={chunk.id} className={`rounded-[10px] p-3 text-sm ${chunk.id === highlightId ? "bg-primary/10 ring-1 ring-primary" : "bg-secondary"}`}>
             <p className="text-xs text-muted-foreground">
-              Chunk {chunk.chunk_index + 1}
+              Section {chunk.chunk_index + 1}
               {chunk.page_number !== null ? ` · page ${chunk.page_number}` : ""}
             </p>
             <p className="mt-2 whitespace-pre-wrap">{chunk.content}</p>
@@ -511,17 +511,19 @@ function EmbeddingGuide({ status }: { status?: { embedding_ready: boolean; embed
     <section className="rounded-xl border border-border bg-card p-4" aria-label="How document search works">
       <h2 className="text-sm font-medium">How search uses your documents</h2>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
-        ATLAS keeps the file, splits it into passages, and stores a searchable fingerprint for each passage. A document is Queued, then Processing, then Ready. Failed indexing keeps the file and can be retried. Replacing a file removes the old passages before the new ones are indexed. Archiving removes it from search and from assistant answers until you restore it.
+        A document is queued, then processed, then ready for search. A failed file stays in the library and can be retried. Replacing a file updates search. Archiving hides it from search and from assistant answers until you restore it.
       </p>
       {status ? (
         <p className="mt-2 text-sm leading-6">
-          {status.embedding_ready
-            ? `This workspace fingerprints passages with ${status.embedding_provider} (${status.embedding_model}). ${status.embedding_detail}`
-            : `An administrator needs to connect an embedding model before new documents can be indexed. ${status.embedding_detail}`}
+          {status.embedding_provider === "double" || status.embedding_model === "demonstration"
+            ? "Search uses the documents in this workspace. A paid search service is not called."
+            : status.embedding_ready
+              ? status.embedding_detail
+              : `An administrator needs to finish document search setup before new files can be indexed. ${status.embedding_detail}`}
           {" "}
           <Link href="/integrations" className="font-medium text-primary underline">Open Integrations</Link>
         </p>
-      ) : <p className="mt-2 text-sm text-muted-foreground">Checking the embedding setup…</p>}
+      ) : <p className="mt-2 text-sm text-muted-foreground">Checking document search…</p>}
       {status && status.incompatible_documents > 0 ? (
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {status.incompatible_documents} ready {status.incompatible_documents === 1 ? "document was" : "documents were"} indexed with a different model. Reindex {status.incompatible_documents === 1 ? "it" : "them"} so search uses the current model. The files stay in place.

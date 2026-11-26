@@ -20,7 +20,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { IntegrationGallery } from "@/components/integrations/integration-gallery";
 import { sessionQueryOptions } from "@/lib/api";
+import { isDemoSession } from "@/lib/demo-session";
 import { getAutomations } from "@/lib/automations";
 import { getCalendarConnection } from "@/lib/calendar";
 import { cancelEmbeddingReindex, getEmbeddingReindex, startEmbeddingReindex } from "@/lib/embedding-reindex";
@@ -90,10 +92,15 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
   };
 
   if (integrationsOnly) {
+    const demonstration = isDemoSession(session.data);
     return (
-      <div className="min-w-0 space-y-6">
-        <PageHeader title="Integrations">Connect the services your organization uses for messaging, automation, and knowledge.</PageHeader>
-        {organizationId ? <IntegrationMarketplace key={organizationId} {...integrationProps} /> : null}
+      <div className="min-w-0 space-y-5">
+        <PageHeader title="Integrations">
+          {demonstration
+            ? "Services ATLAS supports, and how each one behaves in this demonstration."
+            : "Connect the services your organization uses for messaging, automation, and knowledge."}
+        </PageHeader>
+        {demonstration ? <IntegrationGallery /> : organizationId ? <IntegrationMarketplace key={organizationId} {...integrationProps} /> : null}
       </div>
     );
   }

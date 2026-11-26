@@ -10,6 +10,8 @@ import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { sessionQueryOptions } from "@/lib/api";
+import { isDemoSession } from "@/lib/demo-session";
 import { downloadAnalyticsReport, getAnalytics, type AnalyticsSnapshot, type PeriodDelta, type StatusCount } from "@/lib/intelligence";
 import { listTeam } from "@/lib/organization";
 import { isDataScope, type DataScope } from "@/lib/provenance";
@@ -21,7 +23,10 @@ export function AnalyticsScreen() {
 }
 
 function AnalyticsWorkspace({ organizationId }: { organizationId: string }) {
+  const session = useQuery(sessionQueryOptions);
+  const demonstration = isDemoSession(session.data);
   const [scope, setScope] = useState<DataScope>(() => storedScope(organizationId));
+  const recordScope = demonstration ? "all" : scope;
   const [period, setPeriod] = useState("30d");
   const [channel, setChannel] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -36,8 +41,8 @@ function AnalyticsWorkspace({ organizationId }: { organizationId: string }) {
   const valid = !custom || (Boolean(startDate && endDate) && span >= 0 && span <= 365);
   const filters = { period, channel, startDate: custom ? startDate : "", endDate: custom ? endDate : "", ownerUserId };
   const analytics = useQuery({
-    queryKey: ["analytics", organizationId, scope, filters],
-    queryFn: () => getAnalytics(organizationId, scope, filters),
+    queryKey: ["analytics", organizationId, recordScope, filters],
+    queryFn: () => getAnalytics(organizationId, recordScope, filters),
     enabled: valid,
   });
 
@@ -80,16 +85,16 @@ function AnalyticsWorkspace({ organizationId }: { organizationId: string }) {
           <Button type="button" variant="outline" disabled={!valid || exporting} onClick={() => {
             setExporting(true);
             setExportError(null);
-            void downloadAnalyticsReport(organizationId, scope, report, filters)
+            void downloadAnalyticsReport(organizationId, recordScope, report, filters)
               .catch((error: unknown) => setExportError(error instanceof Error ? error : new Error("Export failed")))
               .finally(() => setExporting(false));
           }}>{exporting ? "Exporting…" : "Download CSV"}</Button>
         </div>
         {exportError ? <RequestError error={exportError} /> : null}
-        <DataScopeControl value={scope} advanced onChange={(next) => {
+        {demonstration ? null : <DataScopeControl value={scope} onChange={(next) => {
           setScope(next);
           window.localStorage.setItem(`atlas.dashboard.scope.${organizationId}`, next);
-        }} />
+        }} />}
       </section>
       {!valid ? <p role="status" className="text-sm text-muted-foreground">Choose a start and end date for a range of up to 366 days.</p> :
         analytics.isPending ? <Skeleton className="h-40 w-full" /> :

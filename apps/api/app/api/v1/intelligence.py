@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.core.errors import AppError
 from app.domains.analytics.service import report_csv, snapshot
 from app.domains.crm import service as crm
+from app.domains.demo.access import organization_is_visitor
 from app.domains.evaluation.service import list_evaluations, start_evaluation
 from app.domains.identity.dependencies import CsrfAdmin, CsrfMember, DbSession, Member
 from app.domains.identity.models import Membership
@@ -183,7 +184,9 @@ def get_prediction(lead_id: uuid.UUID, member: Member, db: DbSession) -> Predict
 
 
 @router.post("/evaluations", status_code=202)
-def create_evaluation(member: CsrfAdmin) -> JSONResponse:
+def create_evaluation(member: CsrfAdmin, db: DbSession) -> JSONResponse:
+    if organization_is_visitor(db, member.organization.id):
+        raise AppError(404, "not_found", "Resource not found")
     return JSONResponse(
         status_code=202, content={"status": start_evaluation(member.organization.id)}
     )
@@ -191,6 +194,8 @@ def create_evaluation(member: CsrfAdmin) -> JSONResponse:
 
 @router.get("/evaluations")
 def get_evaluations(member: Member, db: DbSession) -> dict[str, Any]:
+    if organization_is_visitor(db, member.organization.id):
+        raise AppError(404, "not_found", "Resource not found")
     rows = list_evaluations(db, member.organization.id)
     return {
         "notice": "Results are deterministic checks. They are not live-model accuracy.",
@@ -215,7 +220,12 @@ def get_evaluations(member: Member, db: DbSession) -> dict[str, Any]:
 def get_diagnostics(
     member: Member, db: DbSession, scope: DataScope = DataScope.operational
 ) -> dict[str, Any]:
-    return diagnostics(db, member.organization.id, scope)
+    return diagnostics(
+        db,
+        member.organization.id,
+        scope,
+        include_platform=not organization_is_visitor(db, member.organization.id),
+    )
 
 
 @router.get("/diagnostics/runs/{run_id}")

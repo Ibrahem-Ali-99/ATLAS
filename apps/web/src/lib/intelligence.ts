@@ -121,7 +121,8 @@ export type Diagnostics = {
   duration_buckets: { bucket: string; count: number }[];
   cost_usd: number | null;
   cost_notice: string;
-  workers: { id: string; kind: string; status: string; heartbeat_at: string; last_success_at: string | null; processed_count: number; last_error_code: string | null }[];
+  platform_visible?: boolean;
+  workers: { id: string; kind: string; status: string; generation?: "current" | "previous"; heartbeat_at: string; last_success_at: string | null; processed_count: number; last_error_code: string | null }[];
   ingestion_jobs: { id: string; document_id: string; status: string; attempts: number; max_attempts: number; error_code: string | null; next_attempt_at: string; updated_at: string }[];
 };
 

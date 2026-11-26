@@ -18,9 +18,8 @@ export function WorkflowsScreen({ requestedWorkflow, requestedRun, showArchived 
   requestedWorkflow?: string; requestedRun?: string; showArchived?: boolean;
 }) {
   const { organizationId, role } = useWorkspace();
-  const [showActivity, setShowActivity] = useState(false);
   return (
-    <div className="mx-auto w-full max-w-[1450px] min-w-0 space-y-6">
+    <div className="w-full min-w-0 space-y-5">
       {organizationId && role === "admin" ? <WorkflowStudio key={organizationId} organizationId={organizationId} requestedWorkflow={requestedWorkflow} requestedRun={requestedRun} showArchived={showArchived} /> : (
         <header>
           <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
@@ -28,10 +27,11 @@ export function WorkflowsScreen({ requestedWorkflow, requestedRun, showArchived 
         </header>
       )}
       <WorkflowTaskList />
-      <details onToggle={(event) => setShowActivity(event.currentTarget.open)} className="rounded-xl border border-border bg-card px-4 py-3">
-        <summary className="cursor-pointer text-sm font-medium">Built-in automation activity</summary>
-        {showActivity ? <BuiltInWorkflows /> : null}
-      </details>
+      <section className="rounded-xl border border-border bg-card p-5" aria-labelledby="automation-activity-title">
+        <h2 id="automation-activity-title" className="text-base font-semibold">Activity</h2>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Recorded runs, messages, and bookings for this workspace.</p>
+        <BuiltInWorkflows />
+      </section>
     </div>
   );
 }
@@ -110,8 +110,8 @@ function WorkflowsBody({
   const searched = visible.filter((run) => `${run.kind} ${run.lead_title ?? ""} ${run.company_name ?? ""} ${run.status}`.toLowerCase().includes(search.trim().toLowerCase()));
   const focus = data.automations.find((item) => item.kind === kind);
   return (
-    <div className="mx-auto flex w-full max-w-[1240px] min-w-0 flex-col gap-5">
-      <p className="mt-4 text-sm text-muted-foreground">{configurationCopy(data)}</p>
+    <div className="mt-5 flex w-full min-w-0 flex-col gap-5">
+      <p className="text-sm text-muted-foreground">{configurationCopy(data)}</p>
       <nav className="flex flex-wrap gap-2 border-b border-border pb-3" aria-label="Automation workspace views">
         {([ ["overview", "Overview"], ["approvals", "Approvals"], ["history", "Execution history"], ["email", "Email activity"] ] as const).map(([id, label]) => (
           <button key={id} type="button" className={`rounded-md px-3 py-2 text-sm ${view === id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`} aria-pressed={view === id} onClick={() => setView(id)}>{label}</button>
@@ -119,9 +119,9 @@ function WorkflowsBody({
       </nav>
       {view === "overview" ? <section className="grid gap-4 lg:grid-cols-2">
         {data.automations.map((automation) => (
-          <article key={automation.kind} className="flex min-h-52 flex-col rounded-lg border border-border bg-card px-5 py-5 shadow-sm transition hover:border-primary/40">
+          <article key={automation.kind} className="flex min-h-44 flex-col rounded-xl border border-border bg-background px-5 py-5">
             <div className="flex items-start justify-between gap-4">
-              <h2 className="text-[21px] text-foreground">{automation.name}</h2>
+              <h2 className="text-base font-semibold text-foreground">{automation.name}</h2>
               <p className={`text-[11px] uppercase tracking-[0.12em] ${automation.configured ? "text-success" : "text-warning"}`}>
                 {automation.configured ? "Active" : "Not configured"}
               </p>
@@ -152,13 +152,13 @@ function WorkflowsBody({
           </article>
         ))}
       </section> : null}
-      {view === "approvals" ? <section className="rounded-[10px] bg-muted px-5 py-6"><h2 className="text-xl text-foreground">Human approvals</h2><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Review proposed CRM changes and customer responses in the existing approval workspace. Approval and execution permissions remain enforced by the API.</p><Link className="mt-5 inline-block text-sm text-primary underline" href="/approvals">Open approvals →</Link></section> : null}
-      {view === "history" || view === "overview" ? <section id="execution-history" className="rounded-[10px] bg-muted px-5 py-6">
+      {view === "approvals" ? <section className="rounded-xl border border-border bg-background px-5 py-5"><h2 className="text-base font-semibold text-foreground">Approvals</h2><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Review proposed customer changes before they are applied.</p><Link className="mt-4 inline-block text-sm font-medium text-primary" href="/approvals">Open approvals</Link></section> : null}
+      {view === "history" || view === "overview" ? <section id="execution-history" className="rounded-xl border border-border bg-background px-5 py-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-[22px] text-foreground">Execution history</h2>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Actual outcomes are stored. This page does not start, edit, or retry a run.
+            <h2 className="text-base font-semibold text-foreground">Execution history</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              These are stored outcomes. This page does not start or retry a run.
             </p>
           </div>
           {focus ? (
@@ -307,8 +307,8 @@ function WorkflowTaskList() {
 function EmailActivitySection({ emails }: { emails: AutomationSnapshot["emails"] }) {
   if (emails.length === 0) {
     return (
-      <section className="rounded-[10px] bg-muted px-5 py-6" aria-label="Email activity">
-        <h2 className="text-[22px] text-foreground">Email activity</h2>
+      <section className="rounded-xl border border-border bg-background px-5 py-5" aria-label="Email activity">
+        <h2 className="text-base font-semibold text-foreground">Email activity</h2>
         <p className="mt-2 text-sm text-muted-foreground">
           Approved customer responses will appear here with their delivery status.
         </p>
@@ -316,10 +316,10 @@ function EmailActivitySection({ emails }: { emails: AutomationSnapshot["emails"]
     );
   }
   return (
-    <section className="rounded-[10px] bg-muted px-5 py-6" aria-label="Email activity">
+    <section className="rounded-xl border border-border bg-background px-5 py-5" aria-label="Email activity">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-[22px] text-foreground">Email activity</h2>
+          <h2 className="text-base font-semibold text-foreground">Email activity</h2>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
             Review approved messages and their recorded delivery attempts.
           </p>
@@ -426,19 +426,16 @@ function ExecutionDetail({ run, onClose }: { run: WorkflowRun; onClose: () => vo
 function configurationCopy(data: AutomationSnapshot): string {
   const email =
     data.email_mode === "live"
-      ? "Live email is enabled."
-      : "Sandbox email reaches the local mailbox, not a customer inbox.";
+      ? "Email can leave this workspace after approval."
+      : "Email stays in the sandbox mailbox for this workspace.";
   const calendar =
     data.calendar_provider === "simulation"
-      ? "Calendar bookings are simulated in ATLAS."
-      : "Google Calendar is connected for new approved appointments.";
-  const n8n = data.n8n_configured
-    ? "A lead webhook URL is configured."
-    : "The lead webhook URL is empty, so new runs are stored as not configured.";
-  const key = data.webhook_configured
-    ? "A webhook key is installed for signed callbacks."
-    : "No webhook key is installed, so ATLAS cannot sign an outbound call.";
-  return `${email} ${calendar} ${n8n} ${key}`;
+      ? "Appointments are stored here and are not sent to Google Calendar."
+      : "Approved appointments can be added to Google Calendar.";
+  const automation = data.n8n_configured
+    ? "An external workflow is connected."
+    : "No external workflow is connected.";
+  return `${email} ${calendar} ${automation}`;
 }
 
 function outcomeCopy(automation: AutomationSnapshot["automations"][number]): string {

@@ -52,14 +52,14 @@ test("admin can inspect persisted integrations and automation activity", async (
   await page.goto("/automations");
   await expect(page).toHaveURL(/\/workflows$/);
   await expect(page.getByRole("heading", { name: "Workflows", level: 1 })).toBeVisible();
-  await page.getByText("Built-in automation activity", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Overview", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Approvals", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Human approvals", exact: true })).toBeVisible();
-  await page.getByRole("link", { name: /Open approvals/ }).click();
+  await expect(page.getByRole("heading", { name: "Approvals", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Open approvals", exact: true }).click();
   await expect(page).toHaveURL(/\/approvals$/);
   await page.goto("/workflows");
-  await page.getByText("Built-in automation activity", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Execution history", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Execution history", exact: true })).toBeVisible();
   await page.getByLabel("Search execution history").fill("unlikely-no-match");
@@ -77,8 +77,9 @@ test("admin can inspect persisted integrations and automation activity", async (
       await relatedLead.click();
       await expect(page).toHaveURL(/\/crm\?tab=leads&id=/);
       await page.goBack();
-      const activity = page.getByText("Built-in automation activity", { exact: true });
-      if (!await page.getByRole("button", { name: "Email activity", exact: true }).isVisible()) await activity.click();
+      if (!await page.getByRole("button", { name: "Email activity", exact: true }).isVisible()) {
+        await page.goto("/workflows");
+      }
     }
   }
   await page.getByRole("button", { name: "Email activity", exact: true }).click();

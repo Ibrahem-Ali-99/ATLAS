@@ -6,7 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { DemoSessionBar } from "@/components/demo-session-bar";
+import { DemoSessionBadge, useDemoRestart } from "@/components/demo-session-bar";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { WorkspaceSearch } from "@/components/workspace-search";
 import { SignOutDialog } from "@/components/sign-out-dialog";
@@ -43,6 +43,7 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
   const session = useQuery(sessionQueryOptions);
   const [navOpen, setNavOpen] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
+  const demoRestart = useDemoRestart();
   const [collapsed, setCollapsed] = useState(false);
   const workspace = useWorkspace();
   const theme = useTheme();
@@ -94,6 +95,8 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
   const organizationName = workspace.organizationName;
   const immersive = pathname === "/assistant";
   const demo = isDemoSession(session.data);
+  const accountName = user.full_name;
+  const accountDetail = demo ? "Demonstration" : user.email;
 
   return (
     <div className={cn("min-h-screen bg-background md:grid", collapsed ? "md:grid-cols-[68px_minmax(0,1fr)]" : "md:grid-cols-[240px_minmax(0,1fr)]")}>
@@ -120,6 +123,7 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
               <ChevronRight className="hidden size-3 shrink-0 md:block" aria-hidden="true" />
               <span className="truncate font-medium text-foreground">{titleForPath(pathname)}</span>
             </p>
+            <DemoSessionBadge session={session.data} />
           </div>
           {workspace.memberships.length > 1 ? (
             <label className="sr-only" htmlFor="organization-selector">Organization</label>
@@ -148,16 +152,22 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
                 className="flex items-center gap-3 rounded-md px-2 py-1 text-left hover:bg-accent"
               >
                 <span className="flex size-8 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-                  {initials(user.full_name)}
+                  {initials(accountName)}
                 </span>
                 <span className="hidden max-w-48 sm:block">
-                  <span className="block truncate text-sm font-medium">{user.full_name}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{user.email}</span>
+                  <span className="block truncate text-sm font-medium">{accountName}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{accountDetail}</span>
                 </span>
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuLabel>{user.email}</DropdownMenuLabel>
+              <DropdownMenuLabel>{accountDetail}</DropdownMenuLabel>
+              {demo ? (
+                <DropdownMenuItem disabled={demoRestart.pending} onSelect={(event) => { event.preventDefault(); void demoRestart.restart(); }}>
+                  {demoRestart.pending ? "Restarting…" : "Restart demonstration"}
+                </DropdownMenuItem>
+              ) : null}
+              {demo && demoRestart.error ? <p role="alert" className="px-2 py-1.5 text-xs text-destructive">{demoRestart.error}</p> : null}
               {demo ? null : <DropdownMenuSeparator />}
               {demo ? null : <DropdownMenuItem asChild><Link href="/settings#settings-account">Profile and preferences</Link></DropdownMenuItem>}
               {demo ? null : <DropdownMenuItem asChild><Link href="/settings">Workspace settings</Link></DropdownMenuItem>}
@@ -174,15 +184,12 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
           </DropdownMenu>
           </div>
         </header>
-        <DemoSessionBar session={session.data} />
         <main
           id="main"
           className={
             immersive
-              ? demo
-                ? "h-[calc(100dvh-108px)] min-w-0 overflow-hidden"
-                : "h-[calc(100dvh-60px)] min-w-0 overflow-hidden"
-              : "min-w-0 flex-1 overflow-x-hidden px-4 py-6 md:px-8 md:py-8"
+              ? "h-[calc(100dvh-60px)] min-w-0 overflow-hidden"
+              : "mx-auto min-w-0 w-full max-w-[1320px] flex-1 overflow-x-hidden px-4 py-5 md:px-6 md:py-6"
           }
         >
           {children}

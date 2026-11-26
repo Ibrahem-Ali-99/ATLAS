@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { sessionQueryOptions } from "@/lib/api";
+import { isDemoSession } from "@/lib/demo-session";
 import { getDiagnosticRun, getDiagnostics, listEvaluations, startEvaluation, type DiagnosticRun } from "@/lib/intelligence";
 import type { DataScope } from "@/lib/provenance";
 import { useWorkspace } from "@/lib/use-workspace";
@@ -31,6 +33,8 @@ function MonitoringWorkspace({ organizationId, isAdmin }: { organizationId: stri
   const [scope, setScope] = useState<DataScope>("operational");
   const [checksOpen, setChecksOpen] = useState(false);
   const [eventSearch, setEventSearch] = useState("");
+  const session = useQuery(sessionQueryOptions);
+  const demonstration = isDemoSession(session.data);
   const diagnostics = useQuery({
     queryKey: ["diagnostics", organizationId, scope],
     queryFn: () => getDiagnostics(organizationId ?? "", scope),
@@ -61,6 +65,9 @@ function MonitoringWorkspace({ organizationId, isAdmin }: { organizationId: stri
     return <RequestError error={diagnostics.error} />;
   }
   const data = diagnostics.data;
+  const platform = session.isSuccess && !demonstration && data.platform_visible !== false;
+  const currentWorkers = data.workers.filter((worker) => worker.generation !== "previous");
+  const earlierWorkers = data.workers.filter((worker) => worker.generation === "previous");
   const latest = evaluations.data?.items[0];
   const needle = eventSearch.trim().toLowerCase();
   const failedRuns = data.failed_runs.filter((run) => [run.id, run.error_code, run.hint].some(
@@ -72,40 +79,65 @@ function MonitoringWorkspace({ organizationId, isAdmin }: { organizationId: stri
   return (
     <div className="w-full min-w-0 space-y-6">
       <PageHeader title="Monitoring" eyebrow="Workspace operations">
-        Review service health, integration failures, and actions that need attention.
+        {platform
+          ? "Review recorded failures, worker health, and work that needs a decision."
+          : "Review recorded issues for this workspace."}
       </PageHeader>
-      <div className="grid gap-3 md:grid-cols-3">
-        <Stat label="Stored failures" value={String(data.failed_runs.length)} detail="Selecting one opens its recorded trace. It does not mean the failure is still running." />
-        <Stat label="Uncertain attempts" value={String(data.retries)} detail="Retries and outcomes that could not be confirmed." />
-        <Stat
-          label="Recorded cost"
-          value={data.cost_usd === null ? "Not recorded" : String(data.cost_usd)}
-          detail={data.cost_notice}
-        />
+      <div className={`grid gap-3 ${platform ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+        <Stat label="Recorded failures" value={String(data.failed_runs.length)} detail="Open one to see what was stored. A listed failure is not still running." />
+        <Stat label="Uncertain outcomes" value={String(data.retries)} detail="Attempts whose result could not be confirmed." />
+        {platform ? (
+          <Stat
+            label="Recorded cost"
+            value={data.cost_usd === null ? "Not recorded" : String(data.cost_usd)}
+            detail={data.cost_notice}
+          />
+        ) : null}
       </div>
-      <section className="grid gap-4 lg:grid-cols-2">
+      <section className={`grid gap-4 ${platform ? "lg:grid-cols-2" : ""}`}>
+        {platform ? (
+          <div className="min-w-0 space-y-3 rounded-xl border border-border bg-card p-5">
+            <h2 className="font-semibold">Background work</h2>
+            <p className="text-sm text-muted-foreground">A stopped process is not a current failure. A failed status is the last error that process reported.</p>
+            {currentWorkers.length === 0 ? <p className="text-sm text-muted-foreground">No background work has been recorded.</p> : null}
+            {currentWorkers.map((worker) => {
+              const presentation = workerPresentation(worker.status);
+              return (
+                <div key={worker.id} className="flex flex-wrap items-start justify-between gap-2 border-t border-border pt-3 text-sm">
+                  <div className="min-w-0">
+                    <p className="font-medium capitalize">{worker.kind.replaceAll("_", " ")}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Last update <time dateTime={worker.heartbeat_at}>{new Date(worker.heartbeat_at).toLocaleString()}</time>
+                    </p>
+                    {worker.status === "error" && worker.last_error_code ? <p className="mt-1 break-words text-xs text-destructive">{worker.last_error_code}</p> : null}
+                  </div>
+                  <Badge variant="secondary" className={presentation.tone}>{presentation.label}</Badge>
+                </div>
+              );
+            })}
+            {earlierWorkers.length > 0 ? (
+              <details className="border-t border-border pt-3">
+                <summary className="cursor-pointer text-sm text-muted-foreground">Earlier processes ({earlierWorkers.length})</summary>
+                <ul className="mt-3 space-y-2">
+                  {earlierWorkers.map((worker) => (
+                    <li key={worker.id} className="text-sm text-muted-foreground">
+                      <span className="capitalize text-foreground">{worker.kind.replaceAll("_", " ")}</span>
+                      {" · replaced "}
+                      <time dateTime={worker.heartbeat_at}>{new Date(worker.heartbeat_at).toLocaleString()}</time>
+                      {worker.last_error_code ? <span className="mt-1 block text-xs">Recorded error: {worker.last_error_code}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
         <div className="min-w-0 space-y-3 rounded-xl border border-border bg-card p-5">
-          <h2 className="font-semibold">Background workers</h2>
-          {data.workers.length === 0 ? <p className="text-sm text-muted-foreground">No worker heartbeat has been recorded.</p> : null}
-          {data.workers.map((worker) => (
-            <div key={worker.id} className="flex flex-wrap items-start justify-between gap-2 border-t border-border pt-3 text-sm">
-              <div className="min-w-0">
-                <p className="font-medium capitalize">{worker.kind.replaceAll("_", " ")}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Last heartbeat <time dateTime={worker.heartbeat_at}>{new Date(worker.heartbeat_at).toLocaleString()}</time>
-                </p>
-                {worker.last_error_code ? <p className="mt-1 break-words text-xs text-destructive">{worker.last_error_code}</p> : null}
-              </div>
-              <Badge variant="secondary" className={`capitalize ${worker.status === "stalled" || worker.status === "error" ? "text-destructive" : ""}`}>{worker.status}</Badge>
-            </div>
-          ))}
-        </div>
-        <div className="min-w-0 space-y-3 rounded-xl border border-border bg-card p-5">
-          <h2 className="font-semibold">Knowledge jobs</h2>
-          {data.ingestion_jobs.length === 0 ? <p className="text-sm text-muted-foreground">No ingestion jobs are recorded.</p> : null}
+          <h2 className="font-semibold">Document indexing</h2>
+          {data.ingestion_jobs.length === 0 ? <p className="text-sm text-muted-foreground">No documents are waiting to be indexed.</p> : null}
           {data.ingestion_jobs.slice(0, 8).map((job) => (
             <div key={job.id} className="flex items-center justify-between gap-3 text-sm">
-              <span className="truncate">{job.document_id}</span>
+              <span className="truncate">{platform ? job.document_id : "Document"}</span>
               <span className={job.status === "failed" ? "text-destructive" : "text-muted-foreground"}>{job.status} · {job.attempts}/{job.max_attempts}</span>
             </div>
           ))}
@@ -137,34 +169,34 @@ function MonitoringWorkspace({ organizationId, isAdmin }: { organizationId: stri
           {!runId ? <p className="text-sm text-muted-foreground">Select a failed run to see its inquiry, steps, and recorded operations.</p> : null}
           {detail.isPending && runId ? <Skeleton className="h-24 w-full" /> : null}
           {detail.isError ? <RequestError error={detail.error} /> : null}
-          {detail.data ? <TraceDetail detail={detail.data} /> : null}
+          {detail.data ? <TraceDetail detail={detail.data} platform={platform} /> : null}
         </section>
       </div>
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-2 rounded-[10px] bg-muted p-4">
-          <h2 className="text-base text-foreground">Needs attention</h2>
-          {data.needs_attention.length === 0 ? <p className="text-sm text-muted-foreground">No approval is waiting because its outcome was uncertain.</p> : null}
+      <section className={`grid gap-4 ${platform ? "lg:grid-cols-2" : ""}`}>
+        <div className="space-y-2 rounded-xl border border-border bg-card p-4">
+          <h2 className="text-base font-semibold text-foreground">Needs attention</h2>
+          {data.needs_attention.length === 0 ? <p className="text-sm text-muted-foreground">Nothing is waiting on an uncertain outcome.</p> : null}
           {data.needs_attention.map((item) => (
             <div key={item.id} className="text-sm leading-6 text-muted-foreground">
               <Link className="font-medium text-foreground underline" href={`/approvals?approval=${item.id}`}>
                 {item.action_type.replaceAll("_", " ")}
               </Link>
-              {item.hint ? `. ${item.hint}` : ". Review the approval before deciding whether reconciliation is safe."}
+              {item.hint ? `. ${item.hint}` : ". Review this approval before trying again."}
             </div>
           ))}
         </div>
-        <div className="space-y-2 rounded-[10px] bg-muted p-4">
-          <h2 className="text-base text-foreground">Operation latency</h2>
-          <p className="text-xs leading-5 text-muted-foreground">Counts of stored traces that reported a latency. A missing price or usage is not shown here.</p>
+        {platform ? <div className="space-y-2 rounded-xl border border-border bg-card p-4">
+          <h2 className="text-base text-foreground">Operation timing</h2>
+          <p className="text-xs leading-5 text-muted-foreground">How long recorded steps took. A missing measurement is omitted.</p>
           {data.duration_buckets.map((bucket) => (
             <p key={bucket.bucket} className="flex justify-between gap-3 text-sm text-muted-foreground">
               <span>{bucket.bucket.replaceAll("_", " ")}</span>
               <span className="tabular-nums text-foreground">{bucket.count}</span>
             </p>
           ))}
-        </div>
+        </div> : null}
       </section>
-      <section className="space-y-2 rounded-[10px] bg-muted p-4">
+      {platform ? <section className="space-y-2 rounded-xl border border-border bg-card p-4">
         <h2 className="text-base text-foreground">Slowest recorded steps</h2>
         {data.slowest_steps.length === 0 ? <p className="text-sm text-muted-foreground">No operation traces with latency are stored.</p> : null}
         {data.slowest_steps.map((step, index) => (
@@ -178,9 +210,9 @@ function MonitoringWorkspace({ organizationId, isAdmin }: { organizationId: stri
             ) : null}
           </p>
         ))}
-      </section>
-      <section className="space-y-2 rounded-[10px] bg-muted p-4">
-        <h2 className="text-base text-foreground">Integration failures</h2>
+      </section> : null}
+      <section className="space-y-2 rounded-xl border border-border bg-card p-4">
+        <h2 className="text-base font-semibold text-foreground">Integration issues</h2>
         {data.integration_failures.length === 0 ? <p className="text-sm text-muted-foreground">No failed or needs-attention workflows are stored.</p> : null}
         {data.integration_failures.map((item) => (
           <p key={item.id} className="text-sm leading-6 text-muted-foreground">
@@ -191,7 +223,7 @@ function MonitoringWorkspace({ organizationId, isAdmin }: { organizationId: stri
           </p>
         ))}
       </section>
-      <details className="rounded-xl border border-border bg-card p-4" onToggle={(event) => setChecksOpen(event.currentTarget.open)}>
+      {platform ? <details className="rounded-xl border border-border bg-card p-4" onToggle={(event) => setChecksOpen(event.currentTarget.open)}>
         <summary className="cursor-pointer text-sm font-medium">Advanced diagnostics</summary>
         <DataScopeControl value={scope} onChange={setScope} advanced />
         <div className="mt-4 space-y-3">
@@ -224,9 +256,16 @@ function MonitoringWorkspace({ organizationId, isAdmin }: { organizationId: stri
           <p className="text-sm text-muted-foreground">No evaluation has been stored for this organization.</p>
         )}
         </div>
-      </details>
+      </details> : null}
     </div>
   );
+}
+
+function workerPresentation(status: string): { label: string; tone: string } {
+  if (status === "error") return { label: "Failed", tone: "text-destructive" };
+  if (status === "stopped") return { label: "Not running", tone: "text-muted-foreground" };
+  if (status === "replaced") return { label: "Replaced", tone: "text-muted-foreground" };
+  return { label: "Running", tone: "" };
 }
 
 function Stat({ label, value, detail }: { label: string; value: string; detail: string }) {
@@ -239,7 +278,7 @@ function Stat({ label, value, detail }: { label: string; value: string; detail: 
   );
 }
 
-function TraceDetail({ detail }: { detail: DiagnosticRun }) {
+function TraceDetail({ detail, platform }: { detail: DiagnosticRun; platform: boolean }) {
   return (
     <div className="space-y-3 text-sm">
       <p className="leading-6 text-muted-foreground">{detail.hint_notice}</p>
@@ -267,12 +306,12 @@ function TraceDetail({ detail }: { detail: DiagnosticRun }) {
       {detail.traces.map((trace, index) => (
         <p key={`${trace.operation}-${index}`} className="leading-6 text-muted-foreground">
           {trace.operation} {trace.status}.
-          {trace.latency_ms === null ? " Latency was not recorded." : ` ${trace.latency_ms} ms.`}
-          {trace.tokens_in === null && trace.tokens_out === null
-            ? " Tokens were not recorded."
-            : ` Tokens ${trace.tokens_in ?? 0}/${trace.tokens_out ?? 0}.`}
-          {trace.cost_usd === null ? " Cost was not recorded." : ` Cost ${trace.cost_usd}.`}
-          {` Langfuse ${trace.langfuse_status}.`}
+          {platform && trace.latency_ms !== null ? ` ${trace.latency_ms} ms.` : ""}
+          {platform && (trace.tokens_in !== null || trace.tokens_out !== null)
+            ? ` Tokens ${trace.tokens_in ?? 0}/${trace.tokens_out ?? 0}.`
+            : ""}
+          {platform && trace.cost_usd !== null ? ` Cost ${trace.cost_usd}.` : ""}
+          {trace.error_code ? ` ${trace.error_code}.` : ""}
         </p>
       ))}
     </div>

@@ -280,7 +280,7 @@ function AssistantWorkspace({
               </Button>
             ) : null}
           </div>
-          <div className="basis-full break-words"><ProviderNotice organizationId={organizationId} compact /></div>
+          {demonstration ? null : <div className="basis-full break-words"><ProviderNotice organizationId={organizationId} compact /></div>}
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-4">

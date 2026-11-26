@@ -47,7 +47,7 @@ export function CrmScreen() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1180px] min-w-0 flex-col gap-6" data-testid="crm-workspace">
+    <div className="flex w-full min-w-0 flex-col gap-5" data-testid="crm-workspace">
       <header className="flex flex-col gap-4 border-b border-border/80 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">Workspace / CRM</p>

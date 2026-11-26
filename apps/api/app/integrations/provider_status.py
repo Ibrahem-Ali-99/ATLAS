@@ -27,7 +27,6 @@ class ProviderStatus(BaseModel):
 
 def provider_status(db: Session, organization_id: uuid.UUID) -> ProviderStatus:
     if organization_is_visitor(db, organization_id):
-        settings = get_settings()
         return ProviderStatus(
             llm_provider="double",
             llm_model="demonstration",
@@ -37,7 +36,7 @@ def provider_status(db: Session, organization_id: uuid.UUID) -> ProviderStatus:
             ),
             embedding_provider="double",
             embedding_model="demonstration",
-            embedding_dimensions=settings.embedding_dimensions,
+            embedding_dimensions=0,
             embedding_ready=True,
             embedding_detail=(
                 "Demonstration mode. Document search stays in this session "
