@@ -36,7 +36,7 @@ export default function DemoPage() {
         Explore Harbor & Co. in the application.
       </h1>
       <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
-        The tour below uses captures of Atlas Demo. Mina Patel asks about bonded warehousing. Northwind is a second organization used to show that its records stay hidden. Launch interactive demo opens a separate Harbor & Co. workspace in the application. That session expires, restart replaces it, and it does not publish a password.
+        Mina Patel asks about bonded warehousing. Northwind is a second organization used to show that its records stay hidden. Launch interactive demo opens a separate Harbor & Co. workspace in the application. That session expires, restart replaces it, and it does not publish a password. The chapter list below describes that workspace. Release pictures are not on this page yet.
       </p>
       <div className="mt-8">
         <LaunchDemoButton size="lg" />
@@ -64,9 +64,8 @@ export default function DemoPage() {
       <section className="mt-16" aria-labelledby="tour-title">
         <h2 id="tour-title" className="text-2xl font-semibold tracking-tight sm:text-3xl">Product tour</h2>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">
-          Choose a chapter. The pictures are screenshots of the workspace, not a separate interface.
-          An operator prepares the underlying rows with the portfolio demo command, which uses the existing models and services.
-          Landscape captures sit in a 16:10 frame. Taller captures keep their own proportions and scroll inside the frame.
+          Choose a chapter. An operator prepares the underlying rows with the portfolio demo command, which uses the existing models and services.
+          Release pictures are 1440×900 captures of the redesigned workspace. Those files are not on this page yet.
         </p>
         <div className="mt-8">
           <DemoTour />

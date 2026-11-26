@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import { retrievalComparison } from "@/lib/public-site";
+
 export const metadata: Metadata = {
   title: "Case study",
   description:
@@ -58,6 +60,41 @@ export default function CaseStudyPage() {
         </p>
         <p>
           A stored citation is chosen from the answer text: a row that contains a number, code, email, or distinctive word the answer states. The model does not choose the stored ids. A specific fact that appears in none of the supplied rows is replaced, in the stored message, with a sentence that the fact could not be confirmed. When retrieved rows are present, the server checks the completed draft before the client renders it. If neither documents nor CRM records match, the assistant stores a refusal and does not call the model.
+        </p>
+      </Section>
+
+      <Section title="Retrieval comparison">
+        <p>
+          On {retrievalComparison.recordedOn} the hybrid path was compared with the previous reciprocal-rank path. The corpus was {retrievalComparison.documents} fictional documents and {retrievalComparison.questions} labeled questions, indexed with deterministic hash embeddings on a disposable test database. Ranked metrics use K = 5. The corpus is not the Harbor & Co. demonstration and was not written into the development database.
+        </p>
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full min-w-[28rem] text-left text-sm">
+            <caption className="sr-only">Baseline and hybrid retrieval measures</caption>
+            <thead className="bg-muted text-muted-foreground">
+              <tr>
+                <th scope="col" className="px-4 py-3 font-medium">Measure</th>
+                <th scope="col" className="px-4 py-3 font-medium">Baseline</th>
+                <th scope="col" className="px-4 py-3 font-medium">Hybrid</th>
+              </tr>
+            </thead>
+            <tbody>
+              {retrievalComparison.rows.map((row) => (
+                <tr key={row.measure} className="border-t border-border">
+                  <th scope="row" className="px-4 py-3 font-medium text-foreground">{row.measure}</th>
+                  <td className="px-4 py-3">{row.baseline}</td>
+                  <td className="px-4 py-3">{row.hybrid}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Mean retrieval latency is the search itself on the machine that ran the comparison. It does not include a model call. The hybrid path is the default because recall, abstention, faithfulness, and citation accuracy improved on this set. Eight questions are not a production quality guarantee.
+        </p>
+        <p>
+          {retrievalComparison.heldOutRecorded
+            ? "The held-out evaluation is recorded with this comparison."
+            : "The held-out evaluation is not recorded on this page yet."}
         </p>
       </Section>
 

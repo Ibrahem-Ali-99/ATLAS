@@ -1,16 +1,17 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { LaunchDemoButton } from "@/components/public/launch-demo-button";
 import { PricingPlans } from "@/components/public/pricing-plans";
-import { DeviceShot, ProductWindow } from "@/components/public/product-shot";
+import { ProductWindow } from "@/components/public/product-shot";
 import { Button } from "@/components/ui/button";
 import {
   architectureSteps,
   capabilities,
-  captures,
   evaluationEvidence,
   homepageStages,
   integrationGroups,
+  isReleaseCapture,
   reportingRules,
   useCases,
 } from "@/lib/public-site";
@@ -39,7 +40,7 @@ export function HomeScreen() {
               </Button>
             </div>
           </div>
-          <ProductWindow capture={homepageStages.hero} priority />
+          <ReleaseShot capture={homepageStages.hero} priority fallback={<DecisionRail />} />
         </div>
       </section>
 
@@ -48,7 +49,7 @@ export function HomeScreen() {
           <SectionHeading
             eyebrow="Product"
             title="Built for a team that still decides."
-            body="One API and one web app serve every organization. The organization id in a URL is a lookup key. The server loads the membership for the signed-in user."
+            body="One API and one web app serve every organization. The organization id in a URL is a lookup key. The server loads the membership for the signed-in user. On a narrow screen the same routes collapse into a drawer."
           />
           <div className="mt-12 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {capabilities.map((item, index) => (
@@ -95,8 +96,9 @@ export function HomeScreen() {
         id="assistant"
         eyebrow="Intelligent assistant"
         title="Answers stay tied to the records you uploaded."
-        body="PDF and text files are stored, chunked, and embedded for that organization. Hybrid search returns neighbors inside the distance limit. When no document or CRM row matches, the assistant stores a refusal and does not call the model. Conversation history remains with the person who started it."
+        body="PDF and text files are stored, chunked, and embedded for that organization. Hybrid search returns neighbors inside the distance limit. Conversation history remains with the person who started it."
         capture={homepageStages.assistant}
+        fallback={<RetrievalRules />}
       />
 
       <section id="crm" className="border-t border-border bg-card">
@@ -124,6 +126,7 @@ export function HomeScreen() {
         title="A visual path, then a recorded run."
         body="Definitions support all or any conditions, a matching path, and an otherwise path. Runs can pause for review. Activation and pause are explicit. Sandbox email is delivered to the local mailbox. A simulated booking is a row in ATLAS, with no external event id, until Google Calendar is connected and an administrator approves the booking."
         capture={homepageStages.automation}
+        fallback={<BranchDiagram />}
         flip
       />
 
@@ -171,8 +174,8 @@ export function HomeScreen() {
       </section>
 
       <section id="architecture" className="border-t border-border bg-card">
-        <div className="mx-auto grid max-w-7xl items-center gap-12 px-5 py-20 sm:px-8 lg:grid-cols-2 lg:gap-16 lg:py-24">
-          <div>
+        <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:py-24">
+          <div className="max-w-3xl">
             <SectionHeading
               eyebrow="Architecture"
               title="One API, one web app, and a person at the gate."
@@ -195,7 +198,6 @@ export function HomeScreen() {
               </Button>
             </div>
           </div>
-          <ProductWindow capture={homepageStages.architecture} />
         </div>
       </section>
 
@@ -213,22 +215,9 @@ export function HomeScreen() {
             <Evidence term="TypeScript and build" value={evaluationEvidence.buildPassed ? "Passed" : "Not recorded"} detail={`Alembic head ${evaluationEvidence.alembicHead}.`} />
           </dl>
           <p className="mt-8 max-w-3xl text-sm leading-6 text-muted-foreground">{evaluationEvidence.caveat}</p>
-        </div>
-      </section>
-
-      <section className="border-t border-border bg-card">
-        <div className="mx-auto grid max-w-7xl items-center gap-12 px-5 py-20 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] lg:py-24">
-          <div>
-            <SectionHeading
-              eyebrow="Narrow screens"
-              title="The same workspace, composed for a phone."
-              body="Navigation collapses into a drawer. Inbox threads, settings sections, and approval details stay on this application. The frame is one phone viewport. The capture keeps its own width, and the rest of the page scrolls inside the device."
-            />
-          </div>
-          <figure>
-            <DeviceShot capture={captures.mobile} />
-            <figcaption className="px-2 text-sm leading-6 text-muted-foreground">{captures.mobile.caption}</figcaption>
-          </figure>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">
+            The case study records a retrieval comparison on a separate fictional corpus. The held-out evaluation is not on this page yet.
+          </p>
         </div>
       </section>
 
@@ -284,12 +273,87 @@ function Evidence({ term, value, detail }: { term: string; value: string; detail
   );
 }
 
+function ReleaseShot({
+  capture,
+  priority = false,
+  fallback,
+}: {
+  capture: (typeof homepageStages)[keyof typeof homepageStages];
+  priority?: boolean;
+  fallback: ReactNode;
+}) {
+  if (!isReleaseCapture(capture)) return fallback;
+  return <ProductWindow capture={capture} priority={priority} />;
+}
+
+function DecisionRail() {
+  const steps = [
+    ["A message arrives", "Email, WhatsApp, and website chat open one Inbox thread for the organization."],
+    ["The answer cites a row", "Or the assistant stores a refusal and does not call the model."],
+    ["A person approves", "Execute writes the stored payload. If that payload changed, it does nothing."],
+  ] as const;
+  return (
+    <ol className="rounded-2xl border border-border bg-card p-6 shadow-[0_32px_80px_-48px_rgba(23,25,29,0.35)] sm:p-8">
+      {steps.map(([title, body], index) => (
+        <li key={title} className="relative grid grid-cols-[2.75rem_minmax(0,1fr)] gap-4 pb-8 last:pb-0">
+          {index < steps.length - 1 ? <span aria-hidden="true" className="absolute bottom-0 left-[1.2rem] top-10 w-px bg-border" /> : null}
+          <span className="relative grid size-10 place-items-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">{index + 1}</span>
+          <div className="pt-1">
+            <p className="text-lg font-semibold tracking-tight">{title}</p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">{body}</p>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function RetrievalRules() {
+  const rules = [
+    ["Distance limit", "The default maximum cosine distance is 0.55."],
+    ["Shared wording", "A neighbor becomes context when it shares a content word, or when a vector-only neighbor is at or below 0.45."],
+    ["Refusal", "When nothing matches, the assistant stores a refusal and does not call the model."],
+  ] as const;
+  return (
+    <ul className="grid gap-3">
+      {rules.map(([title, body]) => (
+        <li key={title} className="rounded-2xl border border-border bg-card p-5">
+          <p className="font-semibold tracking-tight">{title}</p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function BranchDiagram() {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-6 sm:p-8">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">How a definition runs</p>
+      <p className="mt-4 rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium">Trigger · lead created</p>
+      <p className="mx-auto mt-2 h-4 w-px bg-border" aria-hidden="true" />
+      <p className="rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium">Condition · all matches, or any match</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-border bg-background p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Matching path</p>
+          <p className="mt-2 text-sm leading-6">Approval, then the task. The branch is stored first.</p>
+        </div>
+        <div className="rounded-xl border border-border bg-background p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Otherwise path</p>
+          <p className="mt-2 text-sm leading-6">The other task. A preview of either path saves nothing.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Feature({
   id,
   eyebrow,
   title,
   body,
   capture,
+  fallback,
   flip = false,
 }: {
   id: string;
@@ -297,6 +361,7 @@ function Feature({
   title: string;
   body: string;
   capture: (typeof homepageStages)[keyof typeof homepageStages];
+  fallback: ReactNode;
   flip?: boolean;
 }) {
   return (
@@ -305,7 +370,7 @@ function Feature({
         <div>
           <SectionHeading eyebrow={eyebrow} title={title} body={body} />
         </div>
-        <ProductWindow capture={capture} />
+        <ReleaseShot capture={capture} fallback={fallback} />
       </div>
     </section>
   );

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { LaunchDemoButton } from "@/components/public/launch-demo-button";
 import { CaptureFrame } from "@/components/public/product-shot";
 import { Button } from "@/components/ui/button";
-import { demoSteps, workspaceRoutes } from "@/lib/public-site";
+import { demoSteps, isReleaseCapture, workspaceRoutes } from "@/lib/public-site";
 
 export function DemoTour() {
   const [index, setIndex] = useState(0);
@@ -36,7 +36,17 @@ export function DemoTour() {
         tabIndex={0}
         className="min-w-0"
       >
-        <CaptureFrame capture={step} />
+        {isReleaseCapture(step) ? (
+          <CaptureFrame capture={step} />
+        ) : (
+          <div className="rounded-2xl border border-border bg-card p-6 sm:p-8">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">{step.title}</p>
+            <p className="mt-4 text-base leading-7">{step.caption}</p>
+            <p className="mt-4 text-sm leading-6 text-muted-foreground">
+              A release capture for this chapter is a 1440×900 view of the redesigned workspace. The files currently in the site are not that set, so this chapter is not pictured.
+            </p>
+          </div>
+        )}
         <div className="mt-4 flex flex-wrap gap-2">
           <Button type="button" variant="outline" disabled={index === 0} onClick={() => setIndex((value) => value - 1)}>
             Previous

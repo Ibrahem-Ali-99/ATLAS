@@ -52,6 +52,11 @@ export type ProductCapture = {
   title: string;
   width: number;
   height: number;
+  /**
+   * True only after a 1440×900 capture of the redesigned workspace replaces
+   * the file. The current portfolio files are not that set.
+   */
+  releaseReady: boolean;
 };
 
 export function landscapeCropFraction(width: number, height: number): number {
@@ -64,6 +69,14 @@ export function fitsLandscapeFrame(capture: Pick<ProductCapture, "width" | "heig
   return landscapeCropFraction(capture.width, capture.height) <= landscapeCropLimit;
 }
 
+export function isReleaseCapture(capture: ProductCapture): boolean {
+  return (
+    capture.releaseReady &&
+    capture.width === landscapeFrame.width &&
+    capture.height === landscapeFrame.height
+  );
+}
+
 const recordNote = "Figures in the capture are stored records for that workspace.";
 
 export const captures = {
@@ -74,6 +87,7 @@ export const captures = {
     caption: `Overview for Atlas Demo. ${recordNote}`,
     width: 1440,
     height: 975,
+    releaseReady: false,
   },
   crm: {
     src: "/portfolio/02-crm.png",
@@ -82,6 +96,7 @@ export const captures = {
     caption: "CRM companies, contacts, leads, and inquiries for one organization. Harbor & Co. is fictional.",
     width: 1440,
     height: 1388,
+    releaseReady: false,
   },
   lead: {
     src: "/portfolio/06-crm-lead.png",
@@ -90,6 +105,7 @@ export const captures = {
     caption: "A lead stays attached to its company and contact. The North pier expansion lead is fictional.",
     width: 1440,
     height: 1339,
+    releaseReady: false,
   },
   knowledge: {
     src: "/portfolio/03-knowledge.png",
@@ -98,6 +114,7 @@ export const captures = {
     caption: "Uploaded documents are indexed for the organization that owns them.",
     width: 1440,
     height: 4470,
+    releaseReady: false,
   },
   assistant: {
     src: "/portfolio/04-assistant.png",
@@ -107,6 +124,7 @@ export const captures = {
       "A citation is a retrieved row. With the deterministic provider, the stored answer is the fixed grounded sentence.",
     width: 1440,
     height: 900,
+    releaseReady: false,
   },
   runs: {
     src: "/portfolio/05-agent-runs.png",
@@ -115,6 +133,7 @@ export const captures = {
     caption: "An inquiry run pauses with proposed actions. The model does not approve itself.",
     width: 1440,
     height: 1903,
+    releaseReady: false,
   },
   workflows: {
     src: "/portfolio/07-workflows.png",
@@ -124,6 +143,7 @@ export const captures = {
       "Workflows record the branch that ran. An empty n8n URL is reported as not configured, and sandbox mail stays in the local mailbox.",
     width: 1440,
     height: 976,
+    releaseReady: false,
   },
   analytics: {
     src: "/portfolio/08-analytics.png",
@@ -132,6 +152,7 @@ export const captures = {
     caption: "Analytics reads stored rows. A conversion rate is omitted when there are no won or lost leads.",
     width: 1440,
     height: 1250,
+    releaseReady: false,
   },
   monitoring: {
     src: "/portfolio/09-monitoring.png",
@@ -140,6 +161,7 @@ export const captures = {
     caption: "Monitoring shows recorded issues for the signed-in organization.",
     width: 1440,
     height: 1083,
+    releaseReady: false,
   },
   settings: {
     src: "/portfolio/10-settings.png",
@@ -148,6 +170,7 @@ export const captures = {
     caption: "Settings for Atlas Demo. API keys are not shown. Email is sandbox, the calendar is simulated, and n8n is not configured.",
     width: 1440,
     height: 900,
+    releaseReady: false,
   },
   rejected: {
     src: "/portfolio/11-approval-rejected.png",
@@ -156,6 +179,7 @@ export const captures = {
     caption: "A rejected customer response creates no delivery. The proposed message stays unsent.",
     width: 1440,
     height: 1808,
+    releaseReady: false,
   },
   mobile: {
     src: "/portfolio/12-overview-mobile.png",
@@ -164,8 +188,24 @@ export const captures = {
     caption: "The same workspace at a narrow width. Navigation moves into a drawer.",
     width: 390,
     height: 1898,
+    releaseReady: false,
   },
 } as const satisfies Record<string, ProductCapture>;
+
+/**
+ * Surfaces the release pass will photograph at 1440×900 once the redesigned
+ * workspace and Harbor demonstration rows are the ones on screen.
+ */
+export const releaseShotPlan = [
+  "Overview",
+  "CRM",
+  "Inbox",
+  "Assistant",
+  "Knowledge",
+  "Workflows",
+  "Analytics",
+  "Integrations",
+] as const;
 
 /** Homepage stages. Each one fits the 16:10 frame without a heavy crop. */
 export const homepageStages = {
@@ -315,6 +355,27 @@ export const integrations = integrationGroups.flatMap((group) =>
 );
 
 export const architectureSteps = ["Browser", "Next.js", "FastAPI", "PostgreSQL"] as const;
+
+/**
+ * Recorded hybrid-versus-baseline comparison on a separate fictional corpus.
+ * Hash embeddings, K = 5. This is not the held-out evaluation.
+ */
+export const retrievalComparison = {
+  recordedOn: "26 November 2026",
+  documents: 7,
+  questions: 8,
+  heldOutRecorded: false,
+  rows: [
+    { measure: "Recall@5", baseline: "0.4167", hybrid: "1.0000" },
+    { measure: "MRR", baseline: "0.5000", hybrid: "1.0000" },
+    { measure: "nDCG@5", baseline: "0.4355", hybrid: "1.0000" },
+    { measure: "Answer relevance", baseline: "0.4167", hybrid: "0.9167" },
+    { measure: "Faithfulness", baseline: "0.5000", hybrid: "1.0000" },
+    { measure: "Citation accuracy", baseline: "0.5000", hybrid: "1.0000" },
+    { measure: "Abstention accuracy", baseline: "0.6250", hybrid: "1.0000" },
+    { measure: "Mean retrieval latency", baseline: "7.88 ms", hybrid: "9.73 ms" },
+  ],
+} as const;
 
 /**
  * Recorded on 26 November 2026 for the working tree that included b71d0de
