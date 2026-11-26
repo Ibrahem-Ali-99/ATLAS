@@ -123,6 +123,7 @@ class ResendTestStatus(BaseModel):
     last_test_message_id: str | None = None
     last_test_at: Any | None = None
     provider_confirmation: str | None = None
+    provider_last_event: str | None = None
 
 
 class ResendTestRecipientUpdate(BaseModel):

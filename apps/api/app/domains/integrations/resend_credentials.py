@@ -17,6 +17,7 @@ TEST_EVIDENCE_KEYS = frozenset(
         "resend_test_verified_at",
         "resend_test_recipient",
         "resend_test_confirmation",
+        "resend_test_last_event",
     }
 )
 _USER_CREDENTIAL_KEYS = frozenset({"username", "password", "resend_api_key"})

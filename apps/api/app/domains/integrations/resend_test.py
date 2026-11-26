@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from email.utils import parseaddr
@@ -63,6 +64,7 @@ def test_status(db: Session, organization_id: uuid.UUID) -> ResendTestStatus:
         last_test_message_id=None if evidence is None else evidence[0],
         last_test_at=None if evidence is None else evidence[2],
         provider_confirmation=None if evidence is None else evidence[3],
+        provider_last_event=_stored_last_event(credentials),
     )
 
 
@@ -133,7 +135,7 @@ def deliver_test(
     )
     db.commit()
     try:
-        message_id, confirmation = _send(key, destination)
+        message_id, confirmation, last_event = _send(key, destination)
     except AppError as exc:
         record_event(
             db,
@@ -153,6 +155,7 @@ def deliver_test(
         confirmation=confirmation,
         verified_at=verified_at,
         key_used=key,
+        last_event=last_event,
     )
     record_event(
         db,
@@ -183,7 +186,54 @@ def deliver_test(
     )
 
 
-def _send(api_key: str, recipient: str) -> tuple[str, str]:
+def refresh_delivery(db: Session, organization_id: uuid.UUID, *, attempts: int = 4) -> str:
+    """Read Resend's latest event for the stored test. Does not send another message."""
+
+    record = _email_row(db, organization_id, lock=True)
+    credentials = _credentials(record)
+    evidence = _evidence(credentials)
+    key = _key(credentials)
+    if record is None or evidence is None or key is None:
+        raise AppError(
+            409,
+            "resend_test_unconfirmed",
+            "Resend has not accepted an administrator test for this key",
+        )
+    message_id, recipient = evidence[0], evidence[1]
+    observed = "not_reported"
+    for attempt in range(max(1, attempts)):
+        retrieved = _request(
+            "GET",
+            f"https://api.resend.com/emails/{message_id}",
+            api_key=key,
+            body=None,
+            idempotency_key=None,
+        )
+        if retrieved.status_code in {401, 403} and _error_name(retrieved) == "restricted_api_key":
+            observed = "unavailable"
+            break
+        _raise_for_provider(retrieved, sending=False)
+        if not _retrieved_matches(retrieved, message_id, recipient):
+            raise AppError(
+                502, "resend_receipt_mismatch", "Resend confirmed a different sender or recipient"
+            )
+        payload = _payload(retrieved) or {}
+        observed = _event_name(payload.get("last_event")) or "not_reported"
+        pending = observed in {"sent", "delivery_delayed", "not_reported"}
+        if not pending or attempt + 1 == max(1, attempts):
+            break
+        time.sleep(3)
+    if not _store_last_event(record, observed, key):
+        raise AppError(
+            409,
+            "resend_test_key_changed",
+            "Resend returned a delivery event, but the sending key changed before it was saved.",
+        )
+    db.commit()
+    return observed
+
+
+def _send(api_key: str, recipient: str) -> tuple[str, str, str | None]:
     created = _request(
         "POST",
         "https://api.resend.com/emails",
@@ -206,13 +256,14 @@ def _send(api_key: str, recipient: str) -> tuple[str, str]:
         idempotency_key=None,
     )
     if retrieved.status_code in {401, 403} and _error_name(retrieved) == "restricted_api_key":
-        return message_id, "accepted"
+        return message_id, "accepted", None
     _raise_for_provider(retrieved, sending=False)
     if not _retrieved_matches(retrieved, message_id, recipient):
         raise AppError(
             502, "resend_receipt_mismatch", "Resend confirmed a different sender or recipient"
         )
-    return message_id, "retrieved"
+    payload = _payload(retrieved) or {}
+    return message_id, "retrieved", _event_name(payload.get("last_event"))
 
 
 def _request(
@@ -387,6 +438,7 @@ def _write_evidence(
     confirmation: str,
     verified_at: datetime,
     key_used: str,
+    last_event: str | None = None,
 ) -> bool:
     credentials = _credentials(record)
     if _key(credentials) != key_used:
@@ -399,6 +451,27 @@ def _write_evidence(
             "resend_test_confirmation": confirmation,
         }
     )
+    if last_event is not None:
+        credentials["resend_test_last_event"] = last_event
+    record.encrypted_credentials = seal_integration_secret(json.dumps(credentials))
+    return True
+
+
+def _stored_last_event(credentials: dict[str, object]) -> str | None:
+    return _event_name(credentials.get("resend_test_last_event"))
+
+
+def _event_name(value: object) -> str | None:
+    if isinstance(value, str) and re.fullmatch(r"[a-z0-9._-]{1,40}", value):
+        return value
+    return None
+
+
+def _store_last_event(record: IntegrationConfig, event: str, key_used: str) -> bool:
+    credentials = _credentials(record)
+    if _key(credentials) != key_used:
+        return False
+    credentials["resend_test_last_event"] = event
     record.encrypted_credentials = seal_integration_secret(json.dumps(credentials))
     return True
 

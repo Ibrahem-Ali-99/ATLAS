@@ -124,8 +124,10 @@ services:
       GENERIC_TIMEZONE: UTC
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_SECURE_COOKIE: "false"
+      # ATLAS_PUBLIC_API_URL stays the operational callback. 8012 is the
+      # portfolio API. 8013 is the Harbor listener. All three stay allowed.
       ATLAS_PUBLIC_API_URL: ${ATLAS_PUBLIC_API_URL:-http://host.docker.internal:8000}
-      ATLAS_LEAD_CALLBACK_ORIGINS: ${ATLAS_LEAD_CALLBACK_ORIGINS:-http://api:8000,http://host.docker.internal:8000}
+      ATLAS_LEAD_CALLBACK_ORIGINS: ${ATLAS_LEAD_CALLBACK_ORIGINS:-http://api:8000,http://host.docker.internal:8000,http://host.docker.internal:8012,http://host.docker.internal:8013}
       ATLAS_HOOK_SECRET: ${ATLAS_HOOK_SECRET:-}
       ATLAS_HOOK_KEY_ID: ${ATLAS_HOOK_KEY_ID:-}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"

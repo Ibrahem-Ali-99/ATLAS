@@ -44,6 +44,16 @@ The storage directory must be outside the upload directory of the process that h
 
 The interactive demo does not write this database. It writes a separate visitor organization in whatever database the API is already using, and that organization is deleted when the session ends.
 
+## Connected providers
+
+`app.scripts.harbor_operations` copies sealed grants from the operational workspace into `harbor-showcase` and then calls the providers. It does not copy companies, contacts, or messages. A grant is not treated as verified until that provider accepts a new request. Set `ATLAS_HARBOR_CONNECTIONS=apply` and `ATLAS_HARBOR_DATABASE_URL` to the `atlas_harbor` URL. The command refuses production, a public demo, live WhatsApp, live email, live campaigns, and a live Stripe key.
+
+`app.scripts.harbor_journeys continue` finishes routes that are still open. It does not copy grants again. Public model replies are enabled only in that process, and the inference budgets still apply. The operational environment file is not changed.
+
+n8n keeps `ATLAS_PUBLIC_API_URL` on the operational API. `ATLAS_LEAD_CALLBACK_ORIGINS` also allows the portfolio API on port 8012 and the Harbor listener on port 8013. A signed callback can complete a Harbor workflow without replacing either of those other callbacks. A workflow that already ended `callback_missing` stays that way. A later run dispatches one new workflow to the Harbor listener.
+
+WhatsApp inbound still requires Meta to post a signed webhook to an API whose database is `atlas_harbor`. The Cloud API has one callback URL per app, so pointing that URL at Harbor would replace the operational callback. `app.scripts.harbor_stripe` starts a Harbor API and the Stripe CLI, completes Checkout with the official test card, and records the plan only after the signed webhook. The CLI signing secret stays in that process. The operational webhook secret is not replaced. Resend acceptance and a later `last_event` of `delivered` are stored as different facts. A restricted Resend key can accept a test and still be unable to read delivery events.
+
 ## Limitations
 
 - The deterministic stand-in is not a hosted model. It returns the first line of the first retrieved passage. The bonded note starts with the north-pier sentence so that question returns that sentence. A citation is still a stored passage.

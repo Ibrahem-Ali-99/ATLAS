@@ -2,6 +2,7 @@ import json
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -13,8 +14,13 @@ from app.core.database import SessionLocal
 from app.core.errors import AppError
 from app.domains.crm import service as crm
 from app.domains.crm.models import Lead
+from app.domains.inbox.models import InboxConversation, InboxMessage
 from app.domains.knowledge.retrieval import search_chunks
+from app.integrations.calendar import WorkspaceCalendar
+from app.integrations.google_calendar import active_connection
+from app.integrations.google_calendar import available as google_available
 from app.integrations.language import get_embedding_client
+from app.integrations.provider_status import connection_health, provider_status
 
 # The process environment fixes the organization. Tool arguments cannot select another one.
 
@@ -69,7 +75,79 @@ def build_server(organization_id: uuid.UUID) -> MCPServer:
             ]
         )
 
+    @server.tool(structured_output=False)
+    def provider_health() -> str:
+        """Read provider readiness for this organization. Does not send or book."""
+
+        with _session() as db:
+            payload = provider_status(db, organization_id).model_dump(mode="json")
+            payload["connections"] = connection_health(db, organization_id)
+            return json.dumps(payload)
+
+    @server.tool(structured_output=False)
+    def calendar_availability(starts_at: str, ends_at: str) -> str:
+        """Check whether a slot is free. Read only. Does not create or cancel an event."""
+
+        start, end = _slot(starts_at, ends_at)
+        with _session() as db:
+            local_free = WorkspaceCalendar().available(db, organization_id, start, end)
+            connection = active_connection(db, organization_id)
+            if connection is None:
+                return json.dumps({"available": local_free, "provider": "workspace"})
+            try:
+                remote_free = google_available(connection, start, end)
+            except AppError as exc:
+                return json.dumps({"available": None, "provider": "google", "error": exc.code})
+        return json.dumps({"available": local_free and remote_free, "provider": "google"})
+
+    @server.tool(structured_output=False)
+    def message_delivery(conversation_id: str) -> str:
+        """Read delivery status for one inbox conversation. Does not send a message."""
+
+        _bounded(conversation_id, 80)
+        try:
+            parsed = uuid.UUID(conversation_id)
+        except ValueError as exc:
+            raise ToolError("Resource not found") from exc
+        with _session() as db:
+            conversation = db.get(InboxConversation, parsed)
+            if conversation is None or conversation.organization_id != organization_id:
+                raise ToolError("Resource not found")
+            rows = list(
+                db.scalars(
+                    select(InboxMessage)
+                    .where(
+                        InboxMessage.organization_id == organization_id,
+                        InboxMessage.conversation_id == conversation.id,
+                    )
+                    .order_by(InboxMessage.created_at.desc())
+                )
+            )
+        inbound = next((row.delivery_status for row in rows if row.direction == "inbound"), None)
+        outbound = next((row.delivery_status for row in rows if row.direction == "outbound"), None)
+        return json.dumps(
+            {
+                "conversation_id": str(conversation.id),
+                "channel": conversation.channel,
+                "latest_inbound_status": inbound,
+                "latest_outbound_status": outbound,
+            }
+        )
+
     return server
+
+
+def _slot(starts_at: str, ends_at: str) -> tuple[datetime, datetime]:
+    try:
+        start = datetime.fromisoformat(starts_at)
+        end = datetime.fromisoformat(ends_at)
+    except ValueError as exc:
+        raise ToolError("The tool arguments are not valid") from exc
+    if start.tzinfo is None or end.tzinfo is None or end <= start:
+        raise ToolError("The tool arguments are not valid")
+    if end - start > timedelta(days=7):
+        raise ToolError("The tool arguments are not valid")
+    return start, end
 
 
 def _bounded(value: str, limit: int) -> None:

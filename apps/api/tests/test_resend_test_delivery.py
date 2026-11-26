@@ -360,3 +360,58 @@ def test_administrator_test_does_not_call_campaign_delivery() -> None:
     )
     assert "live_sender" not in source
     assert "send_resend" not in source
+
+
+def test_delivery_feedback_is_a_later_read_and_does_not_send_again(
+    client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization_id, headers = _admin(client, db)
+    assert _save_email(client, organization_id, headers).is_success
+    _accepted(
+        monkeypatch,
+        retrieve=httpx.Response(
+            200,
+            json={
+                "id": MESSAGE_ID,
+                "from": "onboarding@resend.dev",
+                "to": ["delivered@resend.dev"],
+                "last_event": "sent",
+            },
+        ),
+    )
+    sent = client.post(
+        f"/api/v1/organizations/{organization_id}/integration-configs/email/resend-test",
+        headers=headers,
+        json={"recipient": "delivered@resend.dev"},
+    )
+    assert sent.status_code == 200, sent.text
+    assert sent.json()["provider_confirmation"] == "retrieved"
+    assert sent.json()["status"]["provider_last_event"] == "sent"
+
+    calls: list[str] = []
+
+    def handler(method: str, url: str, **kwargs: object) -> httpx.Response:
+        del url, kwargs
+        calls.append(method)
+        return httpx.Response(
+            200,
+            json={
+                "id": MESSAGE_ID,
+                "from": "onboarding@resend.dev",
+                "to": ["delivered@resend.dev"],
+                "last_event": "delivered",
+            },
+        )
+
+    monkeypatch.setattr("app.domains.integrations.resend_test.httpx.request", handler)
+    from app.domains.integrations.resend_test import refresh_delivery
+
+    event = refresh_delivery(db, uuid.UUID(organization_id), attempts=1)
+    assert event == "delivered"
+    assert calls == ["GET"]
+    status = client.get(
+        f"/api/v1/organizations/{organization_id}/integration-configs/email/resend-test",
+        headers=headers,
+    )
+    assert status.json()["provider_last_event"] == "delivered"
+    assert status.json()["provider_confirmation"] == "retrieved"

@@ -93,8 +93,11 @@ def test_mcp_stdio_session_is_read_only_and_organization_scoped(db: Session) -> 
     listed, found, denied, hidden = asyncio.run(_session(atlas.id, secret.id))
 
     assert {tool["name"] for tool in listed} == {
+        "calendar_availability",
         "find_contact",
         "get_lead",
+        "message_delivery",
+        "provider_health",
         "search_company_knowledge",
     }
     for tool in listed:

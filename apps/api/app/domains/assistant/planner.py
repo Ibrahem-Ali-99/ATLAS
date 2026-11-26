@@ -116,6 +116,13 @@ def plan_request(question: str, history: list[tuple[str, str]]) -> LocalDecision
     combined = f"{text} {prior.lower()}" if prior else text
     if _REFERENCE.search(text) and prior is None and not _business(text):
         return LocalDecision(direct=UNKNOWN_REFERENCE)
+    named = [
+        (name, arguments)
+        for name, arguments in _select(text, _query(question))
+        if name != "search_knowledge"
+    ]
+    if named:
+        return LocalDecision(tools=named[:3])
     query = _query(prior if prior else question)
     tools = _select(combined, query)
     if tools:
