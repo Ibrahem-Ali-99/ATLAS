@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { DemoSessionBar } from "@/components/demo-session-bar";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { WorkspaceSearch } from "@/components/workspace-search";
 import { SignOutDialog } from "@/components/sign-out-dialog";
@@ -21,6 +22,7 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, sessionQueryOptions } from "@/lib/api";
+import { isDemoSession } from "@/lib/demo-session";
 import { titleForPath } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { WorkspaceProvider, useWorkspace } from "@/lib/use-workspace";
@@ -91,13 +93,14 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
   const user = session.data.user;
   const organizationName = workspace.organizationName;
   const immersive = pathname === "/assistant";
+  const demo = isDemoSession(session.data);
 
   return (
     <div className={cn("min-h-screen bg-background md:grid", collapsed ? "md:grid-cols-[68px_minmax(0,1fr)]" : "md:grid-cols-[240px_minmax(0,1fr)]")}>
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-card focus:px-3 focus:py-2 focus:text-sm focus:shadow-sm">Skip to content</a>
       <aside className="hidden border-r border-border bg-sidebar md:block">
         <div className="sticky top-0 flex h-screen flex-col">
-          <SidebarNav organizationName={organizationName} collapsed={collapsed} onToggleCollapse={() => setCollapsed((value) => !value)} />
+          <SidebarNav organizationName={organizationName} collapsed={collapsed} demo={demo} onToggleCollapse={() => setCollapsed((value) => !value)} />
         </div>
       </aside>
       <div className="flex min-h-screen min-w-0 flex-col">
@@ -155,10 +158,10 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>{user.email}</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild><Link href="/settings#settings-account">Profile and preferences</Link></DropdownMenuItem>
-              <DropdownMenuItem asChild><Link href="/settings">Workspace settings</Link></DropdownMenuItem>
-              <DropdownMenuSeparator />
+              {demo ? null : <DropdownMenuSeparator />}
+              {demo ? null : <DropdownMenuItem asChild><Link href="/settings#settings-account">Profile and preferences</Link></DropdownMenuItem>}
+              {demo ? null : <DropdownMenuItem asChild><Link href="/settings">Workspace settings</Link></DropdownMenuItem>}
+              {demo ? null : <DropdownMenuSeparator />}
               <DropdownMenuItem
                 onSelect={(event) => {
                   event.preventDefault();
@@ -171,11 +174,14 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
           </DropdownMenu>
           </div>
         </header>
+        <DemoSessionBar session={session.data} />
         <main
           id="main"
           className={
             immersive
-              ? "h-[calc(100dvh-60px)] min-w-0 overflow-hidden"
+              ? demo
+                ? "h-[calc(100dvh-108px)] min-w-0 overflow-hidden"
+                : "h-[calc(100dvh-60px)] min-w-0 overflow-hidden"
               : "min-w-0 flex-1 overflow-x-hidden px-4 py-6 md:px-8 md:py-8"
           }
         >
@@ -185,7 +191,7 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
       <Sheet open={navOpen} onOpenChange={setNavOpen}>
         <SheetContent aria-describedby={undefined}>
           <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <SidebarNav organizationName={organizationName} onNavigate={() => setNavOpen(false)} />
+          <SidebarNav organizationName={organizationName} demo={demo} onNavigate={() => setNavOpen(false)} />
         </SheetContent>
       </Sheet>
       <SignOutDialog open={signOutOpen} onOpenChange={setSignOutOpen} />

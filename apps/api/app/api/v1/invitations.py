@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from sqlalchemy import select
 
 from app.domains.billing.service import enforce_limit
+from app.domains.demo.guards import refuse_visitor_organization
 from app.domains.identity.dependencies import Admin, CsrfAdmin, DbSession
 from app.domains.identity.invitation_models import OrganizationInvitation
 from app.domains.identity.invitation_service import accept_invitation, create_invitation
@@ -20,6 +21,7 @@ router = APIRouter(tags=["identity"])
     "/organizations/{organization_id}/invitations", response_model=list[InvitationStatusOut]
 )
 def list_pending(admin: Admin, db: DbSession) -> list[InvitationStatusOut]:
+    refuse_visitor_organization(admin.organization)
     rows = db.scalars(
         select(OrganizationInvitation)
         .where(OrganizationInvitation.organization_id == admin.organization.id)
@@ -34,6 +36,7 @@ def list_pending(admin: Admin, db: DbSession) -> list[InvitationStatusOut]:
     status_code=201,
 )
 def create(body: InvitationCreate, admin: CsrfAdmin, db: DbSession) -> InvitationCreated:
+    refuse_visitor_organization(admin.organization)
     enforce_limit(db, admin.organization.id, "seats")
     invitation, token = create_invitation(db, admin.organization.id, admin.user.id, str(body.email))
     return InvitationCreated(

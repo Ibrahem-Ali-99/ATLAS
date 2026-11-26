@@ -27,6 +27,7 @@ from app.domains.billing.service import (
     scheduled_cancellation,
     usage,
 )
+from app.domains.demo.guards import refuse_visitor_organization
 from app.domains.identity.dependencies import CsrfAdmin, DbSession, Member
 
 router = APIRouter(tags=["billing"])
@@ -79,6 +80,7 @@ def status(member: Member, db: DbSession) -> dict[str, object]:
 
 @router.post("/organizations/{organization_id}/billing/checkout")
 def checkout(body: CheckoutBody, admin: CsrfAdmin, db: DbSession) -> dict[str, object]:
+    refuse_visitor_organization(admin.organization)
     if get_settings().billing_provider == "stripe":
         if body.plan_code == "free":
             raise AppError(422, "billing_price_unavailable", "Choose a paid plan for checkout")
@@ -111,6 +113,7 @@ def checkout(body: CheckoutBody, admin: CsrfAdmin, db: DbSession) -> dict[str, o
 
 @router.post("/organizations/{organization_id}/billing/portal")
 def portal(admin: CsrfAdmin, db: DbSession) -> dict[str, str]:
+    refuse_visitor_organization(admin.organization)
     row = get_subscription(db, admin.organization.id)
     if row.provider != "stripe" or not row.provider_customer_id:
         raise AppError(

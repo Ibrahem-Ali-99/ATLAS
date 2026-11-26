@@ -24,6 +24,7 @@ from app.domains.automation.schemas import (
     WebhookKeyOut,
     WebhookKeyStatus,
 )
+from app.domains.demo.guards import refuse_visitor_organization
 from app.domains.identity.dependencies import Admin, CsrfAdmin, CsrfMember, DbSession, Member
 from app.domains.identity.models import Membership, User
 from app.domains.provenance.origin import DataScope
@@ -185,6 +186,7 @@ def get_email_activity(
 
 @router.post("/integrations/webhook-keys", response_model=WebhookKeyOut, status_code=201)
 def create_key(member: CsrfAdmin, db: DbSession, response: Response) -> WebhookKeyOut:
+    refuse_visitor_organization(member.organization)
     key, secret = create_webhook_key(db, member.organization.id, actor_id=member.user.id)
     response.headers["Cache-Control"] = "no-store"
     return WebhookKeyOut(id=key.id, name=key.name, secret=secret)
@@ -192,6 +194,7 @@ def create_key(member: CsrfAdmin, db: DbSession, response: Response) -> WebhookK
 
 @router.get("/integrations/webhook-keys", response_model=WebhookKeyStatus | None)
 def webhook_key_status(member: Admin, db: DbSession) -> WebhookKeyStatus | None:
+    refuse_visitor_organization(member.organization)
     key = db.scalar(select(WebhookKey).where(WebhookKey.organization_id == member.organization.id))
     if key is None:
         return None
@@ -212,6 +215,7 @@ def webhook_key_status(member: Admin, db: DbSession) -> WebhookKeyStatus | None:
 
 @router.post("/integrations/webhook-keys/rotate", response_model=WebhookKeyOut)
 def rotate_key(member: CsrfAdmin, db: DbSession, response: Response) -> WebhookKeyOut:
+    refuse_visitor_organization(member.organization)
     key, secret = rotate_webhook_key(db, member.organization.id, member.user.id)
     response.headers["Cache-Control"] = "no-store"
     return WebhookKeyOut(id=key.id, name=key.name, secret=secret)
@@ -219,6 +223,7 @@ def rotate_key(member: CsrfAdmin, db: DbSession, response: Response) -> WebhookK
 
 @router.post("/integrations/webhook-keys/revoke", status_code=204)
 def revoke_key(member: CsrfAdmin, db: DbSession) -> None:
+    refuse_visitor_organization(member.organization)
     revoke_webhook_key(db, member.organization.id, member.user.id)
 
 

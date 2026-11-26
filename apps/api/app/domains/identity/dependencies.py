@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import read_session_id
+from app.domains.demo.access import is_visitor_email, note_demo_request
 from app.domains.identity.models import Membership, MembershipRole, Organization, User, UserSession
 from app.domains.identity.service import get_active_session, get_membership
 
@@ -37,6 +38,8 @@ def get_current_user(db: DbSession, session: CurrentSession) -> User:
     user = db.get(User, session.user_id)
     if user is None or not user.is_active:
         raise AppError(401, "unauthenticated", "Authentication required")
+    if is_visitor_email(user.email):
+        note_demo_request(str(session.id))
     return user
 
 

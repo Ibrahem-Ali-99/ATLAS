@@ -20,6 +20,7 @@ from app.domains.assistant.schemas import (
     ReplyOut,
 )
 from app.domains.billing.service import meter_assistant_request
+from app.domains.demo.service import enforce_demo_assistant
 from app.domains.identity.dependencies import CsrfMember, DbSession, Member
 from app.domains.observability.tracing import record_operation
 from app.integrations.language import (
@@ -161,6 +162,7 @@ def create_message(
     chat: Annotated[ChatClient, Depends(organization_chat)],
 ) -> ReplyOut:
     service.get_conversation(db, member.organization.id, member.user.id, conversation_id)
+    enforce_demo_assistant(db, member.organization)
     meter_assistant_request(db, member.organization.id)
     turn = service.prepare_turn(
         db,
@@ -215,6 +217,7 @@ def stream_message(
 ) -> StreamingResponse:
     organization_id = member.organization.id
     service.get_conversation(db, organization_id, member.user.id, conversation_id)
+    enforce_demo_assistant(db, member.organization)
     meter_assistant_request(db, organization_id)
     turn = service.prepare_turn(
         db,

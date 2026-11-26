@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { LaunchDemoButton } from "@/components/public/launch-demo-button";
 import { Button } from "@/components/ui/button";
 import { sessionQueryOptions } from "@/lib/api";
 import { publicNav } from "@/lib/public-site";
@@ -53,9 +54,7 @@ export function SiteHeader() {
           <Button asChild variant="outline" className="hidden sm:inline-flex">
             <Link href={signedIn ? "/overview" : "/login"}>{signedIn ? "Open workspace" : "Sign in"}</Link>
           </Button>
-          <Button asChild className="hidden sm:inline-flex">
-            <Link href="/demo">Enter demo</Link>
-          </Button>
+          <LaunchDemoButton className="hidden sm:inline-flex" />
           <Button type="button" variant="outline" size="icon" className="lg:hidden" aria-expanded={open} aria-controls="public-menu" onClick={() => setOpen((value) => !value)}>
             {open ? <X size={16} /> : <Menu size={16} />}
             <span className="sr-only">{open ? "Close menu" : "Open menu"}</span>
@@ -77,10 +76,8 @@ export function SiteHeader() {
                 {signedIn ? "Open workspace" : "Sign in"}
               </Link>
             </li>
-            <li>
-              <Link href="/demo" className="block rounded-md px-3 py-3 text-base text-primary hover:bg-accent" onClick={() => setOpen(false)}>
-                Enter demo
-              </Link>
+            <li className="px-3 py-2">
+              <LaunchDemoButton className="w-full" />
             </li>
           </ul>
         </nav>

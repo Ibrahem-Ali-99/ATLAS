@@ -7,18 +7,30 @@ import { navigationGroups } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
+const demoHidden = new Set(["/integrations", "/billing", "/settings", "/setup"]);
+
 export function SidebarNav({
   organizationName,
   onNavigate,
   collapsed = false,
   onToggleCollapse,
+  demo = false,
 }: {
   organizationName?: string | null;
   onNavigate?: () => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  demo?: boolean;
 }) {
   const pathname = usePathname();
+  const groups = demo
+    ? navigationGroups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => !demoHidden.has(item.href)),
+        }))
+        .filter((group) => group.items.length > 0)
+    : navigationGroups;
 
   return (
     <div className={cn("flex h-full flex-col bg-sidebar text-foreground", collapsed ? "items-center" : "")}>
@@ -31,7 +43,7 @@ export function SidebarNav({
         {!collapsed ? <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{organizationName ?? "ATLAS"}</p><p className="mt-0.5 truncate text-[10px] text-muted-foreground">Workspace</p></div> : null}
       </div>
       <nav className="mt-3 flex w-full flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-3" aria-label="Workspace">
-        {navigationGroups.map((group) => (
+        {groups.map((group) => (
           <div key={group.label} className="flex flex-col gap-1">
             {!collapsed ? <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{group.label}</p> : null}
             <div className="flex flex-col gap-1">

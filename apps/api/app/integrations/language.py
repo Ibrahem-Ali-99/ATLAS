@@ -316,6 +316,12 @@ def get_embedding_client(
 ) -> EmbeddingClient:
     settings = get_settings()
     if db is not None and organization_id is not None:
+        from app.domains.demo.access import organization_is_visitor
+
+        if organization_is_visitor(db, organization_id):
+            from app.integrations.doubles import DeterministicEmbeddingClient
+
+            return DeterministicEmbeddingClient()
         from app.integrations.resolver import resolve_settings
 
         settings = resolve_settings(
@@ -339,6 +345,12 @@ def get_chat_client(
 ) -> ChatClient:
     settings = get_settings()
     if db is not None and organization_id is not None:
+        from app.domains.demo.access import organization_is_visitor
+
+        if organization_is_visitor(db, organization_id):
+            from app.integrations.doubles import DeterministicChatClient
+
+            return DeterministicChatClient()
         from app.integrations.resolver import resolve_settings
 
         settings = resolve_settings(db, organization_id, "chat", for_verification=for_verification)

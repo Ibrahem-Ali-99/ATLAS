@@ -41,11 +41,17 @@ def read_session_id(token: str, secret_key: str, max_age_seconds: int) -> uuid.U
         return None
 
 
-def attach_session_cookie(response: Response, settings: Settings, session_id: uuid.UUID) -> None:
+def attach_session_cookie(
+    response: Response,
+    settings: Settings,
+    session_id: uuid.UUID,
+    *,
+    max_age: int | None = None,
+) -> None:
     response.set_cookie(
         key=settings.session_cookie_name,
         value=sign_session_id(session_id, settings.secret_key),
-        max_age=settings.session_max_age_seconds,
+        max_age=settings.session_max_age_seconds if max_age is None else max_age,
         httponly=True,
         secure=settings.cookie_secure,
         samesite="lax",

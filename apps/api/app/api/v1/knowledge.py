@@ -10,6 +10,8 @@ from app.core.errors import AppError
 from app.domains.assistant.service import evaluate_response
 from app.domains.billing.service import enforce_limit
 from app.domains.crm.service import page_bounds
+from app.domains.demo.access import MAX_UPLOAD_BYTES, is_visitor_slug
+from app.domains.demo.service import enforce_demo_upload
 from app.domains.identity.dependencies import Admin, CsrfAdmin, CsrfMember, DbSession, Member
 from app.domains.knowledge import reindex, service
 from app.domains.knowledge.models import (
@@ -109,7 +111,11 @@ def upload_document(
     file: UploadFile,
     origin: Annotated[Origin, Form()] = Origin.operational,
 ) -> DocumentOut:
-    payload = file.file.read()
+    if is_visitor_slug(member.organization.slug):
+        payload = file.file.read(MAX_UPLOAD_BYTES + 1)
+    else:
+        payload = file.file.read()
+    enforce_demo_upload(db, member.organization, len(payload))
     enforce_limit(db, member.organization.id, "knowledge_storage_bytes", len(payload))
     document = service.store_upload(
         db,

@@ -206,6 +206,14 @@ _EXTERNAL_ACTIONS = {ActionType.prepare_customer_response, ActionType.request_ap
 
 def _execute_external(db: Session, approval: Approval) -> dict[str, Any]:
     from app.domains.automation.intents import dispatch_intent, stage_intent
+    from app.domains.demo.access import organization_is_visitor
+
+    if organization_is_visitor(db, approval.organization_id):
+        raise AppError(
+            403,
+            "demo_restricted",
+            "Demo sessions cannot send messages or call a live provider.",
+        )
 
     payload = dict(approval.payload)
     settings = get_settings()

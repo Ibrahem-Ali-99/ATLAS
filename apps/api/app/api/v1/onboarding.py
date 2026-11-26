@@ -202,6 +202,9 @@ def _record_agent_configuration(
 
 @router.post("/onboarding/assistant-test")
 def assistant_test(body: AssistantTestBody, member: CsrfMember, db: DbSession) -> dict[str, object]:
+    from app.domains.demo.service import enforce_demo_assistant
+
+    enforce_demo_assistant(db, member.organization)
     meter_assistant_request(db, member.organization.id)
     chat = get_chat_client(db, member.organization.id)
     embedder = get_embedding_client(db, member.organization.id)

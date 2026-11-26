@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { LaunchDemoButton } from "@/components/public/launch-demo-button";
 import { PricingPlans } from "@/components/public/pricing-plans";
 import { ProductShot } from "@/components/public/product-shot";
 import { Button } from "@/components/ui/button";
@@ -18,9 +19,10 @@ export function HomeScreen() {
             ATLAS is an organization-scoped workspace for CRM, a multichannel inbox, document retrieval, and automation.
             A person approves a CRM change, a message, or a booking before it leaves the workspace.
           </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Button asChild size="lg">
-              <Link href="/demo">Explore the demo</Link>
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            <LaunchDemoButton size="lg" />
+            <Button asChild size="lg" variant="outline">
+              <Link href="/demo">View the tour</Link>
             </Button>
             <Button asChild size="lg" variant="outline">
               <Link href="/#pricing">View pricing</Link>
@@ -158,14 +160,12 @@ export function HomeScreen() {
       <section className="border-t border-border">
         <div className="mx-auto flex max-w-6xl flex-col items-start gap-6 px-4 py-16 sm:px-6 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-3xl font-semibold tracking-tight">Walk the product before you sign in.</h2>
+            <h2 className="text-3xl font-semibold tracking-tight">Open a private Harbor & Co. workspace.</h2>
             <p className="mt-3 max-w-xl text-muted-foreground">
-              The demo tour uses captures of the running application and explains the sandbox. It does not publish a password or open the development workspace.
+              Launch starts a short-lived session in the application. Restart replaces that workspace. No password is published, and the development workspace stays separate.
             </p>
           </div>
-          <Button asChild size="lg">
-            <Link href="/demo">Enter the demo</Link>
-          </Button>
+          <LaunchDemoButton size="lg" />
         </div>
       </section>
     </div>

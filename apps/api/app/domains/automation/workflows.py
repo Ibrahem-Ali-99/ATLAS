@@ -25,6 +25,7 @@ from app.domains.automation.models import (
 from app.domains.automation.signatures import open_webhook_secret, sign_webhook
 from app.domains.billing.service import enforce_limit
 from app.domains.crm.models import Contact, Inquiry, Lead, LeadStatus, Opportunity
+from app.domains.demo.access import organization_is_visitor
 from app.domains.provenance.origin import Origin
 from app.integrations.language import get_chat_client
 from app.integrations.n8n import post_webhook
@@ -235,6 +236,16 @@ def dispatch_workflow(db: Session, organization_id: uuid.UUID, run_id: uuid.UUID
     if run is None:
         return
     if _execute_local_actions(db, run):
+        return
+    if organization_is_visitor(db, organization_id):
+        run.status = WorkflowStatus.completed
+        run.last_error = None
+        run.payload = {
+            **run.payload,
+            "outcome": "simulated",
+            "steps": [{"type": "external_dispatch", "status": "simulated"}],
+        }
+        db.commit()
         return
     if run.payload.get("dry_run"):
         run.status = WorkflowStatus.completed

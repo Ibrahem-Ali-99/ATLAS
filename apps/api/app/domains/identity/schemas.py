@@ -43,6 +43,8 @@ class AuthResponse(BaseModel):
     user: UserOut
     memberships: list[MembershipOut]
     csrf_token: str
+    demo: bool = False
+    demo_expires_at: datetime | None = None
 
 
 class OrganizationAccessResponse(BaseModel):

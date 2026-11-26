@@ -14,6 +14,7 @@ from app.domains.approvals.models import ActionType
 from app.domains.approvals.service import create_approval
 from app.domains.audit.service import record_event
 from app.domains.crm.models import Inquiry, Lead
+from app.domains.demo.guards import refuse_visitor_organization
 from app.domains.identity.dependencies import (
     CsrfAdmin,
     CsrfMember,
@@ -44,6 +45,7 @@ def connection(member: Member, db: DbSession) -> dict[str, bool | str | None]:
 
 @router.post(f"{_WORKSPACE}/google/connect")
 def connect(admin: CsrfAdmin, session: CurrentSession, db: DbSession) -> dict[str, str]:
+    refuse_visitor_organization(admin.organization)
     return {"url": google_calendar.connect_url(db, admin.organization.id, session.id)}
 
 
@@ -56,7 +58,8 @@ def callback(
     code: Annotated[str | None, Query(max_length=2048)] = None,
 ) -> RedirectResponse:
     authorization = google_calendar.authorization(db, state, session.id)
-    require_admin(require_member(authorization.organization_id, user, db))
+    context = require_admin(require_member(authorization.organization_id, user, db))
+    refuse_visitor_organization(context.organization)
     target = google_calendar.finish(db, authorization, code)
     return RedirectResponse(
         target,

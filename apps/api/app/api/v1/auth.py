@@ -9,13 +9,14 @@ from starlette.responses import Response
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.security import attach_session_cookie, clear_session_cookie
+from app.domains.demo.access import is_visitor_email, is_visitor_slug
 from app.domains.identity.dependencies import CsrfSession, CurrentSession, CurrentUser, DbSession
 from app.domains.identity.login_limit import (
     login_is_limited,
     note_login_failure,
     note_login_success,
 )
-from app.domains.identity.models import User
+from app.domains.identity.models import User, UserSession
 from app.domains.identity.schemas import (
     AuthResponse,
     LoginRequest,
@@ -39,12 +40,19 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/auth")
 
 
-def _auth_response(db: DbSession, user: User, csrf_token: str) -> AuthResponse:
+def _auth_response(db: DbSession, user: User, session: UserSession) -> AuthResponse:
     memberships = [
         membership_out(organization, membership.role, membership.id)
         for organization, membership in list_memberships(db, user.id)
     ]
-    return AuthResponse(user=user_out(user), memberships=memberships, csrf_token=csrf_token)
+    demo = any(is_visitor_slug(item.organization_slug) for item in memberships)
+    return AuthResponse(
+        user=user_out(user),
+        memberships=memberships,
+        csrf_token=session.csrf_token,
+        demo=demo,
+        demo_expires_at=session.expires_at if demo else None,
+    )
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -54,6 +62,10 @@ def login(body: LoginRequest, request: Request, response: Response, db: DbSessio
     if login_is_limited(client_key, email):
         logger.info("login_rate_limited")
         raise AppError(429, "rate_limited", "Too many login attempts. Wait and try again.")
+    if is_visitor_email(email):
+        note_login_failure(client_key, email)
+        logger.info("login_failed")
+        raise AppError(401, "invalid_credentials", "Invalid email or password")
     user = authenticate(db, body.email, body.password)
     if user is None:
         note_login_failure(client_key, email)
@@ -64,7 +76,7 @@ def login(body: LoginRequest, request: Request, response: Response, db: DbSessio
     record = start_session(db, user, timedelta(hours=settings.session_ttl_hours))
     attach_session_cookie(response, settings, record.id)
     logger.info("login_succeeded", user_id=str(user.id))
-    return _auth_response(db, user, record.csrf_token)
+    return _auth_response(db, user, record)
 
 
 @router.post("/logout", status_code=204)
@@ -78,13 +90,14 @@ def logout(db: DbSession, session: CsrfSession) -> Response:
 
 @router.get("/me", response_model=AuthResponse)
 def me(db: DbSession, user: CurrentUser, session: CurrentSession) -> AuthResponse:
-    return _auth_response(db, user, session.csrf_token)
+    return _auth_response(db, user, session)
 
 
 @router.post("/forgot-password", status_code=202)
 def forgot_password(body: PasswordResetRequest, db: DbSession) -> dict[str, str]:
     allowed_origins = get_settings().cors_origin_list
-    token = create_password_reset(db, str(body.email)) if allowed_origins else None
+    visitor = is_visitor_email(normalize_email(str(body.email)))
+    token = None if visitor or not allowed_origins else create_password_reset(db, str(body.email))
     if token:
         web_url = allowed_origins[0]
         link = f"{web_url.rstrip('/')}/reset-password#{urlencode({'token': token})}"

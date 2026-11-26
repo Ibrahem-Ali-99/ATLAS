@@ -1,12 +1,22 @@
 import type { Metadata } from "next";
 
+import { LaunchDemoButton } from "@/components/public/launch-demo-button";
 import { DemoTour } from "@/components/public/demo-tour";
 
 export const metadata: Metadata = {
   title: "Demo",
   description:
-    "A guided tour of the ATLAS workspace and the rules for an isolated demonstration database.",
+    "Launch a short-lived Harbor & Co. session in the ATLAS workspace, or walk the captured tour.",
 };
+
+const sessionRules = [
+  "Launch creates a new organization for this browser. Another visitor cannot read it, and it is not the development workspace.",
+  "The session lasts 45 minutes. Restart deletes that organization and opens a fresh Harbor & Co. workspace.",
+  "CRM, inbox, knowledge, the assistant, workflows, analytics, and campaigns use the stored demonstration records.",
+  "The assistant and document search use a deterministic stand-in. A paid model is not called for this session.",
+  "Integration credentials, billing, invitations, outbound messages, and live provider calls are refused.",
+  "Each session is limited to 400 requests, 12 assistant replies, 3 documents, and 500 KB of knowledge files.",
+];
 
 const guards = [
   "The portfolio command writes only a database named atlas_portfolio. It refuses the development database, the test databases, and production.",
@@ -23,14 +33,26 @@ export default function DemoPage() {
     <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
       <p className="text-sm font-medium uppercase tracking-[0.16em] text-primary">Interactive demo</p>
       <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-balance">
-        Explore Atlas Demo without bringing your own provider accounts.
+        Explore Harbor & Co. in the application.
       </h1>
       <p className="mt-4 max-w-3xl text-lg leading-8 text-muted-foreground">
-        The tour below uses captures of Atlas Demo. Harbor & Co. is a fictional logistics company.
-        Mina Patel asks about bonded warehousing. Northwind is a second organization used to show that its records stay hidden.
+        The tour below uses captures of Atlas Demo. Mina Patel asks about bonded warehousing. Northwind is a second organization used to show that its records stay hidden. Launch interactive demo opens a separate Harbor & Co. workspace in the application. That session expires, restart replaces it, and it does not publish a password.
       </p>
+      <div className="mt-8">
+        <LaunchDemoButton size="lg" />
+      </div>
+      <section className="mt-10" aria-labelledby="session-title">
+        <h2 id="session-title" className="text-2xl font-semibold tracking-tight">What the launched session can do</h2>
+        <ul className="mt-4 grid gap-3 md:grid-cols-2">
+          {sessionRules.map((item) => (
+            <li key={item} className="rounded-xl border border-border bg-card p-4 text-sm leading-6">
+              {item}
+            </li>
+          ))}
+        </ul>
+      </section>
       <section className="mt-10" aria-labelledby="sandbox-title">
-        <h2 id="sandbox-title" className="text-2xl font-semibold tracking-tight">What a visitor deployment is allowed to do</h2>
+        <h2 id="sandbox-title" className="text-2xl font-semibold tracking-tight">Separate portfolio database</h2>
         <ul className="mt-4 grid gap-3 md:grid-cols-2">
           {guards.map((item) => (
             <li key={item} className="rounded-xl border border-border bg-card p-4 text-sm leading-6">

@@ -54,6 +54,14 @@ def stage_intent(db: Session, approval: Approval, payload: dict[str, Any]) -> Ex
 def dispatch_intent(
     db: Session, organization_id: uuid.UUID, intent_id: uuid.UUID
 ) -> dict[str, Any]:
+    from app.domains.demo.access import organization_is_visitor
+
+    if organization_is_visitor(db, organization_id):
+        raise AppError(
+            403,
+            "demo_restricted",
+            "Demo sessions cannot send messages or call a live provider.",
+        )
     intent = _claim(db, organization_id, intent_id)
     if intent is None:
         return _when_unclaimed(db, organization_id, intent_id)

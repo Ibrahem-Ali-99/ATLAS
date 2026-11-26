@@ -11,6 +11,7 @@ from app.domains.campaigns.audience import audience_filters
 from app.domains.campaigns.models import Campaign, CampaignDelivery, CustomerSegment
 from app.domains.campaigns.preferences import public_origin, token_for
 from app.domains.campaigns.resend import live_sender, send_resend
+from app.domains.demo.access import organization_is_visitor
 from app.integrations.email import OutboundEmail, send_email
 from app.integrations.outcomes import DeliveryFailed, OutcomeUncertain
 
@@ -31,6 +32,8 @@ def _segment(db: Session, campaign: Campaign) -> CustomerSegment | None:
 def schedule(
     db: Session, campaign: Campaign, scheduled_at: datetime | None, *, delivery_mode: str
 ) -> int:
+    if organization_is_visitor(db, campaign.organization_id):
+        raise AppError(403, "demo_restricted", "Demo sessions cannot send campaign messages.")
     if campaign.status != "draft":
         raise AppError(409, "campaign_locked", "Only draft campaigns can be scheduled")
     if delivery_mode != get_settings().email_mode:
@@ -127,6 +130,8 @@ def _deliver(db: Session, campaign: Campaign, row: CampaignDelivery) -> None:
     try:
         db.refresh(campaign)
         if campaign.status == "cancelled" or not _eligible(db, campaign, row.email):
+            result = "skipped"
+        elif organization_is_visitor(db, campaign.organization_id):
             result = "skipped"
         else:
             unsubscribe_url = (

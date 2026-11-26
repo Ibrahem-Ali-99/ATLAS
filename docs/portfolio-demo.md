@@ -2,7 +2,7 @@
 
 Harbor & Co. is fictional. This command fills a separate database with that account so a visitor deployment can use the real CRM, inbox, knowledge, workflow, campaign, and assistant models. It does not run against the development database, and it was not run against the database on this machine.
 
-The public website at `/demo` explains the same boundary. It does not publish a password and it does not create a session.
+The public website can also open a short-lived visitor session in the API the process is already using. That path is described in [demo-access.md](demo-access.md). It does not publish a password and it does not sign the visitor into Atlas Demo.
 
 ## What it writes
 

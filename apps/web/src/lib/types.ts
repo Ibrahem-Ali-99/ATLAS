@@ -18,6 +18,8 @@ export type AuthSession = {
   user: User;
   memberships: Membership[];
   csrf_token: string;
+  demo?: boolean;
+  demo_expires_at?: string | null;
 };
 
 export type OrganizationRecord = {

@@ -6,12 +6,13 @@ import uuid
 from datetime import UTC, datetime
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from sqlalchemy import select, update
 
 from app.core.errors import AppError
 from app.domains.audit.service import record_event
 from app.domains.automation.signatures import open_integration_secret
+from app.domains.demo.guards import refuse_visitor_configuration
 from app.domains.identity.dependencies import Admin, CsrfAdmin, DbSession
 from app.domains.integrations.domain_models import EmailDomainVerification
 from app.domains.integrations.domain_service import check_domain, register_domain, revoke_domain
@@ -51,7 +52,9 @@ from app.integrations.language import get_chat_client, get_embedding_client
 from app.integrations.smtp_verification import verify_smtp
 
 router = APIRouter(
-    prefix="/organizations/{organization_id}/integration-configs", tags=["integrations"]
+    prefix="/organizations/{organization_id}/integration-configs",
+    tags=["integrations"],
+    dependencies=[Depends(refuse_visitor_configuration)],
 )
 
 
