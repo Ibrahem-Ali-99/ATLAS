@@ -8,9 +8,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.errors import AppError
 from app.domains.knowledge.models import Chunk, Document
-from app.domains.knowledge.vectors import model_clause, vector_column
-from app.integrations.language import EmbeddingClient
+from app.domains.knowledge.vectors import (
+    index_identity,
+    lock_embedding_index,
+    model_clause,
+    vector_column,
+)
+from app.integrations.language import EmbeddingClient, OpenAICompatibleEmbeddingClient
+from app.integrations.resolver import resolve_settings
 
 # Candidates may sit as far as ATLAS_MAX_COSINE_DISTANCE (0.55).
 # A vector-only hit is evidence only at or below this distance.
@@ -29,6 +36,7 @@ class RetrievedChunk:
     page_number: int | None
     content: str
     score: float
+    confidence: float
 
 
 @dataclass
@@ -38,6 +46,7 @@ class _Candidate:
     score: float
     distance: float | None
     lexical: bool
+    shared_terms: int = 0
 
 
 def search_chunks(
@@ -52,21 +61,37 @@ def search_chunks(
     if len(query) < 2:
         return []
     vector = embedder.embed([query])[0]
-    settings = get_settings()
+    settings = (
+        embedder.settings
+        if isinstance(embedder, OpenAICompatibleEmbeddingClient)
+        else get_settings()
+    )
+    lock_embedding_index(db, organization_id, shared=True)
+    use_vectors = True
+    if isinstance(embedder, OpenAICompatibleEmbeddingClient):
+        try:
+            current = resolve_settings(db, organization_id, "embedding")
+            use_vectors = index_identity(current) == index_identity(settings)
+        except AppError:
+            use_vectors = False
     column = vector_column(settings.embedding_dimensions)
     distance = column.cosine_distance(vector)
-    vector_rows = db.execute(
-        select(Chunk, Document.title, distance.label("distance"))
-        .join(Document, Document.id == Chunk.document_id)
-        .where(
-            Chunk.organization_id == organization_id,
-            Document.status == "ready",
-            column.is_not(None),
-            model_clause(settings),
-        )
-        .order_by(distance.asc())
-        .limit(20)
-    ).all()
+    vector_rows = (
+        db.execute(
+            select(Chunk, Document.title, distance.label("distance"))
+            .join(Document, Document.id == Chunk.document_id)
+            .where(
+                Chunk.organization_id == organization_id,
+                Document.status == "ready",
+                column.is_not(None),
+                model_clause(settings),
+            )
+            .order_by(distance.asc())
+            .limit(20)
+        ).all()
+        if use_vectors
+        else []
+    )
     tsquery = func.plainto_tsquery("english", query)
     rank = func.ts_rank_cd(Chunk.search_vector, tsquery)
     text_rows = db.execute(
@@ -137,8 +162,7 @@ def _mark_shared_terms(fused: dict[uuid.UUID, _Candidate], query: str) -> None:
     if not query_terms:
         return
     for candidate in fused.values():
-        if query_terms & _content_terms(candidate.chunk.content):
-            candidate.lexical = True
+        candidate.shared_terms = len(query_terms & _content_terms(candidate.chunk.content))
 
 
 def _content_terms(text: str) -> set[str]:
@@ -156,7 +180,7 @@ def _is_evidence(candidate: _Candidate, vector_threshold: float = VECTOR_ONLY_MA
     still be about a different subject.
     """
 
-    if candidate.lexical:
+    if candidate.lexical or candidate.shared_terms:
         return True
     return candidate.distance is not None and candidate.distance <= vector_threshold
 
@@ -204,6 +228,8 @@ def _add(
 
 def _record(candidate: _Candidate) -> RetrievedChunk:
     chunk = candidate.chunk
+    similarity = 1.0 - candidate.distance if candidate.distance is not None else 0.0
+    lexical_confidence = 0.85 if candidate.lexical else 0.6 if candidate.shared_terms >= 2 else 0.0
     return RetrievedChunk(
         chunk_id=chunk.id,
         document_id=chunk.document_id,
@@ -212,4 +238,5 @@ def _record(candidate: _Candidate) -> RetrievedChunk:
         page_number=chunk.page_number,
         content=chunk.content,
         score=candidate.score,
+        confidence=max(0.0, min(1.0, max(similarity, lexical_confidence))),
     )

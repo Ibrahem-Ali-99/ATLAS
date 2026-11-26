@@ -30,20 +30,142 @@ from app.domains.automation.models import (
     EmailMessage,
     ExecutionIntent,
     IntentStatus,
+    WorkflowDefinition,
     WorkflowRun,
     WorkflowStatus,
+    WorkflowTask,
 )
 from app.domains.automation.signatures import open_webhook_secret, sign_webhook
+from app.domains.automation.worker import run_once
 from app.domains.automation.workflows import (
     complete_lead_callback,
+    dispatch_workflow,
     recover_workflows,
     stage_lead_created,
 )
+from app.domains.crm.models import Lead, LeadStatus
 from app.domains.crm.service import create_company, create_contact, create_inquiry, create_lead
 from app.domains.identity.models import MembershipRole, Organization, User
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
 from tests.helpers import login
 from tests.smtp_sink import SINK, SmtpSink
+from tests.test_crm import _csrf
+
+
+def test_due_scheduled_workflow_dispatches_once(db: Session) -> None:
+    organization = make_organization(db, "Scheduled workspace", "scheduled-workspace")
+    admin = make_user(db, "scheduler@example.com")
+    scheduled = WorkflowDefinition(
+        organization_id=organization.id,
+        created_by=admin.id,
+        slug="hourly-task",
+        name="Hourly task",
+        active=True,
+        next_run_at=datetime.now(UTC) - timedelta(seconds=1),
+        definition={
+            "trigger": "schedule",
+            "interval_seconds": 3600,
+            "actions": [
+                {"type": "create_task", "title": "Check the queue"},
+            ],
+        },
+    )
+    db.add(scheduled)
+    db.commit()
+    assert run_once() == 1
+    assert run_once() == 0
+    db.expire_all()
+    assert scheduled.next_run_at is not None and scheduled.next_run_at > datetime.now(UTC)
+    assert (
+        db.scalar(select(WorkflowTask.title).where(WorkflowTask.organization_id == organization.id))
+        == "Check the queue"
+    )
+
+
+def test_workflow_activation_enforces_definition_quota(client: TestClient, db: Session) -> None:
+    organization = make_organization(db, "Workflow quota", "workflow-quota")
+    admin = make_user(db, "workflow-quota@example.com")
+    make_membership(db, admin, organization, MembershipRole.admin)
+    headers = _csrf(login(client, admin.email, PASSWORD))
+    root = f"/api/v1/organizations/{organization.id}/workflow-definitions"
+    draft = {"definition": {"trigger": "schedule", "actions": [{"type": "create_task"}]}}
+    rows = []
+    for index in range(3):
+        body = {**draft, "name": f"Draft {index}", "slug": f"draft-{index}"}
+        created = client.post(root, headers=headers, json=body)
+        assert created.status_code == 201, created.text
+        rows.append(created.json()["id"])
+    duplicate = client.post(
+        root, headers=headers, json={**draft, "name": "Draft 0", "slug": "draft-0"}
+    )
+    assert duplicate.status_code == 409
+    for workflow in rows[:2]:
+        assert client.post(f"{root}/{workflow}/activate", headers=headers).status_code == 200
+    blocked = client.post(f"{root}/{rows[2]}/activate", headers=headers)
+    assert blocked.status_code == 402
+    assert client.post(f"{root}/{rows[0]}/pause", headers=headers).status_code == 200
+    assert client.post(f"{root}/{rows[2]}/activate", headers=headers).status_code == 200
+
+
+def test_workflow_draft_edit_activation_and_local_execution(
+    client: TestClient, db: Session
+) -> None:
+    org = make_organization(db, "Workflow acceptance", "workflow-acceptance")
+    admin = make_user(db, "workflow-admin@example.com")
+    make_membership(db, admin, org, MembershipRole.admin)
+    headers = _csrf(login(client, admin.email, PASSWORD))
+    root = f"/api/v1/organizations/{org.id}"
+    path = f"{root}/workflow-definitions"
+    body = {
+        "name": "New lead follow-up",
+        "slug": "new-lead-follow-up",
+        "definition": {
+            "trigger": "schedule",
+            "interval_seconds": 60,
+            "actions": [{"type": "create_task"}],
+        },
+    }
+    draft = client.post(path, json=body, headers=headers)
+    assert draft.status_code == 201, draft.text
+    assert draft.json()["next_run_at"] is None
+    detail = f"{path}/{draft.json()['id']}"
+    activated = client.post(f"{detail}/activate", headers=headers)
+    assert activated.status_code == 200, activated.text
+    assert activated.json()["next_run_at"] is not None
+    assert client.patch(detail, json=body, headers=headers).status_code == 409
+    paused = client.post(f"{detail}/pause", headers=headers)
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["next_run_at"] is None
+
+    body["definition"] = {
+        "trigger": "lead_created",
+        "actions": [
+            {"type": "update_lead", "status": "contacted"},
+            {"type": "create_task", "title": "Prepare estimate"},
+            {"type": "create_task", "title": "Review account"},
+        ],
+    }
+    edited = client.patch(detail, json=body, headers=headers)
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["version"] == 2
+    assert client.post(f"{detail}/activate", headers=headers).status_code == 200
+    created = client.post(f"{root}/leads", json={"title": "Customer inquiry"}, headers=headers)
+    assert created.status_code == 201, created.text
+    lead_id = uuid.UUID(created.json()["id"])
+    run = db.scalar(
+        select(WorkflowRun).where(
+            WorkflowRun.lead_id == lead_id,
+            WorkflowRun.payload["workflow_definition_id"].as_string() == draft.json()["id"],
+        )
+    )
+    assert run is not None
+    dispatch_workflow(db, org.id, run.id)
+    dispatch_workflow(db, org.id, run.id)
+    assert db.get(Lead, lead_id).status == LeadStatus.contacted
+    assert run.status == WorkflowStatus.completed
+    assert set(
+        db.scalars(select(WorkflowTask.title).where(WorkflowTask.workflow_run_id == run.id))
+    ) == {"Prepare estimate", "Review account"}
 
 
 def test_restart_does_not_resend_an_uncertain_email(db: Session) -> None:
@@ -193,6 +315,21 @@ def test_rejected_and_expired_approvals_send_nothing(db: Session) -> None:
     assert db.scalar(select(func.count()).select_from(ExecutionIntent)) == 0
 
 
+def test_approval_cannot_cross_into_live_delivery(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = _email_approval(db)
+    assert approval.payload["delivery_mode"] == "sandbox"
+    decide(
+        db, approval.organization_id, approval.id, approval.requested_by, approved=True, note=None
+    )
+    monkeypatch.setattr(get_settings(), "email_mode", "live")
+    with pytest.raises(AppError) as exc:
+        execute_approved(db, approval.organization_id, approval.id)
+    assert exc.value.code == "delivery_mode_changed"
+    assert db.scalar(select(ExecutionIntent.id)) is None
+
+
 def test_simulated_booking_and_cancellation(client: TestClient, db: Session) -> None:
     approval, shared = _appointment_approval(db)
     decide(
@@ -211,13 +348,22 @@ def test_simulated_booking_and_cancellation(client: TestClient, db: Session) -> 
         execute_approved(db, other.organization_id, other.id)
     assert exc.value.code == "slot_unavailable"
     ada = login(client, "ada@example.com", PASSWORD)
+    calendar_url = (
+        f"/api/v1/organizations/{approval.organization_id}/calendar/bookings/{booking.id}"
+    )
+    exported = client.get(f"{calendar_url}/export")
+    assert exported.status_code == 200
+    assert exported.headers["Content-Type"].startswith("text/calendar")
+    assert f"UID:{booking.id}@atlas\r\n" in exported.text
+    assert f"DTSTART:{booking.starts_at.astimezone(UTC):%Y%m%dT%H%M%SZ}\r\n" in exported.text
     cancelled = client.post(
-        f"/api/v1/organizations/{approval.organization_id}/calendar/bookings/{booking.id}/cancel",
+        f"{calendar_url}/cancel",
         headers={"X-CSRF-Token": str(ada["csrf_token"])},
     )
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancelled"
     assert cancelled.json()["provider"] == "simulation"
+    assert client.get(f"{calendar_url}/export").status_code == 404
 
 
 def test_webhook_secret_is_sealed_and_absent_from_reads(client: TestClient, db: Session) -> None:
@@ -236,7 +382,8 @@ def test_webhook_secret_is_sealed_and_absent_from_reads(client: TestClient, db: 
         f"/api/v1/organizations/{atlas.id}/integrations/webhook-keys",
         headers={"X-CSRF-Token": str(ada["csrf_token"])},
     )
-    assert listed.status_code == 405
+    assert listed.status_code == 200
+    assert listed.json()["id"] == str(key.id)
     assert secret not in listed.text
 
 
@@ -297,12 +444,62 @@ def test_webhook_auth_replay_and_cross_organization(client: TestClient, db: Sess
     assert first.status_code == 200, first.text
     second = client.post("/api/v1/hooks/follow-ups/request", content=owned, headers=headers)
     assert second.json() == first.json()
+    changed = json.dumps({"lead_id": str(lead.id), "body": "A different message."}).encode()
+    conflict = client.post(
+        "/api/v1/hooks/follow-ups/request",
+        content=changed,
+        headers=_signed(key.id, secret, changed, "follow-4"),
+    )
+    assert conflict.status_code == 409
+    wrong_route = client.post("/api/v1/hooks/follow-ups", content=owned, headers=headers)
+    assert wrong_route.status_code == 409
     assert db.scalar(select(func.count()).select_from(Approval)) == 1
     approval = db.scalar(select(Approval))
     assert approval is not None
     assert approval.organization_id == atlas.id
     assert approval.status == ApprovalStatus.pending
     assert db.scalar(select(func.count()).select_from(EmailMessage)) == 0
+
+
+def test_webhook_rotation_revokes_old_secret_and_reports_fresh_acceptance(
+    client: TestClient, db: Session
+) -> None:
+    admin = make_user(db, "hook-admin@example.com")
+    organization = make_organization(db, "Hook rotation", "hook-rotation")
+    make_membership(db, admin, organization, MembershipRole.admin)
+    csrf = _csrf(login(client, admin.email, PASSWORD))
+    path = f"/api/v1/organizations/{organization.id}/integrations/webhook-keys"
+    assert client.get(path).json() is None
+    response = client.post(path, headers=csrf)
+    assert response.status_code == 201
+    assert response.headers["Cache-Control"] == "no-store"
+    created = response.json()
+    key_id = uuid.UUID(created["id"])
+    body = b"{}"
+    old_headers = _signed(key_id, created["secret"], body, "rotation-before")
+    callback = "/api/v1/hooks/follow-ups"
+    assert client.post(callback, content=body, headers=old_headers).status_code == 200
+    assert client.get(path).json()["last_accepted_at"]
+    rotated = client.post(f"{path}/rotate", headers=csrf)
+    assert rotated.status_code == 200, rotated.text
+    assert rotated.headers["Cache-Control"] == "no-store"
+    assert rotated.json()["id"] == created["id"]
+    status = client.get(path).json()
+    assert "secret" not in status
+    assert status["rotated_at"]
+    assert status["last_accepted_at"] is None
+    assert client.post(callback, content=body, headers=old_headers).status_code == 401
+    new_headers = _signed(key_id, rotated.json()["secret"], body, "rotation-after")
+    assert client.post(callback, content=body, headers=new_headers).status_code == 200
+    assert client.get(path).json()["last_accepted_at"]
+    assert client.post(f"{path}/revoke", headers=csrf).status_code == 204
+    assert client.get(path).json()["revoked_at"]
+    assert client.post(callback, content=body, headers=new_headers).status_code == 401
+    reconnected = client.post(f"{path}/rotate", headers=csrf)
+    assert reconnected.status_code == 200
+    assert client.get(path).json()["revoked_at"] is None
+    assert client.get(path).json()["last_accepted_at"] is None
+    assert client.post(callback, content=body, headers=new_headers).status_code == 401
 
 
 def test_webhook_rate_limit_and_payload_cap(

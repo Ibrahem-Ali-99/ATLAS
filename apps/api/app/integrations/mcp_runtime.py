@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import subprocess
 import sys
 import uuid
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Literal
 
 import structlog
+from cryptography.fernet import Fernet
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
@@ -109,20 +111,35 @@ def virtualenv_root(executable: str) -> str | None:
 
 
 def mcp_process_env(*, organization_id: str | None = None) -> dict[str, str]:
-    """Environment for an MCP child. The chat key is not included."""
+    """Pass resolved retrieval settings and process-local keys to the tool child."""
 
     settings = get_settings()
+    embedding_settings = {
+        "embedding_provider": _configured("ATLAS_EMBEDDING_PROVIDER", settings.embedding_provider),
+        "embedding_api_key": _configured("ATLAS_EMBEDDING_API_KEY", settings.embedding_api_key),
+        "embedding_base_url": _configured("ATLAS_EMBEDDING_BASE_URL", settings.embedding_base_url),
+        "embedding_model": _configured("ATLAS_EMBEDDING_MODEL", settings.embedding_model),
+        "embedding_dimensions": int(
+            _configured("ATLAS_EMBEDDING_DIMENSIONS", str(settings.embedding_dimensions))
+        ),
+    }
+    settings = settings.model_copy(update=embedding_settings)
     if organization_id is not None:
         db = SessionLocal()
         try:
-            settings = resolve_settings(db, uuid.UUID(organization_id), "embedding")
+            settings = resolve_settings(
+                db, uuid.UUID(organization_id), "embedding", base_settings=settings
+            )
         finally:
             db.close()
     env = _process_env()
+
     env.update(
         {
             "ATLAS_DATABASE_URL": _configured("ATLAS_DATABASE_URL", settings.database_url),
-            "ATLAS_SECRET_KEY": _configured("ATLAS_SECRET_KEY", settings.secret_key),
+            "ATLAS_SECRET_KEY": secrets.token_urlsafe(48),
+            "ATLAS_CREDENTIAL_ENCRYPTION_KEYS": f"mcp={Fernet.generate_key().decode()}",
+            "ATLAS_MCP_ISOLATED_SETTINGS": "1",
             "ATLAS_ENVIRONMENT": _configured("ATLAS_ENVIRONMENT", settings.environment),
             "ATLAS_COOKIE_SECURE": _configured(
                 "ATLAS_COOKIE_SECURE", "true" if settings.cookie_secure else "false"
@@ -132,25 +149,17 @@ def mcp_process_env(*, organization_id: str | None = None) -> dict[str, str]:
                 "ATLAS_EMAIL_LIVE_ENABLED", "true" if settings.email_live_enabled else "false"
             ),
             "ATLAS_SMTP_HOST": _configured("ATLAS_SMTP_HOST", settings.smtp_host),
-            "ATLAS_EMBEDDING_PROVIDER": _configured(
-                "ATLAS_EMBEDDING_PROVIDER", settings.embedding_provider
-            ),
+            "ATLAS_EMBEDDING_PROVIDER": settings.embedding_provider,
             "ATLAS_LLM_PROVIDER": _configured("ATLAS_LLM_PROVIDER", settings.llm_provider),
             "ATLAS_LLM_BASE_URL": _configured("ATLAS_LLM_BASE_URL", settings.llm_base_url),
             "ATLAS_LLM_MODEL": _configured("ATLAS_LLM_MODEL", settings.llm_model),
             "ATLAS_PUBLIC_DEMO": _configured(
                 "ATLAS_PUBLIC_DEMO", "true" if settings.public_demo else "false"
             ),
-            "ATLAS_EMBEDDING_API_KEY": _configured(
-                "ATLAS_EMBEDDING_API_KEY", settings.embedding_api_key
-            ),
-            "ATLAS_EMBEDDING_BASE_URL": _configured(
-                "ATLAS_EMBEDDING_BASE_URL", settings.embedding_base_url
-            ),
-            "ATLAS_EMBEDDING_MODEL": _configured("ATLAS_EMBEDDING_MODEL", settings.embedding_model),
-            "ATLAS_EMBEDDING_DIMENSIONS": _configured(
-                "ATLAS_EMBEDDING_DIMENSIONS", str(settings.embedding_dimensions)
-            ),
+            "ATLAS_EMBEDDING_API_KEY": settings.embedding_api_key,
+            "ATLAS_EMBEDDING_BASE_URL": settings.embedding_base_url,
+            "ATLAS_EMBEDDING_MODEL": settings.embedding_model,
+            "ATLAS_EMBEDDING_DIMENSIONS": str(settings.embedding_dimensions),
             "ATLAS_MAX_COSINE_DISTANCE": _configured(
                 "ATLAS_MAX_COSINE_DISTANCE", str(settings.max_cosine_distance)
             ),

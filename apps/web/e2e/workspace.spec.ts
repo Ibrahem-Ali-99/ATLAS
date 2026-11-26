@@ -106,22 +106,27 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await shot(page, "02-crm.png");
 
   await page.getByRole("link", { name: "Knowledge" }).click();
+  await page.getByRole("button", { name: "Upload document", exact: true }).click();
   await page.locator('input[type="file"]').setInputFiles({
     name: `${documentTitle}.txt`,
     mimeType: "text/plain",
     buffer: Buffer.from(`Harbor warehousing includes cold storage and bonded-yard-${stamp}.`),
   });
+  await page.getByRole("button", { name: "Upload and index" }).click();
   const documentRow = page.getByRole("row", { name: documentTitle });
   await expect(documentRow).toBeVisible();
   await expect(documentRow.getByRole("cell", { name: "ready" })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "Semantic search" }).click();
   await page.getByLabel("Search documents").fill(`bonded-yard-${stamp}`);
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByText(`Harbor warehousing includes cold storage and bonded-yard-${stamp}.`).first()).toBeVisible();
+  await page.getByRole("button", { name: "Document library" }).click();
   const reindexed = page.waitForResponse(
     (response) => response.request().method() === "POST" && response.url().includes("/reindex") && response.ok(),
   );
   await documentRow.getByRole("button", { name: "Reindex" }).click();
-  await reindexed;
+  const documentUrl = (await reindexed).url().replace(/\/reindex$/, "");
+  await expect.poll(async () => (await (await page.request.get(documentUrl)).json()).status).toBe("ready");
   await expect(documentRow.getByRole("cell", { name: "ready" })).toBeVisible({ timeout: 30_000 });
   await shot(page, "03-knowledge.png");
 
@@ -129,9 +134,9 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.getByPlaceholder("Ask about records, documents or your organization…").fill(`bonded-yard-${stamp}`);
   await page.getByRole("button", { name: "Send" }).click();
-  const answer = page.getByRole("article").filter({ hasText: "Grounded answer from the supplied company records." });
-  await expect(answer.getByText("Grounded answer from the supplied company records.")).toBeVisible();
-  await expect(answer.getByText(documentTitle)).toHaveCount(0);
+  const answer = page.getByRole("article").filter({ hasText: documentTitle });
+  await expect(answer.getByText(`Harbor warehousing includes cold storage and bonded-yard-${stamp}.`)).toBeVisible();
+  await expect(answer.getByText(documentTitle, { exact: true })).toBeVisible();
   await shot(page, "04-assistant.png");
 
   await page.getByPlaceholder("Ask about records, documents or your organization…").fill("What can you help me with?");
@@ -150,10 +155,10 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await page.getByPlaceholder("Ask about records, documents or your organization…").fill("What does the document you mentioned say?");
   await page.getByRole("button", { name: "Send" }).click();
   const answers = page.getByRole("article").filter({
-    hasText: "Grounded answer from the supplied company records.",
+    hasText: documentTitle,
   });
   await expect(answers).toHaveCount(2);
-  await expect(answers.nth(1).getByText(documentTitle)).toHaveCount(0);
+  await expect(answers.nth(1).getByText(documentTitle, { exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "CRM", exact: true }).click();
   await page.getByRole("tab", { name: "Inquiries" }).click();
@@ -251,8 +256,9 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
   await expect(page.getByLabel("Notes")).toHaveValue("Rates for bonded storage");
   await shot(page, "06-crm-lead.png");
 
-  await page.getByRole("link", { name: "Automations" }).click();
-  await expect(page.getByRole("heading", { name: "Automations" })).toBeVisible();
+  await page.getByRole("link", { name: "Workflows" }).click();
+  await expect(page.getByRole("heading", { name: "Workflows" })).toBeVisible();
+  await page.getByText("Built-in automation activity", { exact: true }).click();
   await expect(page.getByText("sandbox", { exact: false }).first()).toBeVisible();
   await shot(page, "07-workflows.png");
   await page.getByRole("link", { name: "Analytics" }).click();
@@ -287,7 +293,7 @@ test("workspace flow uses the browser and deterministic providers", async ({ pag
 
   await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-  await expect(page.getByLabel("Name")).toHaveValue("Avery Admin");
+  await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue("Avery Admin");
   await shot(page, "10-settings.png");
 
   await page.getByRole("button", { name: /Avery Admin/ }).click();
@@ -314,34 +320,37 @@ test("narrow viewport opens every page without a missing chunk", async ({ page }
   await shot(page, "12-overview-mobile.png");
   const pages: [string, string][] = [
     ["CRM", "/crm"],
+    ["Inbox", "/inbox"],
+    ["Campaigns", "/campaigns"],
     ["Knowledge", "/knowledge"],
     ["AI Assistant", "/assistant"],
     ["Agent Runs", "/agent-runs"],
     ["Approvals", "/approvals"],
-    ["Automations", "/workflows"],
+    ["Workflows", "/workflows"],
     ["Analytics", "/analytics"],
     ["Monitoring", "/monitoring"],
+    ["Integrations", "/integrations"],
+    ["Setup", "/setup"],
     ["Settings", "/settings"],
   ];
   for (const [name, href] of pages) {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("link", { name, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`${href}$`));
-    await expect(page.locator("header").getByText(name, { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("This page failed to render")).toHaveCount(0);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(overflow).toBeLessThanOrEqual(1);
   }
-  await shot(page, "13-approvals-mobile.png");
   for (const size of [
     { width: 1920, height: 1080 },
     { width: 768, height: 1024 },
   ]) {
     await page.setViewportSize(size);
     await page.goto("/overview");
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(page.getByTestId("overview-workspace")).toBeVisible();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
@@ -351,6 +360,7 @@ test("narrow viewport opens every page without a missing chunk", async ({ page }
   await page.goto("/approvals");
   await page.reload();
   await expect(page.getByLabel("Filter approvals")).toBeVisible();
+  await shot(page, "13-approvals-mobile.png");
   expect(failedChunks).toEqual([]);
   expect(pageErrors).toEqual([]);
 });

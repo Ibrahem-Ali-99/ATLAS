@@ -18,6 +18,7 @@ from n8n_contract import (
     ContractError,
     assert_imported,
     classify,
+    is_published,
     load_definitions,
 )
 
@@ -27,6 +28,7 @@ DEFAULT_ENV = ROOT / "infrastructure" / "staging" / ".env"
 FORBIDDEN_PROJECTS = {"atlas", "infrastructure", "titan", "legalstats"}
 SECRET_KEYS = {
     "STAGING_SECRET_KEY",
+    "STAGING_CREDENTIAL_ENCRYPTION_KEYS",
     "STAGING_POSTGRES_PASSWORD",
     "STAGING_N8N_ENCRYPTION_KEY",
     "STAGING_HOOK_SECRET",
@@ -194,9 +196,8 @@ def deactivate(
             "node",
             "n8n",
             "n8n",
-            "update:workflow",
+            "unpublish:workflow",
             f"--id={workflow_id}",
-            "--active=false",
         ],
         env,
     )
@@ -227,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
             workflow_id = workflow.get("id")
             if (
                 name in imported_names
-                and workflow.get("active") is True
+                and is_published(workflow)
                 and isinstance(workflow_id, str)
             ):
                 deactivate(args.project, args.env_file, env, workflow_id)

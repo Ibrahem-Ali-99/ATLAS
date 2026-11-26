@@ -69,6 +69,14 @@ def validate_definition(workflow: dict[str, object]) -> None:
             raise ContractError("lead_webhook_path")
         if not any("callback_url" in item for item in strings):
             raise ContractError("lead_callback")
+        if not all(
+            required in joined for required in (
+                "$env.ATLAS_LEAD_CALLBACK_ORIGINS",
+                "'/api/v1/hooks/lead-processed'",
+                "destinations.includes(source.callback_url)",
+            )
+        ):
+            raise ContractError("lead_callback_origin")
     elif name == "ATLAS Follow-up":
         for callback in FOLLOW_UP_CALLBACKS:
             if callback not in joined:
@@ -90,6 +98,7 @@ def inactive_copy(workflow: dict[str, object]) -> dict[str, object]:
     copied = json.loads(json.dumps(workflow))
     copied["id"] = STABLE_IDS[name]
     copied["active"] = False
+    copied.pop("activeVersionId", None)
     return copied
 
 
@@ -113,6 +122,10 @@ def classify(
     return missing, already
 
 
+def is_published(workflow: dict[str, object]) -> bool:
+    return workflow.get("active") is True or bool(workflow.get("activeVersionId"))
+
+
 def assert_imported(exported: list[dict[str, object]]) -> list[str]:
     names = [workflow.get("name") for workflow in exported]
     active: list[str] = []
@@ -121,6 +134,6 @@ def assert_imported(exported: list[dict[str, object]]) -> list[str]:
             raise ContractError(f"count:{name}")
         workflow = next(item for item in exported if item.get("name") == name)
         validate_definition(workflow)
-        if workflow.get("active") is True:
+        if is_published(workflow):
             active.append(name)
     return active

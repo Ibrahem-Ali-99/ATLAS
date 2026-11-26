@@ -51,8 +51,15 @@ def get_analytics(
 ) -> dict[str, Any]:
     if period not in {"7d", "30d", "90d", "custom"}:
         raise AppError(422, "invalid_analytics_period", "Unsupported analytics period")
-    if period == "custom" and (start_date is None or end_date is None or start_date > end_date):
-        raise AppError(422, "invalid_analytics_dates", "Custom analytics dates are invalid")
+    if period == "custom":
+        if start_date is None or end_date is None or not 0 <= (end_date - start_date).days <= 365:
+            raise AppError(
+                422, "invalid_analytics_dates", "Choose an ordered date range of up to 366 days"
+            )
+        days = (end_date - start_date).days + 1
+    else:
+        days = int(period[:-1])
+        start_date = end_date = None
     if channel is not None and channel not in {"email", "whatsapp", "webchat", "website", "sms"}:
         raise AppError(422, "invalid_analytics_channel", "Unsupported conversation channel")
     if (
@@ -66,7 +73,6 @@ def get_analytics(
         is None
     ):
         raise AppError(404, "owner_not_found", "Opportunity owner is not in this organization")
-    days = 30 if period == "custom" else int(period[:-1])
     return snapshot(
         db,
         member.organization.id,

@@ -1,13 +1,13 @@
 import { execFileSync, type ChildProcess, spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const apiRoot = path.resolve(process.cwd(), "../api");
 const repoRoot = path.resolve(process.cwd(), "../..");
 const apiPort = Number(process.env.ATLAS_E2E_API_PORT ?? "8011");
-const pidFile = path.join(repoRoot, "var", `e2e-api-${apiPort}.pid`);
-const mailpitFile = path.join(repoRoot, "var", "e2e-mailpit.name");
-const mailpitHttpFile = path.join(repoRoot, "var", "e2e-mailpit.http-port");
+const mailpitFile = path.join(repoRoot, "var", `e2e-mailpit-${apiPort}.name`);
+const mailpitHttpFile = path.join(repoRoot, "var", `e2e-mailpit-${apiPort}.http-port`);
 const logFile = path.join(repoRoot, "var", `e2e-api-${apiPort}.log`);
 const mailpitName = `atlas-e2e-mailpit-${process.pid}`;
 let mailpitPort = 0;
@@ -56,6 +56,9 @@ function spawnApi(): Promise<ChildProcess> {
         ATLAS_E2E_WEB_PORT: process.env.ATLAS_E2E_WEB_PORT ?? "3011",
         ATLAS_E2E_PROVIDER_TRANSPORT: "1",
         ATLAS_E2E_RESEND_TRANSPORT: "1",
+        ATLAS_BILLING_PROVIDER: "sandbox",
+        ATLAS_EMAIL_LIVE_ENABLED: "false",
+        ATLAS_COOKIE_SECURE: "false",
         ATLAS_ENVIRONMENT: "development",
         ATLAS_SMTP_HOST: "127.0.0.1",
         ATLAS_SMTP_PORT: String(mailpitPort),
@@ -67,9 +70,7 @@ function spawnApi(): Promise<ChildProcess> {
     child.stderr?.on("data", (chunk: Buffer) => appendFileSync(logFile, redacted(chunk.toString())));
     child.once("error", reject);
     child.once("spawn", () => {
-      if (process.platform !== "win32") {
-        child.unref();
-      }
+      child.unref();
       resolve(child);
     });
   });
@@ -109,21 +110,14 @@ function projectPython(): string {
     : "python";
 }
 
-function stopPreviousApi(): void {
-  try {
-    const previousPid = Number(readFileSync(pidFile, "utf8"));
-    if (Number.isFinite(previousPid) && previousPid > 0) {
-      execFileSync("taskkill", ["/PID", String(previousPid), "/T", "/F"], { stdio: "ignore" });
-    }
-  } catch {
-    // The previous disposable API was already stopped.
-  }
-}
-
-export default async function globalSetup(): Promise<void> {
-  stopPreviousApi();
+export default async function globalSetup(): Promise<() => void> {
   mkdirSync(path.dirname(logFile), { recursive: true });
   writeFileSync(logFile, "e2e API startup\n", "utf8");
+  const databaseName = `atlas_e2e_${randomUUID().replaceAll("-", "")}`;
+  process.env.ATLAS_E2E_DATABASE_NAME = databaseName;
+  process.env.ATLAS_STORAGE_DIR = path.join(repoRoot, "var", databaseName, "uploads");
+  process.env.ATLAS_MODEL_DIR = path.join(repoRoot, "var", databaseName, "models");
+  const pidFile = path.join(repoRoot, "var", `${databaseName}.pid`);
   const e2eEnvironment = {
     ...process.env,
     // Docker's published port is a host IPv4 endpoint on Windows. Avoid the
@@ -179,6 +173,12 @@ export default async function globalSetup(): Promise<void> {
     }
   } catch (error) {
     api.kill();
+    api.stdout?.destroy();
+    api.stderr?.destroy();
     throw error;
   }
+  return () => {
+    api.stdout?.destroy();
+    api.stderr?.destroy();
+  };
 }

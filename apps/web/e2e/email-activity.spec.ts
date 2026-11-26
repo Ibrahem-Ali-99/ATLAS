@@ -1,11 +1,15 @@
 import { expect, test } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { signInAsSeedAdmin } from "./auth";
+import { sandboxEmailSubjects } from "./sandbox-mail";
 
 test("approved email is delivered once and visible in Email Activity", async ({ page, request }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await signInAsSeedAdmin(page);
+  const expectedSubject = "Bonded storage inquiry";
+  const recipient = "mina.patel@harbor.example";
+  const matchingMessages = async () => (await sandboxEmailSubjects(request, recipient))
+    .filter((subject) => subject === expectedSubject).length;
+  const before = await matchingMessages();
 
   const stamp = Date.now();
   const subject = `Email acceptance ${stamp}`;
@@ -48,6 +52,8 @@ test("approved email is delivered once and visible in Email Activity", async ({ 
   await approvedResponse;
   const approvalRow = page.locator(`[data-approval-id="${responseApproval?.id}"]`);
   await approvalRow.click();
+  const preview = page.getByRole("region", { name: "Approved message preview" });
+  await expect(preview.getByText(recipient, { exact: true })).toBeVisible();
   const execution = page.waitForResponse(
     (response) => response.request().method() === "POST" && response.url().includes("/execute") && response.ok(),
   );
@@ -57,33 +63,19 @@ test("approved email is delivered once and visible in Email Activity", async ({ 
   expect(executionBody.status).toBe("executing");
 
   await page.getByRole("link", { name: "Workflows" }).click();
+  await page.getByText("Built-in automation activity", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Email activity" })).toBeVisible();
-  await expect.poll(
-    async () => {
-      if (await page.getByText("Accepted by SMTP").count() > 0) return true;
-      await page.reload();
-      return (await page.getByText("Accepted by SMTP").count()) > 0;
-    },
-    { timeout: 30_000, intervals: [250, 500, 1_000, 2_000] },
-  ).toBe(true);
+  const delivery = page.getByRole("region", { name: "Email activity" }).locator(`[data-approval-id="${responseApproval?.id}"]`);
+  const accepted = delivery.getByText("Accepted by SMTP", { exact: true });
+  await expect(accepted).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("Mailpit sandbox")).toBeVisible();
-  await page.screenshot({ path: path.resolve(process.cwd(), "../../var/email-activity-desktop.png"), fullPage: true });
 
-  const httpPort = readFileSync(path.resolve(process.cwd(), "../../var/e2e-mailpit.http-port"), "utf8").trim();
-  let messageBody: { messages: { To: { Address: string }[]; Subject: string }[] } = { messages: [] };
   await expect.poll(
-    async () => {
-      const messages = await request.get(`http://127.0.0.1:${httpPort}/api/v1/messages`);
-      expect(messages.ok()).toBeTruthy();
-      messageBody = await messages.json() as typeof messageBody;
-      return messageBody.messages.length;
-    },
+    matchingMessages,
     { timeout: 10_000, intervals: [250, 500, 1_000] },
-  ).toBe(1);
-  expect(messageBody.messages[0]?.Subject).toBe("Bonded storage inquiry");
+  ).toBe(before + 1);
 
   await page.reload();
-  await expect(page.getByText("Accepted by SMTP")).toBeVisible();
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: path.resolve(process.cwd(), "../../var/email-activity-mobile.png"), fullPage: true });
+  await page.getByText("Built-in automation activity", { exact: true }).click();
+  await expect(accepted).toBeVisible();
 });

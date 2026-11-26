@@ -2,12 +2,15 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { DataScopeControl } from "@/components/data-scope";
+import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getDiagnosticRun, getDiagnostics, listEvaluations, startEvaluation, type DiagnosticRun } from "@/lib/intelligence";
 import type { DataScope } from "@/lib/provenance";
@@ -16,10 +19,18 @@ import { useWorkspace } from "@/lib/use-workspace";
 export function MonitoringScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
+  return organizationId ? (
+    <MonitoringWorkspace key={organizationId} organizationId={organizationId} isAdmin={workspace.role === "admin"} />
+  ) : <Skeleton className="h-40 w-full" />;
+}
+
+function MonitoringWorkspace({ organizationId, isAdmin }: { organizationId: string; isAdmin: boolean }) {
+  const router = useRouter();
   const queryClient = useQueryClient();
-  const requestedRun = useSearchParams().get("run");
-  const [runId, setRunId] = useState<string | null>(requestedRun);
+  const runId = useSearchParams().get("run");
   const [scope, setScope] = useState<DataScope>("operational");
+  const [checksOpen, setChecksOpen] = useState(false);
+  const [eventSearch, setEventSearch] = useState("");
   const diagnostics = useQuery({
     queryKey: ["diagnostics", organizationId, scope],
     queryFn: () => getDiagnostics(organizationId ?? "", scope),
@@ -28,7 +39,7 @@ export function MonitoringScreen() {
   const evaluations = useQuery({
     queryKey: ["evaluations", organizationId],
     queryFn: () => listEvaluations(organizationId ?? ""),
-    enabled: Boolean(organizationId),
+    enabled: Boolean(organizationId && checksOpen),
   });
   const detail = useQuery({
     queryKey: ["diagnostic-run", organizationId, runId],
@@ -43,27 +54,26 @@ export function MonitoringScreen() {
       }, 1500);
     },
   });
-  if (!organizationId || diagnostics.isPending || evaluations.isPending) {
+  if (!organizationId || diagnostics.isPending) {
     return <Skeleton className="h-40 w-full" />;
   }
   if (diagnostics.isError) {
     return <RequestError error={diagnostics.error} />;
   }
-  if (evaluations.isError) {
-    return <RequestError error={evaluations.error} />;
-  }
   const data = diagnostics.data;
-  const latest = evaluations.data.items[0];
+  const latest = evaluations.data?.items[0];
+  const needle = eventSearch.trim().toLowerCase();
+  const failedRuns = data.failed_runs.filter((run) => [run.id, run.error_code, run.hint].some(
+    (value) => value?.toLowerCase().includes(needle),
+  ));
+  const setRunId = (id: string | null) => router.replace(
+    id ? `/monitoring?run=${encodeURIComponent(id)}` : "/monitoring", { scroll: false },
+  );
   return (
-    <div className="w-full space-y-6">
-      <div>
-        <h1 className="text-[31px] leading-none text-foreground">Monitoring</h1>
-        <DataScopeControl value={scope} onChange={setScope} />
-        <p className="mt-3 max-w-3xl text-sm text-muted-foreground">{data.hint_notice}</p>
-        <p className="mt-2 max-w-3xl text-xs leading-5 text-subtle">
-          Failed runs are historical records. Needs attention and integration failures are outcomes that still need a look.
-        </p>
-      </div>
+    <div className="w-full min-w-0 space-y-6">
+      <PageHeader title="Monitoring" eyebrow="Workspace operations">
+        Review service health, integration failures, and actions that need attention.
+      </PageHeader>
       <div className="grid gap-3 md:grid-cols-3">
         <Stat label="Stored failures" value={String(data.failed_runs.length)} detail="Selecting one opens its recorded trace. It does not mean the failure is still running." />
         <Stat label="Uncertain attempts" value={String(data.retries)} detail="Retries and outcomes that could not be confirmed." />
@@ -74,18 +84,24 @@ export function MonitoringScreen() {
         />
       </div>
       <section className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-2 rounded-[10px] bg-muted p-4">
-          <h2 className="text-base text-foreground">Worker health</h2>
+        <div className="min-w-0 space-y-3 rounded-xl border border-border bg-card p-5">
+          <h2 className="font-semibold">Background workers</h2>
           {data.workers.length === 0 ? <p className="text-sm text-muted-foreground">No worker heartbeat has been recorded.</p> : null}
           {data.workers.map((worker) => (
-            <div key={worker.id} className="flex items-center justify-between gap-3 text-sm">
-              <span>{worker.kind}</span>
-              <span className={worker.status === "stalled" || worker.status === "error" ? "text-destructive" : "text-success"}>{worker.status}</span>
+            <div key={worker.id} className="flex flex-wrap items-start justify-between gap-2 border-t border-border pt-3 text-sm">
+              <div className="min-w-0">
+                <p className="font-medium capitalize">{worker.kind.replaceAll("_", " ")}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Last heartbeat <time dateTime={worker.heartbeat_at}>{new Date(worker.heartbeat_at).toLocaleString()}</time>
+                </p>
+                {worker.last_error_code ? <p className="mt-1 break-words text-xs text-destructive">{worker.last_error_code}</p> : null}
+              </div>
+              <Badge variant="secondary" className={`capitalize ${worker.status === "stalled" || worker.status === "error" ? "text-destructive" : ""}`}>{worker.status}</Badge>
             </div>
           ))}
         </div>
-        <div className="space-y-2 rounded-[10px] bg-muted p-4">
-          <h2 className="text-base text-foreground">Knowledge jobs</h2>
+        <div className="min-w-0 space-y-3 rounded-xl border border-border bg-card p-5">
+          <h2 className="font-semibold">Knowledge jobs</h2>
           {data.ingestion_jobs.length === 0 ? <p className="text-sm text-muted-foreground">No ingestion jobs are recorded.</p> : null}
           {data.ingestion_jobs.slice(0, 8).map((job) => (
             <div key={job.id} className="flex items-center justify-between gap-3 text-sm">
@@ -96,13 +112,15 @@ export function MonitoringScreen() {
         </div>
       </section>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
-        <section className="space-y-3 rounded-[10px] bg-muted p-4">
-          <h2 className="text-base text-foreground">Historical failures</h2>
-          {data.failed_runs.length === 0 ? <p className="text-sm text-muted-foreground">No failed agent runs are stored.</p> : null}
-          {data.failed_runs.map((run) => (
+        <section className="min-w-0 space-y-3 rounded-xl border border-border bg-card p-5">
+          <h2 className="font-semibold">Historical failures</h2>
+          {data.failed_runs.length ? <Input aria-label="Search failed runs" placeholder="Search failed runs" value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} /> : null}
+          {failedRuns.length === 0 ? <p className="text-sm text-muted-foreground">{needle ? "No failed runs match your search." : "No failed agent runs are stored."}</p> : null}
+          {failedRuns.map((run) => (
             <button
               key={run.id}
               type="button"
+              aria-current={run.id === runId || undefined}
               className={`block w-full rounded-[10px] px-3 py-3 text-left text-sm ${run.id === runId ? "bg-accent" : "bg-secondary"}`}
               onClick={() => setRunId(run.id)}
             >
@@ -111,8 +129,11 @@ export function MonitoringScreen() {
             </button>
           ))}
         </section>
-        <section className="space-y-3 rounded-[10px] bg-muted p-4">
-          <h2 className="text-base text-foreground">Trace</h2>
+        <section className="min-w-0 space-y-3 rounded-xl border border-border bg-card p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-semibold">Trace</h2>
+            {runId ? <Button type="button" variant="outline" size="sm" onClick={() => setRunId(null)}>Close trace</Button> : null}
+          </div>
           {!runId ? <p className="text-sm text-muted-foreground">Select a failed run to see its inquiry, steps, and recorded operations.</p> : null}
           {detail.isPending && runId ? <Skeleton className="h-24 w-full" /> : null}
           {detail.isError ? <RequestError error={detail.error} /> : null}
@@ -121,7 +142,7 @@ export function MonitoringScreen() {
       </div>
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-2 rounded-[10px] bg-muted p-4">
-          <h2 className="text-base text-foreground">Needs a look</h2>
+          <h2 className="text-base text-foreground">Needs attention</h2>
           {data.needs_attention.length === 0 ? <p className="text-sm text-muted-foreground">No approval is waiting because its outcome was uncertain.</p> : null}
           {data.needs_attention.map((item) => (
             <div key={item.id} className="text-sm leading-6 text-muted-foreground">
@@ -170,20 +191,25 @@ export function MonitoringScreen() {
           </p>
         ))}
       </section>
-      <section className="space-y-3 rounded-[10px] bg-muted p-4">
+      <details className="rounded-xl border border-border bg-card p-4" onToggle={(event) => setChecksOpen(event.currentTarget.open)}>
+        <summary className="cursor-pointer text-sm font-medium">Advanced diagnostics</summary>
+        <DataScopeControl value={scope} onChange={setScope} advanced />
+        <div className="mt-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base text-foreground">Evaluation</h2>
-          {workspace.role === "admin" ? (
+          <h2 className="text-base text-foreground">Service checks</h2>
+          {isAdmin ? (
             <Button type="button" disabled={evaluate.isPending} onClick={() => evaluate.mutate()}>
               {evaluate.isPending ? "Starting" : "Run checks"}
             </Button>
           ) : (
-            <p className="text-sm text-muted-foreground">An admin starts a stored evaluation.</p>
+            <p className="text-sm text-muted-foreground">An administrator can run these checks.</p>
           )}
         </div>
-        <p className="text-sm leading-6 text-muted-foreground">{evaluations.data.notice}</p>
+        {evaluations.data ? <p className="text-sm leading-6 text-muted-foreground">{evaluations.data.notice}</p> : null}
         {evaluate.isError ? <RequestError error={evaluate.error} /> : null}
-        {latest ? (
+        {evaluations.isPending ? <Skeleton className="h-16 w-full" /> : evaluations.isError ? (
+          <RequestError error={evaluations.error} />
+        ) : latest ? (
           <div className="rounded-[10px] bg-secondary p-4 text-sm">
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium">{latest.dataset_version}</span>
@@ -197,7 +223,8 @@ export function MonitoringScreen() {
         ) : (
           <p className="text-sm text-muted-foreground">No evaluation has been stored for this organization.</p>
         )}
-      </section>
+        </div>
+      </details>
     </div>
   );
 }

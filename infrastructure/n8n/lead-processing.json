@@ -20,7 +20,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const input = $input.first().json;\nconst source = input.body_text ? input : (input.body && input.body.body_text ? input.body : input);\nreturn [{ json: source }];"
+          "jsCode": "const input = $input.first().json;\nconst source = input.body_text ? input : input.body;\nconst origins = ($env.ATLAS_LEAD_CALLBACK_ORIGINS || $env.ATLAS_PUBLIC_API_URL || '').split(',').map(origin => origin.trim().replace(/\\/$/, '')).filter(Boolean);\nconst destinations = origins.map(origin => origin + '/api/v1/hooks/lead-processed');\nif (!source || typeof source.body_text !== 'string' || !source.headers || !destinations.includes(source.callback_url)) {\n  throw new Error('ATLAS callback configuration or payload is invalid');\n}\nreturn [{ json: { callback_url: source.callback_url, body_text: source.body_text, headers: source.headers } }];"
         },
         "id": "c0a1e5a0-6b1a-4a1a-9a11-0a1a1a1a1a12",
         "name": "Normalize",

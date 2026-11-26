@@ -2,12 +2,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.domains.audit.service import record_event
-from app.domains.automation.models import WorkflowRun, WorkflowStatus
+from app.domains.automation.models import WorkflowDefinition, WorkflowRun, WorkflowStatus
+from app.domains.billing import provider
 from app.domains.billing.models import (
     OrganizationSubscription,
     SubscriptionPlan,
@@ -50,10 +52,18 @@ PLAN_DEFINITIONS = {
 
 
 def ensure_plans(db: Session) -> None:
-    for code, definition in PLAN_DEFINITIONS.items():
-        if db.scalar(select(SubscriptionPlan).where(SubscriptionPlan.code == code)) is None:
-            db.add(SubscriptionPlan(code=code, name=definition["name"], entitlements=definition))
-    db.flush()
+    existing = set(db.scalars(select(SubscriptionPlan.code)))
+    missing = [
+        {"code": code, "name": definition["name"], "entitlements": definition}
+        for code, definition in PLAN_DEFINITIONS.items()
+        if code not in existing
+    ]
+    if missing:
+        db.execute(
+            insert(SubscriptionPlan)
+            .values(missing)
+            .on_conflict_do_nothing(index_elements=[SubscriptionPlan.code])
+        )
 
 
 def plan_for(db: Session, code: str) -> SubscriptionPlan:
@@ -68,15 +78,21 @@ def plan_for(db: Session, code: str) -> SubscriptionPlan:
     return row
 
 
-def get_subscription(db: Session, organization_id: uuid.UUID) -> OrganizationSubscription:
-    row = db.scalar(
-        select(OrganizationSubscription).where(
-            OrganizationSubscription.organization_id == organization_id
-        )
+def get_subscription(
+    db: Session, organization_id: uuid.UUID, *, lock: bool = False
+) -> OrganizationSubscription:
+    query = select(OrganizationSubscription).where(
+        OrganizationSubscription.organization_id == organization_id
     )
-    if row is None:
-        now = datetime.now(UTC)
-        row = OrganizationSubscription(
+    if lock:
+        query = query.with_for_update()
+    row = db.scalar(query)
+    if row is not None:
+        return row
+    now = datetime.now(UTC)
+    db.execute(
+        insert(OrganizationSubscription)
+        .values(
             organization_id=organization_id,
             plan_code="free",
             billing_interval="monthly",
@@ -85,9 +101,15 @@ def get_subscription(db: Session, organization_id: uuid.UUID) -> OrganizationSub
             current_period_start=now,
             current_period_end=now + timedelta(days=30),
         )
-        db.add(row)
-        db.flush()
-    return row
+        .on_conflict_do_nothing(index_elements=[OrganizationSubscription.organization_id])
+    )
+    return db.scalars(query).one()
+
+
+def entitlement_plan_code(row: OrganizationSubscription) -> str:
+    if row.status not in {SubscriptionStatus.active, SubscriptionStatus.trialing}:
+        return "free"
+    return row.plan_code
 
 
 def usage(db: Session, organization_id: uuid.UUID) -> dict[str, int]:
@@ -114,7 +136,9 @@ def usage(db: Session, organization_id: uuid.UUID) -> dict[str, int]:
         db.scalar(
             select(func.count(OperationTrace.id)).where(
                 OperationTrace.organization_id == organization_id,
-                OperationTrace.operation.in_(["agent_run", "assistant"]),
+                OperationTrace.operation.in_(
+                    ["agent_run", "assistant", "metered_assistant_request"]
+                ),
                 OperationTrace.started_at >= period_start,
             )
         )
@@ -140,12 +164,8 @@ def usage(db: Session, organization_id: uuid.UUID) -> dict[str, int]:
 
 
 def enforce_limit(db: Session, organization_id: uuid.UUID, key: str, additional: int = 1) -> None:
-    subscription = db.scalar(
-        select(OrganizationSubscription)
-        .where(OrganizationSubscription.organization_id == organization_id)
-        .with_for_update()
-    ) or get_subscription(db, organization_id)
-    plan = plan_for(db, subscription.plan_code)
+    subscription = get_subscription(db, organization_id, lock=True)
+    plan = plan_for(db, entitlement_plan_code(subscription))
     current = usage(db, organization_id).get(key, 0)
     if current + additional > int(plan.entitlements.get(key, 0)):
         raise AppError(
@@ -155,19 +175,62 @@ def enforce_limit(db: Session, organization_id: uuid.UUID, key: str, additional:
         )
 
 
+def enforce_workflow_definition_limit(db: Session, organization_id: uuid.UUID) -> None:
+    subscription = get_subscription(db, organization_id, lock=True)
+    plan = plan_for(db, entitlement_plan_code(subscription))
+    current = (
+        db.scalar(
+            select(func.count())
+            .select_from(WorkflowDefinition)
+            .where(
+                WorkflowDefinition.organization_id == organization_id,
+                WorkflowDefinition.active.is_(True),
+            )
+        )
+        or 0
+    )
+    if current >= int(plan.entitlements.get("active_workflows", 0)):
+        raise AppError(
+            402,
+            "entitlement_limit_reached",
+            "Your plan limit for active workflows has been reached",
+        )
+
+
+def meter_assistant_request(db: Session, organization_id: uuid.UUID) -> None:
+    enforce_limit(db, organization_id, "ai_requests")
+    now = datetime.now(UTC)
+    db.add(
+        OperationTrace(
+            organization_id=organization_id,
+            operation="metered_assistant_request",
+            status="accepted",
+            started_at=now,
+            finished_at=now,
+        )
+    )
+    db.commit()
+
+
 def change_subscription(
     db: Session, organization_id: uuid.UUID, actor_id: uuid.UUID, plan_code: str, interval: str
 ) -> OrganizationSubscription:
+    if get_settings().billing_provider != "sandbox":
+        raise AppError(
+            409, "provider_managed_subscription", "The payment provider manages this subscription"
+        )
     if interval not in {"monthly", "yearly"}:
         raise AppError(400, "invalid_billing_interval", "Choose monthly or yearly billing")
     plan_for(db, plan_code)
-    row = get_subscription(db, organization_id)
+    row = get_subscription(db, organization_id, lock=True)
+    if row.provider != "sandbox":
+        raise AppError(
+            409, "provider_managed_subscription", "The payment provider manages this subscription"
+        )
+    if row.plan_code == plan_code and row.billing_interval == interval:
+        db.commit()
+        return row
     row.plan_code, row.billing_interval, row.status = plan_code, interval, SubscriptionStatus.active
-    row.provider = get_settings().billing_provider
-    row.current_period_end = datetime.now(UTC) + (
-        timedelta(days=365) if interval == "yearly" else timedelta(days=30)
-    )
-    row.current_period_start = datetime.now(UTC)
     record_event(
         db,
         organization_id,
@@ -181,43 +244,108 @@ def change_subscription(
 
 
 def reconcile_provider_event(db: Session, payload: dict[str, object]) -> None:
-    """Apply only provider-sourced subscription state; client requests never call this."""
-    event_type = str(payload.get("type", ""))
+    event_type = payload.get("type")
+    if event_type not in (
+        "checkout.session.completed",
+        "checkout.session.async_payment_succeeded",
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    ):
+        return
     data = payload.get("data")
     obj = data.get("object") if isinstance(data, dict) else None
     if not isinstance(obj, dict):
         return
-    subscription_id = str(obj.get("id", ""))
-    customer_id = str(obj.get("customer", ""))
-    row = None
-    if subscription_id:
-        row = db.scalar(
-            select(OrganizationSubscription)
-            .where(OrganizationSubscription.provider_subscription_id == subscription_id)
-            .with_for_update()
-        )
-    if row is None and customer_id:
-        row = db.scalar(
-            select(OrganizationSubscription)
-            .where(OrganizationSubscription.provider_customer_id == customer_id)
-            .with_for_update()
-        )
+    from_checkout = str(event_type).startswith("checkout.")
+    if from_checkout and obj.get("payment_status") not in ("paid", "no_payment_required"):
+        return
+    subscription_id = obj.get("subscription" if from_checkout else "id")
+    customer_id = obj.get("customer")
+    if not isinstance(subscription_id, str) or not isinstance(customer_id, str):
+        return
+    row = db.scalar(
+        select(OrganizationSubscription)
+        .where(OrganizationSubscription.provider_customer_id == customer_id)
+        .with_for_update()
+    )
     if row is None:
         return
-    status = str(obj.get("status", ""))
-    if status in {item.value for item in SubscriptionStatus}:
-        row.status = SubscriptionStatus(status)
-    row.provider_subscription_id = subscription_id or row.provider_subscription_id
-    row.provider_customer_id = customer_id or row.provider_customer_id
-    period_start = obj.get("current_period_start")
-    period_end = obj.get("current_period_end")
-    if isinstance(period_start, int):
-        row.current_period_start = datetime.fromtimestamp(period_start, UTC)
-    if isinstance(period_end, int):
-        row.current_period_end = datetime.fromtimestamp(period_end, UTC)
-    if event_type == "invoice.payment_failed":
-        row.status = SubscriptionStatus.past_due
-    elif event_type == "invoice.payment_succeeded" and row.status == SubscriptionStatus.past_due:
-        row.status = SubscriptionStatus.active
-    elif event_type == "customer.subscription.deleted":
-        row.status = SubscriptionStatus.canceled
+    if from_checkout and obj.get("client_reference_id") != str(row.organization_id):
+        return
+    current = provider.retrieve_subscription(subscription_id)
+    if current.get("customer") != customer_id or current.get("livemode") is not False:
+        raise AppError(
+            409, "billing_subscription_mismatch", "Stripe subscription ownership differs"
+        )
+    metadata = current.get("metadata")
+    same_subscription = row.provider_subscription_id == subscription_id
+    if not same_subscription:
+        if not isinstance(metadata, dict) or metadata.get("atlas_organization") != str(
+            row.organization_id
+        ):
+            return
+        if row.provider_subscription_id and row.status not in {
+            SubscriptionStatus.canceled,
+            SubscriptionStatus.expired,
+        }:
+            return
+        if current.get("status") not in {"active", "trialing"}:
+            return
+
+    provider_status = str(current.get("status", ""))
+    status = {
+        "active": SubscriptionStatus.active,
+        "trialing": SubscriptionStatus.trialing,
+        "past_due": SubscriptionStatus.past_due,
+        "unpaid": SubscriptionStatus.past_due,
+        "paused": SubscriptionStatus.past_due,
+        "canceled": SubscriptionStatus.canceled,
+        "incomplete": SubscriptionStatus.expired,
+        "incomplete_expired": SubscriptionStatus.expired,
+    }.get(provider_status)
+    if status is None:
+        raise AppError(
+            502, "billing_status_unknown", "The payment provider returned an unknown status"
+        )
+    items = current.get("items")
+    lines = items.get("data") if isinstance(items, dict) else None
+    if not isinstance(lines, list) or len(lines) != 1 or not isinstance(lines[0], dict):
+        raise AppError(409, "billing_price_unavailable", "This subscription must have one plan")
+    item = lines[0]
+    price = item.get("price")
+    price_id = price.get("id") if isinstance(price, dict) else None
+    selections = [key for key, value in provider.price_map().items() if value == price_id]
+    if len(selections) != 1:
+        raise AppError(
+            409, "billing_price_unavailable", "The Stripe price is not mapped to one plan"
+        )
+    code, sep, interval = selections[0].partition(":")
+    if not sep or interval not in {"monthly", "yearly"}:
+        raise AppError(409, "billing_price_unavailable", "The Stripe billing interval is invalid")
+    plan_for(db, code)
+    period_start = item.get("current_period_start", current.get("current_period_start"))
+    period_end = item.get("current_period_end", current.get("current_period_end"))
+    if type(period_start) is not int or type(period_end) is not int or period_start >= period_end:
+        raise AppError(
+            409, "billing_period_unavailable", "The payment provider returned an invalid period"
+        )
+    changed = (row.plan_code, row.billing_interval, row.status, row.provider_subscription_id)
+    row.plan_code = code
+    row.billing_interval = interval
+    row.status = status
+    row.provider = "stripe"
+    row.provider_subscription_id = subscription_id
+    row.current_period_start = datetime.fromtimestamp(period_start, UTC)
+    row.current_period_end = datetime.fromtimestamp(period_end, UTC)
+    if changed != (code, interval, status, subscription_id):
+        record_event(
+            db,
+            row.organization_id,
+            "stripe_subscription_reconciled",
+            {
+                "plan": code,
+                "interval": interval,
+                "status": status.value,
+            },
+        )

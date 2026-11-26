@@ -1,41 +1,26 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
-import { signInAsSeedAdmin } from "./auth";
+import { openSampleWorkspace, prepareSampleWorkspace, sampleWorkspaceSlug } from "./sample-workspace";
 
-const slug = `sample-e2e-${process.pid}-${Date.now()}`;
+const slug = sampleWorkspaceSlug();
 const artifactDir = path.resolve(
   process.env.ATLAS_E2E_ARTIFACT_DIR ?? path.resolve(process.cwd(), "../../var/populated-workspace"),
 );
-const apiDir = path.resolve(process.cwd(), "../api");
-const python = path.join(apiDir, ".venv", "Scripts", "python.exe");
-
-function prepare(...args: string[]): string {
-  return execFileSync(
-    python,
-    ["-m", "app.scripts.prepare_populated_e2e", "--organization-slug", slug, ...args],
-    {
-      cwd: apiDir,
-      env: { ...process.env, ATLAS_E2E_PRODUCTION: "1" },
-      encoding: "utf8",
-    },
-  );
-}
 
 async function capture(page: import("@playwright/test").Page, name: string): Promise<void> {
   mkdirSync(artifactDir, { recursive: true });
   await page.screenshot({ path: path.join(artifactDir, name), fullPage: true });
 }
 
-test.beforeAll(() => {
-  prepare();
-  prepare("--verify");
+test.beforeAll(async ({ request }) => {
+  await prepareSampleWorkspace(request, slug, "prepare");
+  await prepareSampleWorkspace(request, slug, "verify");
 });
 
-test.afterAll(() => {
-  prepare("--cleanup");
+test.afterAll(async ({ request }) => {
+  await prepareSampleWorkspace(request, slug, "cleanup");
 });
 
 test("populated workspace supports connected CRM operations", async ({ page }) => {
@@ -56,15 +41,11 @@ test("populated workspace supports connected CRM operations", async ({ page }) =
     });
   });
 
-  await signInAsSeedAdmin(page);
+  await openSampleWorkspace(page);
   authenticated = true;
-  await page.getByLabel("Organization").selectOption({ label: "ATLAS Sample Workspace" });
-  await expect(page.locator("#organization-selector option:checked")).toHaveText("ATLAS Sample Workspace");
-  const metricValue = (label: string) =>
-    page.getByRole("link", { name: new RegExp(label) }).locator("p").nth(1);
-  await expect(metricValue("Active companies")).toHaveText("03");
-  await expect(metricValue("Active leads")).toHaveText("03");
-  await expect(metricValue("Open inquiries")).toHaveText("03");
+  await expect(page.getByTestId("overview-kpi-companies-value")).toHaveText(/^0?3$/);
+  await expect(page.getByTestId("overview-kpi-active-leads-value")).toHaveText(/^0?3$/);
+  await expect(page.getByTestId("overview-kpi-customer-requests-value")).toHaveText(/^0?3$/);
   await capture(page, "populated-overview-desktop.png");
 
   await page.getByRole("link", { name: "CRM", exact: true }).click();
@@ -141,8 +122,7 @@ test("populated workspace supports connected CRM operations", async ({ page }) =
 
 test("populated workspace remains usable on mobile", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await signInAsSeedAdmin(page);
-  await page.getByLabel("Organization").selectOption({ label: "ATLAS Sample Workspace" });
+  await openSampleWorkspace(page);
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("link", { name: "CRM", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Customer records" })).toBeVisible();

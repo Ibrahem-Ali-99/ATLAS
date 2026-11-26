@@ -16,6 +16,7 @@ from app.domains.assistant.schemas import (
     MessageCreate,
     ReplyOut,
 )
+from app.domains.billing.service import meter_assistant_request
 from app.domains.identity.dependencies import CsrfMember, DbSession, Member
 from app.domains.observability.tracing import record_operation
 from app.integrations.language import (
@@ -81,6 +82,8 @@ def create_message(
     embedder: Annotated[EmbeddingClient, Depends(organization_embedder)],
     chat: Annotated[ChatClient, Depends(organization_chat)],
 ) -> ReplyOut:
+    service.get_conversation(db, member.organization.id, member.user.id, conversation_id)
+    meter_assistant_request(db, member.organization.id)
     turn = service.prepare_turn(
         db,
         member.organization.id,
@@ -132,6 +135,9 @@ def stream_message(
     embedder: Annotated[EmbeddingClient, Depends(organization_embedder)],
     chat: Annotated[ChatClient, Depends(organization_chat)],
 ) -> StreamingResponse:
+    organization_id = member.organization.id
+    service.get_conversation(db, organization_id, member.user.id, conversation_id)
+    meter_assistant_request(db, organization_id)
     turn = service.prepare_turn(
         db,
         member.organization.id,
@@ -145,6 +151,7 @@ def stream_message(
 
     def events() -> Iterator[str]:
         parts: list[str] = []
+        started = time.perf_counter()
         try:
             for phase in turn.phases:
                 if phase in {"preparing", "searching_crm", "retrieving_documents"}:
@@ -165,11 +172,27 @@ def stream_message(
             if turn.needs_model and not answer:
                 raise AppError(502, "llm_failed", "The language model returned an empty answer")
             reply = service.save_completed_turn(db, turn, answer or service.NO_RECORDS)
+            record_operation(
+                operation="assistant_response",
+                organization_id=organization_id,
+                status="escalated" if turn.escalation_reason else "succeeded",
+                latency_ms=round((time.perf_counter() - started) * 1000),
+                provider=getattr(chat, "provider", None),
+                model_name=getattr(chat, "model", None),
+                detail={"grounding": "grounded" if reply.message.sources else "none"},
+            )
             if turn.holds_evidence():
                 yield _event("token", {"text": reply.message.content})
             yield _event("done", reply.model_dump(mode="json"))
         except AppError as exc:
             service.record_provider_failure(db, turn.conversation, exc.message)
+            record_operation(
+                operation="assistant_response",
+                organization_id=organization_id,
+                status="failed",
+                latency_ms=round((time.perf_counter() - started) * 1000),
+                error_code=exc.code,
+            )
             yield _event("error", {"code": exc.code, "message": exc.message})
 
     return StreamingResponse(events(), media_type="text/event-stream")

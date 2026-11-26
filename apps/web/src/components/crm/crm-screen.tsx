@@ -1,8 +1,7 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
-import { BriefcaseBusiness, Building2, Contact, Inbox } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { BriefcaseBusiness, Building2, Contact, Inbox, Kanban } from "lucide-react";
 
 import { CompaniesPanel } from "@/components/crm/companies-panel";
 import { ContactsPanel } from "@/components/crm/contacts-panel";
@@ -19,26 +18,29 @@ const tabs = [
   { id: "contacts", label: "Contacts" },
   { id: "leads", label: "Leads" },
   { id: "inquiries", label: "Inquiries" },
+  { id: "opportunities", label: "Opportunities" },
 ] as const;
 
 type TabId = (typeof tabs)[number]["id"];
-type RecordTarget = { tab: TabId; id: string };
+type RecordTarget = { tab: TabId; id: string | null };
 
 export function CrmScreen() {
-  const router = useRouter();
   const { organizationId, organizationName } = useWorkspace();
-  const requested = useSearchParams().get("tab");
-  const requestedId = useSearchParams().get("id");
-  const requestedStatus = useSearchParams().get("status");
-  const initial = tabs.some((item) => item.id === requested) ? (requested as TabId) : "companies";
+  const searchParams = useSearchParams();
+  const requested = searchParams.get("tab");
+  const requestedId = searchParams.get("id");
+  const requestedStatus = searchParams.get("status");
+  const activeTab = tabs.some((item) => item.id === requested) ? (requested as TabId) : "companies";
   const initialStatus = leadStatuses.includes(requestedStatus as LeadStatus) ? (requestedStatus as LeadStatus) : "";
-  const [tab, setTab] = useState<TabId>(initial);
-  const [target, setTarget] = useState<RecordTarget | null>(requestedId ? { tab: initial, id: requestedId } : null);
-  const activeTab = requested ? initial : tab;
+  const target = requestedId ? { tab: activeTab, id: requestedId } : null;
+  const selectTab = (next: TabId) => {
+    window.history.replaceState(null, "", `/crm?tab=${next}`);
+  };
   const navigateTo = (next: RecordTarget) => {
-    setTarget(next);
-    setTab(next.tab);
-    router.replace(`/crm?tab=${next.tab}&id=${next.id}`);
+    const params = new URLSearchParams({ tab: next.tab });
+    if (next.id) params.set("id", next.id);
+    if (next.tab === "leads" && initialStatus) params.set("status", initialStatus);
+    window.history.replaceState(null, "", `/crm?${params}`);
   };
   if (!organizationId) {
     return null;
@@ -55,7 +57,7 @@ export function CrmScreen() {
         <div className="hidden items-center gap-2 text-xs text-subtle sm:flex"><span className="size-2 rounded-full bg-success" /> {organizationName ?? "Current workspace"}</div>
       </header>
       <div className="-mx-1 flex max-w-full gap-1 overflow-x-auto px-1 pb-1" role="tablist" aria-label="CRM records" data-testid="crm-tabs">
-        {tabs.map((item) => (
+        {tabs.map((item, index) => (
           <Button
             key={item.id}
             className={cn(
@@ -64,20 +66,41 @@ export function CrmScreen() {
             )}
             type="button"
             role="tab"
+            id={`crm-tab-${item.id}`}
+            tabIndex={activeTab === item.id ? 0 : -1}
+            aria-controls="crm-records-panel"
             aria-selected={activeTab === item.id}
             variant="ghost"
-            onClick={() => { setTarget(null); setTab(item.id); router.replace(`/crm?tab=${item.id}`); }}
+            onClick={() => selectTab(item.id)}
+            onKeyDown={(event) => {
+              const last = tabs.length - 1;
+              const directions: Partial<Record<string, number>> = {
+                ArrowRight: (index + 1) % tabs.length,
+                ArrowLeft: (index + last) % tabs.length,
+                Home: 0,
+                End: last,
+              };
+              const nextIndex = directions[event.key];
+              if (nextIndex === undefined) return;
+              event.preventDefault();
+              const next = tabs[nextIndex].id;
+              const nextButton = document.getElementById(`crm-tab-${next}`);
+              nextButton?.focus();
+              selectTab(next);
+            }}
           >
-            {item.id === "companies" ? <Building2 className="size-4" aria-hidden="true" /> : item.id === "contacts" ? <Contact className="size-4" aria-hidden="true" /> : item.id === "leads" ? <BriefcaseBusiness className="size-4" aria-hidden="true" /> : <Inbox className="size-4" aria-hidden="true" />}
+            {item.id === "companies" ? <Building2 className="size-4" aria-hidden="true" /> : item.id === "contacts" ? <Contact className="size-4" aria-hidden="true" /> : item.id === "leads" ? <BriefcaseBusiness className="size-4" aria-hidden="true" /> : item.id === "opportunities" ? <Kanban className="size-4" aria-hidden="true" /> : <Inbox className="size-4" aria-hidden="true" />}
             {item.label}
           </Button>
         ))}
       </div>
-      <OpportunityPipeline />
-      {activeTab === "companies" ? <CompaniesPanel key={`companies-${target?.id ?? "none"}`} organizationId={organizationId} selectedId={target?.tab === "companies" ? target.id : null} onNavigate={navigateTo} /> : null}
-      {activeTab === "contacts" ? <ContactsPanel key={`contacts-${target?.id ?? "none"}`} organizationId={organizationId} selectedId={target?.tab === "contacts" ? target.id : null} onNavigate={navigateTo} /> : null}
-      {activeTab === "leads" ? <LeadsPanel key={`leads-${target?.id ?? "none"}-${initialStatus}`} organizationId={organizationId} selectedId={target?.tab === "leads" ? target.id : null} initialStatus={initialStatus} onNavigate={navigateTo} /> : null}
-      {activeTab === "inquiries" ? <InquiriesPanel key={`inquiries-${target?.id ?? "none"}`} organizationId={organizationId} selectedId={target?.tab === "inquiries" ? target.id : null} onNavigate={navigateTo} /> : null}
+      <div id="crm-records-panel" role="tabpanel" aria-labelledby={`crm-tab-${activeTab}`} className="min-w-0" tabIndex={0}>
+      {activeTab === "opportunities" ? <OpportunityPipeline key={organizationId} selectedId={target?.id ?? null} onSelect={(id) => navigateTo({ tab: "opportunities", id })} /> : null}
+      {activeTab === "companies" ? <CompaniesPanel key={`companies-${organizationId}`} organizationId={organizationId} selectedId={target?.tab === "companies" ? target.id : null} onNavigate={navigateTo} /> : null}
+      {activeTab === "contacts" ? <ContactsPanel key={`contacts-${organizationId}`} organizationId={organizationId} selectedId={target?.tab === "contacts" ? target.id : null} onNavigate={navigateTo} /> : null}
+      {activeTab === "leads" ? <LeadsPanel key={`leads-${organizationId}-${initialStatus}`} organizationId={organizationId} selectedId={target?.tab === "leads" ? target.id : null} initialStatus={initialStatus} onNavigate={navigateTo} /> : null}
+      {activeTab === "inquiries" ? <InquiriesPanel key={`inquiries-${organizationId}`} organizationId={organizationId} selectedId={target?.tab === "inquiries" ? target.id : null} onNavigate={navigateTo} /> : null}
+      </div>
     </div>
   );
 }

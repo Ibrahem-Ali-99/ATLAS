@@ -244,11 +244,13 @@ def update_opportunity(
     db: DbSession,
 ) -> dict[str, object]:
     row = db.scalar(
-        select(Opportunity).where(
+        select(Opportunity)
+        .where(
             Opportunity.id == opportunity_id,
             Opportunity.organization_id == member.organization.id,
             Opportunity.archived_at.is_(None),
         )
+        .with_for_update()
     )
     if row is None:
         raise AppError(404, "opportunity_not_found", "Opportunity not found")
@@ -301,13 +303,14 @@ def update_opportunity(
         )
     for key, value in values.items():
         setattr(row, key, value)
-    db.commit()
     if body.stage is not None and body.stage != previous_stage:
         from app.domains.automation.workflows import dispatch_pending, stage_opportunity_changed
 
         stage_opportunity_changed(db, member.organization.id, row.id, previous_stage, row.stage)
         db.commit()
         dispatch_pending(db, member.organization.id)
+    else:
+        db.commit()
     return {"id": row.id, "title": row.title, "stage": row.stage, "loss_reason": row.loss_reason}
 
 
@@ -483,7 +486,9 @@ def list_leads(
 
 @router.post("/leads", response_model=LeadOut, status_code=201)
 def create_lead(body: LeadCreate, member: CsrfMember, db: DbSession) -> LeadOut:
-    lead = service.create_lead(db, member.organization.id, member.user.id, body.model_dump())
+    lead = service.create_lead(
+        db, member.organization.id, member.user.id, body.model_dump(), commit=False
+    )
     from app.domains.automation.workflows import dispatch_pending, stage_lead_created
 
     stage_lead_created(db, member.organization.id, lead.id, None)
@@ -499,10 +504,10 @@ def get_lead(lead_id: uuid.UUID, member: Member, db: DbSession) -> LeadOut:
 
 @router.patch("/leads/{lead_id}", response_model=LeadOut)
 def update_lead(lead_id: uuid.UUID, body: LeadUpdate, member: CsrfMember, db: DbSession) -> LeadOut:
-    before = service.get_lead(db, member.organization.id, lead_id)
+    before = service.get_lead(db, member.organization.id, lead_id, lock=True)
     previous_status = before.status.value
     lead = service.update_lead(
-        db, member.organization.id, lead_id, body.model_dump(exclude_unset=True)
+        db, member.organization.id, lead_id, body.model_dump(exclude_unset=True), commit=False
     )
     if "status" in body.model_fields_set:
         from app.domains.automation.workflows import dispatch_pending, stage_lead_status_changed
@@ -512,6 +517,8 @@ def update_lead(lead_id: uuid.UUID, body: LeadUpdate, member: CsrfMember, db: Db
         )
         db.commit()
         dispatch_pending(db, member.organization.id)
+    else:
+        db.commit()
     return LeadOut.model_validate(lead)
 
 

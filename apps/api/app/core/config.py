@@ -1,3 +1,5 @@
+import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
@@ -43,6 +45,7 @@ class Settings(BaseSettings):
         env_file=ENV_FILE if ENV_FILE is not None and ENV_FILE.is_file() else None,
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     environment: Literal["development", "test", "production"] = "development"
@@ -86,7 +89,12 @@ class Settings(BaseSettings):
     smtp_port: int = Field(default=1025, ge=1, le=65535)
     smtp_from: str = "atlas@localhost"
     smtp_timeout_seconds: float = Field(default=5, ge=0.2, le=60)
+    smtp_live_hosts: str = ""
     calendar_mode: Literal["simulation"] = "simulation"
+    google_calendar_client_id: str = ""
+    google_calendar_client_secret: str = ""
+    google_calendar_redirect_uri: str = ""
+    google_calendar_web_origin: str = ""
     webhook_max_bytes: int = Field(default=65_536, ge=32, le=1_048_576)
     webhook_skew_seconds: int = Field(default=300, ge=30, le=3600)
     webhook_rate_limit: int = Field(default=30, ge=1, le=300)
@@ -106,7 +114,14 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_price_ids: str = ""
     billing_public_url: str = ""
+    campaign_public_url: str = ""
+    campaign_link_secret: str = ""
+    campaign_live_enabled: bool = False
+    resend_campaign_webhook_secret: str = ""
     inbox_webhook_secret: str = ""
+    whatsapp_webhook_verify_token: str = ""
+    whatsapp_webhook_app_secret: str = ""
+    whatsapp_live_enabled: bool = False
 
     @field_validator("database_url")
     @classmethod
@@ -161,8 +176,23 @@ class Settings(BaseSettings):
             raise ValueError("ATLAS_SECRET_KEY must be at least 32 characters")
         if self.environment == "production" and _placeholder_secret(self.secret_key):
             raise ValueError("ATLAS_SECRET_KEY placeholder is not allowed in production")
-        if self.environment == "production" and not self.credential_encryption_keys.strip():
-            raise ValueError("ATLAS_CREDENTIAL_ENCRYPTION_KEYS is required in production")
+        if self.environment == "production":
+            key_ids: set[str] = set()
+            for entry in self.credential_encryption_keys.split(","):
+                key_id, _, key = entry.partition("=")
+                if (
+                    not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", key_id)
+                    or key_id in key_ids
+                    or key_id == "legacy-secret-key"
+                    or len(key.strip()) < 32
+                    or key == self.secret_key
+                    or _placeholder_secret(key)
+                ):
+                    raise ValueError(
+                        "ATLAS_CREDENTIAL_ENCRYPTION_KEYS requires distinct key IDs and "
+                        "independent, random secrets in production"
+                    )
+                key_ids.add(key_id)
         if self.environment == "production" and not self.cookie_secure:
             raise ValueError("ATLAS_COOKIE_SECURE must be true in production")
         if self.email_mode == "live" and not self.email_live_enabled:
@@ -209,4 +239,6 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    if os.environ.get("ATLAS_MCP_ISOLATED_SETTINGS") == "1":
+        return Settings(_env_file=None)
     return Settings()

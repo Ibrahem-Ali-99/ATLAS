@@ -49,7 +49,7 @@ test("CRM lifecycle persists relationships and recoverable archives", async ({ p
   await page.getByLabel("Subject").fill(inquiry);
   await page.getByLabel("Body").fill("A browser-created inquiry.");
   await page.getByLabel("Company").selectOption({ label: company });
-  await page.getByLabel("Lead").selectOption({ label: lead });
+  await page.getByLabel("Lead", { exact: true }).selectOption({ label: lead });
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("button", { name: inquiry })).toBeVisible();
 

@@ -11,6 +11,7 @@ from app.integrations.language import get_chat_client, get_embedding_client
 from tests.ai_clients import HashEmbeddingClient
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
 from tests.helpers import login
+from tests.test_assistant import _process_ingestion
 from tests.test_crm import _csrf, _org
 
 YARD = "Acceptance Yard stores 42 bonded pallets. Token YARD-42-PALLETS."
@@ -152,6 +153,7 @@ def test_assistant_cites_the_42_pallet_passage_and_not_the_brochure(
             headers=headers,
         )
         assert uploaded.status_code == 201, uploaded.text
+        _process_ingestion()
         ready = client.get(f"/api/v1/organizations/{org}/documents/{uploaded.json()['id']}")
         assert ready.json()["status"] == "ready"
     created = client.post(
@@ -219,6 +221,7 @@ def test_grounded_stream_emits_the_verified_answer_only(client: TestClient, db: 
         headers=headers,
     )
     assert uploaded.status_code == 201, uploaded.text
+    _process_ingestion()
     created = client.post(
         f"/api/v1/organizations/{org}/conversations", json={"title": "Stream"}, headers=headers
     )

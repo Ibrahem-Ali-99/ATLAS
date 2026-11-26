@@ -6,13 +6,12 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import router as v1_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
-from app.core.middleware import RequestContextMiddleware
+from app.core.middleware import AtlasCorsMiddleware, RequestContextMiddleware
 
 logger = structlog.get_logger(__name__)
 _stdlib_logger = logging.getLogger(__name__)
@@ -59,8 +58,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     worker_thread: threading.Thread | None = None
     knowledge_worker_thread: threading.Thread | None = None
     worker_enabled = (
-        settings.environment != "test"
-        or os.environ.get("ATLAS_E2E_PROVIDER_TRANSPORT") == "1"
+        settings.environment != "test" or os.environ.get("ATLAS_E2E_PROVIDER_TRANSPORT") == "1"
     )
     logger.info("automation_worker_enabled", enabled=worker_enabled)
     _stdlib_logger.info("automation_worker_enabled enabled=%s", worker_enabled)
@@ -70,6 +68,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         worker_stop = threading.Event()
         worker_thread = start(worker_stop)
         from app.domains.knowledge.worker import start as start_knowledge
+
         knowledge_worker_thread = start_knowledge(worker_stop)
     yield
     if worker_stop is not None and worker_thread is not None:
@@ -98,14 +97,7 @@ def create_app() -> FastAPI:
     )
     register_exception_handlers(app)
     app.add_middleware(RequestContextMiddleware)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origin_list,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "X-CSRF-Token"],
-        expose_headers=["X-Request-ID"],
-    )
+    app.add_middleware(AtlasCorsMiddleware, workspace_origins=settings.cors_origin_list)
     app.include_router(v1_router, prefix="/api/v1")
 
     @app.get("/", include_in_schema=False)

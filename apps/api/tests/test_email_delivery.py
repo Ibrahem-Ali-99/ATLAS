@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.errors import AppError
+from app.domains.automation.signatures import seal_integration_secret
 from app.integrations import email
 
 
@@ -81,3 +82,59 @@ def test_configured_org_smtp_never_replaces_mailpit_transport(
     )
     assert receipt.mode == "sandbox"
     assert seen == [("mailpit", 1025)]
+
+
+def test_approved_live_transport_authenticates_over_tls_to_allowlisted_relay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = email.get_settings()
+    monkeypatch.setattr(settings, "email_mode", "live")
+    monkeypatch.setattr(settings, "email_live_enabled", True)
+    monkeypatch.setattr(settings, "smtp_live_hosts", "relay.example.com")
+    record = SimpleNamespace(
+        provider="smtp",
+        status=email.IntegrationStatus.configured,
+        encrypted_credentials=seal_integration_secret('{"username":"tenant","password":"fixture"}'),
+        config={
+            "host": "relay.example.com",
+            "port": 587,
+            "from_address": "team@example.com",
+            "starttls": True,
+            "live_delivery_enabled": True,
+        },
+    )
+    monkeypatch.setattr(email, "read_metadata", lambda *_: record)
+    db = SimpleNamespace(scalar=lambda _: record)
+    events: list[str] = []
+
+    class FakeSMTP:
+        def __init__(self, host: str, port: int, timeout: float) -> None:
+            assert (host, port) == ("relay.example.com", 587)
+            events.append("connect")
+
+        def __enter__(self) -> "FakeSMTP":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def starttls(self, *, context: object) -> None:
+            assert context
+            events.append("tls")
+
+        def login(self, username: str, password: str) -> None:
+            assert (username, password) == ("tenant", "fixture")
+            events.append("auth")
+
+        def send_message(self, message) -> None:
+            assert message["From"] == "team@example.com"
+            events.append("send")
+
+    monkeypatch.setattr(email.smtplib, "SMTP", FakeSMTP)
+    message = email.OutboundEmail("customer@example.com", "Subject", "Body", "intent-2")
+    assert email.send_email(message, db=db, organization_id=uuid.uuid4()).mode == "live"
+    assert events == ["connect", "tls", "auth", "send"]
+    record.config["host"] = "different.example.com"
+    with pytest.raises(AppError, match="approved SMTP relay"):
+        email.send_email(message, db=db, organization_id=uuid.uuid4())
+    assert events == ["connect", "tls", "auth", "send"]

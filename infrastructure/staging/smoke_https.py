@@ -162,6 +162,7 @@ def ensure_env() -> dict[str, str]:
     values = {
         "STAGING_ENVIRONMENT": "development",
         "STAGING_SECRET_KEY": secrets.token_hex(32),
+        "STAGING_CREDENTIAL_ENCRYPTION_KEYS": f"stage-01={secrets.token_hex(32)}",
         "STAGING_POSTGRES_USER": "atlas",
         "STAGING_POSTGRES_PASSWORD": secrets.token_hex(24),
         "STAGING_POSTGRES_DB": "atlas",

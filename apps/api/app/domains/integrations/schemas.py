@@ -1,4 +1,5 @@
 # ruff: noqa: E501
+import re
 import uuid
 from typing import Any
 
@@ -32,16 +33,13 @@ class IntegrationInput(BaseModel):
                 f"Provider {self.provider!r} is not supported for {self.integration_type.value}"
             )
         if self.integration_type == IntegrationType.whatsapp:
-            if (
-                not isinstance(self.config.get("phone_number_id"), str)
-                or not self.config["phone_number_id"].strip()
+            for field, label in (
+                ("phone_number_id", "phone number ID"),
+                ("business_account_id", "Business Account ID"),
             ):
-                raise ValueError("WhatsApp phone number ID is required")
-            if (
-                not isinstance(self.config.get("business_account_id"), str)
-                or not self.config["business_account_id"].strip()
-            ):
-                raise ValueError("WhatsApp Business Account ID is required")
+                value = self.config.get(field)
+                if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,32}", value):
+                    raise ValueError(f"Enter a valid WhatsApp {label}")
         if self.integration_type == IntegrationType.email:
             host = self.config.get("host")
             port = self.config.get("port")
@@ -61,6 +59,7 @@ class IntegrationUpdate(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     credentials: str | None = Field(default=None, min_length=1)
     expected_version: int | None = Field(default=None, ge=1)
+    merge_email_credentials: bool = False
 
 
 class CredentialUpdate(BaseModel):
@@ -86,6 +85,7 @@ class IntegrationMetadata(BaseModel):
     updated_at: Any
     verified_at: Any | None = None
     verification_detail: str | None = None
+    last_inbound_at: Any | None = None
 
 
 class VerificationResult(BaseModel):

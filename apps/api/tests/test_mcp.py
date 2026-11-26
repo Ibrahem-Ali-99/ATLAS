@@ -48,6 +48,7 @@ def test_mcp_child_env_keeps_production_cookie_rules(monkeypatch: pytest.MonkeyP
         _env_file=None,
         environment=env["ATLAS_ENVIRONMENT"],
         secret_key=env["ATLAS_SECRET_KEY"],
+        credential_encryption_keys=env["ATLAS_CREDENTIAL_ENCRYPTION_KEYS"],
         database_url=env["ATLAS_DATABASE_URL"],
         cookie_secure=env["ATLAS_COOKIE_SECURE"] == "true",
         email_mode=env["ATLAS_EMAIL_MODE"],

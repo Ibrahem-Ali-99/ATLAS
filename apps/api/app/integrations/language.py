@@ -29,6 +29,10 @@ class OpenAICompatibleEmbeddingClient:
         self._settings = settings
         self._transport = transport
 
+    @property
+    def settings(self) -> Settings:
+        return self._settings
+
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
@@ -307,12 +311,16 @@ def _post_with_retry(
     return response
 
 
-def get_embedding_client(db: Any = None, organization_id: Any = None) -> EmbeddingClient:
+def get_embedding_client(
+    db: Any = None, organization_id: Any = None, *, for_verification: bool = False
+) -> EmbeddingClient:
     settings = get_settings()
     if db is not None and organization_id is not None:
         from app.integrations.resolver import resolve_settings
 
-        settings = resolve_settings(db, organization_id, "embedding")
+        settings = resolve_settings(
+            db, organization_id, "embedding", for_verification=for_verification
+        )
     if settings.public_demo and settings.embedding_provider != "double":
         raise AppError(
             503,
@@ -326,12 +334,14 @@ def get_embedding_client(db: Any = None, organization_id: Any = None) -> Embeddi
     return OpenAICompatibleEmbeddingClient(settings)
 
 
-def get_chat_client(db: Any = None, organization_id: Any = None) -> ChatClient:
+def get_chat_client(
+    db: Any = None, organization_id: Any = None, *, for_verification: bool = False
+) -> ChatClient:
     settings = get_settings()
     if db is not None and organization_id is not None:
         from app.integrations.resolver import resolve_settings
 
-        settings = resolve_settings(db, organization_id, "chat")
+        settings = resolve_settings(db, organization_id, "chat", for_verification=for_verification)
     if settings.public_demo and settings.llm_provider != "double":
         raise AppError(
             503,

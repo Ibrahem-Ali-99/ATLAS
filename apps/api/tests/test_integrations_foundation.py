@@ -77,12 +77,14 @@ def test_replacement_increments_version_and_disable_is_explicit(db: Session) -> 
         .where(AuditEvent.organization_id == organization.id)
         .order_by(AuditEvent.created_at, AuditEvent.id)
     ).all()
-    assert sorted(actions) == sorted([
-        "integration_configuration_created",
-        "integration_credentials_replaced",
-        "integration_configuration_disabled",
-        "integration_credentials_revoked",
-    ])
+    assert sorted(actions) == sorted(
+        [
+            "integration_configuration_created",
+            "integration_credentials_replaced",
+            "integration_configuration_disabled",
+            "integration_credentials_revoked",
+        ]
+    )
 
 
 def test_invalid_provider_and_stale_update_are_rejected(db: Session) -> None:
@@ -113,9 +115,7 @@ def test_wrong_encryption_key_fails_closed(db: Session, monkeypatch: pytest.Monk
         db, organization.id, IntegrationInput(integration_type="chat", provider="groq"), "secret"
     )
     db.commit()
-    wrong = get_settings().model_copy(
-        update={"secret_key": "not-the-configured-key"}
-    )
+    wrong = get_settings().model_copy(update={"secret_key": "not-the-configured-key"})
     monkeypatch.setattr(signatures, "get_settings", lambda: wrong)
     with pytest.raises(AppError) as exc:
         open_credentials(record)

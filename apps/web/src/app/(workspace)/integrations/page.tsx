@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 import { SettingsScreen } from "@/components/screens/settings-screen";
 
@@ -7,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function IntegrationsPage() {
-  return <SettingsScreen integrationsOnly />;
+  return <Suspense><SettingsScreen integrationsOnly /></Suspense>;
 }

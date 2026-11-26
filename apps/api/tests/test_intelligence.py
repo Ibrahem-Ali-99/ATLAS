@@ -116,6 +116,8 @@ def test_analytics_defines_empty_and_conversion(client: TestClient, db: Session)
     assert payload["conversion"]["denominator"] == 0
     assert payload["automation"]["success_rate"] is None
     assert len(payload["lead_trend"]) == payload["window_days"]
+    assert len(payload["customer_activity"]) == payload["window_days"]
+    assert all(row["inquiries"] == row["interactions"] == 0 for row in payload["customer_activity"])
     headers = _csrf(ada)
     for status in ("won", "lost"):
         created = client.post(
@@ -127,6 +129,12 @@ def test_analytics_defines_empty_and_conversion(client: TestClient, db: Session)
     filled = snapshot(db, uuid.UUID(org))
     assert filled["leads_total"] == 2
     assert filled["conversion"]["rate"] == 0.5
+    inquiry = client.post(
+        f"/api/v1/organizations/{org}/inquiries",
+        json={"subject": "Delivery capacity", "body": "Please confirm availability."},
+        headers=headers,
+    )
+    assert inquiry.status_code == 201, inquiry.text
     db.add(
         InboxConversation(
             organization_id=atlas.id,
@@ -136,11 +144,13 @@ def test_analytics_defines_empty_and_conversion(client: TestClient, db: Session)
     )
     db.commit()
     support = snapshot(db, atlas.id)
+    assert sum(row["inquiries"] for row in support["customer_activity"]) == 1
     assert support["support"]["volume_trend"]
     assert support["support"]["volume_trend"][0]["channel"] == "webchat"
     outsider_session = login(client, "metrics-out@example.org", PASSWORD)
     foreign = client.get(f"/api/v1/organizations/{_org(outsider_session)}/analytics")
     assert foreign.json()["leads_total"] == 0
+    assert sum(row["inquiries"] for row in foreign.json()["customer_activity"]) == 0
 
 
 def test_evaluation_records_deterministic_results(db: Session) -> None:

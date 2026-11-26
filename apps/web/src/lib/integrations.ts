@@ -14,7 +14,20 @@ export type IntegrationMetadata = {
   has_credentials: boolean;
   created_at: string;
   updated_at: string;
+  verified_at: string | null;
+  verification_detail: string | null;
+  last_inbound_at?: string | null;
 };
+
+export function integrationConnection(record?: IntegrationMetadata) {
+  if (!record) return "Not configured";
+  if (record.status === "disabled") return "Disconnected";
+  if (record.status === "verification_failed") {
+    return record.verification_detail === "WhatsApp access token expired" ? "Credentials expired" : "Verification failed";
+  }
+  if (!record.verified_at) return "Configured";
+  return record.last_inbound_at ? "Connected" : "Verified";
+}
 
 export type VerificationResult = {
   integration: IntegrationMetadata;
@@ -29,10 +42,31 @@ export function getIntegrations(organizationId: string) {
   return apiFetch<IntegrationMetadata[]>(base(organizationId));
 }
 
+export function getWebhookKeyStatus(organizationId: string) {
+  return apiFetch<{
+    id: string;
+    created_at: string;
+    rotated_at: string | null;
+    revoked_at: string | null;
+    last_accepted_at: string | null;
+  } | null>(`/api/v1/organizations/${organizationId}/integrations/webhook-keys`);
+}
+
+export function issueWebhookKey(organizationId: string, rotate = false) {
+  return apiFetch<{ id: string; secret: string }>(
+    `/api/v1/organizations/${organizationId}/integrations/webhook-keys${rotate ? "/rotate" : ""}`,
+    { method: "POST" },
+  );
+}
+
+export function disconnectWebhookKey(organizationId: string) {
+  return apiFetch<void>(`/api/v1/organizations/${organizationId}/integrations/webhook-keys/revoke`, { method: "POST" });
+}
+
 export function saveIntegration(
   organizationId: string,
   type: IntegrationType,
-  body: { provider: string; config: Record<string, unknown>; credentials?: string; expected_version?: number },
+  body: { provider: string; config: Record<string, unknown>; credentials?: string; expected_version?: number; merge_email_credentials?: boolean },
 ) {
   return apiFetch<IntegrationMetadata>(`${base(organizationId)}/${type}`, {
     method: "PUT",

@@ -2,12 +2,13 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.domains.automation.models import BookingStatus, CalendarBooking
 from app.domains.provenance.origin import Origin
+from app.integrations import google_calendar
 
 
 @dataclass(frozen=True)
@@ -18,10 +19,11 @@ class Slot:
     starts_at: datetime
     ends_at: datetime
     origin: Origin
+    provider_calendar_id: str | None = None
 
 
-class SimulatedCalendar:
-    """Store bookings in ATLAS. These rows are not events on an external calendar."""
+class WorkspaceCalendar:
+    """Coordinate reservations and their approved external destination."""
 
     provider = "simulation"
 
@@ -29,6 +31,20 @@ class SimulatedCalendar:
         self._lock_organization(db, slot.organization_id)
         if not self.available(db, slot.organization_id, slot.starts_at, slot.ends_at):
             raise AppError(409, "slot_unavailable", "That time is already booked")
+        provider = self.provider
+        event_id = None
+        if slot.provider_calendar_id:
+            if slot.origin != Origin.operational:
+                raise AppError(
+                    409, "calendar_operational_required", "Use an operational CRM record"
+                )
+            connection = google_calendar.active_connection(db, slot.organization_id)
+            if connection is None or connection.calendar_id != slot.provider_calendar_id:
+                raise AppError(
+                    409, "calendar_account_changed", "Reconnect the approved Google calendar"
+                )
+            event_id = google_calendar.create_event(connection, slot)
+            provider = "google"
         booking = CalendarBooking(
             organization_id=slot.organization_id,
             lead_id=slot.lead_id,
@@ -36,9 +52,10 @@ class SimulatedCalendar:
             starts_at=slot.starts_at,
             ends_at=slot.ends_at,
             status=BookingStatus.booked,
-            provider=self.provider,
+            provider=provider,
             origin=slot.origin,
-            provider_event_id=None,
+            provider_event_id=event_id,
+            provider_calendar_id=slot.provider_calendar_id,
         )
         db.add(booking)
         db.flush()
@@ -47,6 +64,7 @@ class SimulatedCalendar:
     def cancel(
         self, db: Session, organization_id: uuid.UUID, booking_id: uuid.UUID
     ) -> CalendarBooking:
+        self._lock_organization(db, organization_id)
         booking = db.scalar(
             select(CalendarBooking).where(
                 CalendarBooking.id == booking_id,
@@ -55,12 +73,25 @@ class SimulatedCalendar:
         )
         if booking is None:
             raise AppError(404, "not_found", "Resource not found")
-        if booking.provider != self.provider:
-            raise AppError(
-                409, "invalid_transition", "This booking is not a simulated calendar entry"
-            )
         if booking.status == BookingStatus.cancelled:
             return booking
+        if booking.provider == "google":
+            connection = google_calendar.active_connection(db, organization_id)
+            if (
+                connection is None
+                or not booking.provider_calendar_id
+                or not booking.provider_event_id
+            ):
+                raise AppError(
+                    409, "calendar_disconnected", "Reconnect the calendar to cancel this event"
+                )
+            google_calendar.cancel_event(
+                connection, booking.provider_calendar_id, booking.provider_event_id
+            )
+        elif booking.provider != self.provider:
+            raise AppError(
+                409, "calendar_provider_unknown", "This calendar booking requires review"
+            )
         booking.status = BookingStatus.cancelled
         db.commit()
         db.refresh(booking)
@@ -84,9 +115,8 @@ class SimulatedCalendar:
         return overlap is None
 
     def _lock_organization(self, db: Session, organization_id: uuid.UUID) -> None:
-        lock_key = int.from_bytes(organization_id.bytes[:4], "big", signed=True)
-        db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+        google_calendar.lock_workspace(db, organization_id)
 
 
-def calendar_adapter() -> SimulatedCalendar:
-    return SimulatedCalendar()
+def calendar_adapter() -> WorkspaceCalendar:
+    return WorkspaceCalendar()

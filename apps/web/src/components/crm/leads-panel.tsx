@@ -8,6 +8,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { ConfirmButton } from "@/components/confirm-button";
+import { AppointmentDialog } from "@/components/calendar/appointment-dialog";
 import { Pager } from "@/components/pager";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +24,7 @@ import { startAgentRun } from "@/lib/agent-api";
 import { getLeadPrediction, scoreLead } from "@/lib/intelligence";
 import {
   addInteraction,
-  createLead,
+  createLead, getLead,
   deleteLead,
   listCompanies,
   listContacts,
@@ -53,7 +54,7 @@ const noteSchema = z.object({
 
 type NoteValues = z.infer<typeof noteSchema>;
 
-type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string }) => void;
+type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string | null }) => void;
 
 export function LeadsPanel({ organizationId, selectedId: requestedId, initialStatus = "", onNavigate }: { organizationId: string; selectedId?: string | null; initialStatus?: LeadStatus | ""; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
@@ -61,9 +62,9 @@ export function LeadsPanel({ organizationId, selectedId: requestedId, initialSta
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<LeadStatus | "">(initialStatus);
   const [page, setPage] = useState(1);
-  const [includeArchived, setIncludeArchived] = useState(Boolean(requestedId));
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
+  const selectedId = requestedId ?? null;
   const leads = useQuery({
     queryKey: ["leads", organizationId, query, status, page, includeArchived],
     queryFn: () => listLeads(organizationId, { q: query, status, page, includeArchived }),
@@ -90,7 +91,13 @@ export function LeadsPanel({ organizationId, selectedId: requestedId, initialSta
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  const selected = leads.data?.items.find((item) => item.id === selectedId) ?? null;
+  const selectedInList = leads.data?.items.find((item) => item.id === selectedId);
+  const record = useQuery({
+    queryKey: ["leads", organizationId, "record", selectedId],
+    queryFn: () => getLead(organizationId, selectedId ?? ""),
+    enabled: Boolean(selectedId && !selectedInList),
+  });
+  const selected = selectedInList ?? record.data ?? null;
 
   return (
     <div className={selected ? "grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.9fr)]" : "w-full"}>
@@ -156,11 +163,11 @@ export function LeadsPanel({ organizationId, selectedId: requestedId, initialSta
           onNavigate={onNavigate}
           onChanged={() => void queryClient.invalidateQueries({ queryKey: ["leads", organizationId] })}
           onDeleted={() => {
-            setSelectedId(null);
+            onNavigate({ tab: "leads", id: null });
             void queryClient.invalidateQueries({ queryKey: ["leads", organizationId] });
           }}
         />
-      ) : (
+      ) : record.isError ? <RequestError error={record.error} /> : (
         <aside className="rounded-lg border border-dashed border-border bg-card p-6 text-sm text-muted-foreground lg:min-h-32">
           Select a lead to update its status and interaction history.
         </aside>
@@ -172,7 +179,7 @@ export function LeadsPanel({ organizationId, selectedId: requestedId, initialSta
         open={open}
         onOpenChange={setOpen}
         onCreated={(lead) => {
-          setSelectedId(lead.id);
+          onNavigate({ tab: "leads", id: lead.id });
           void queryClient.invalidateQueries({ queryKey: ["leads", organizationId] });
         }}
       />
@@ -318,6 +325,7 @@ function LeadDetail({
         </Button>
         {lead.archived_at ? <Button type="button" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button> : <ConfirmButton label="Archive" confirmLabel="Confirm archive" pendingLabel="Archiving…" pending={remove.isPending} onConfirm={() => remove.mutate()} />}
       </div>
+      {linkedInquiry && !lead.archived_at ? <AppointmentDialog key={lead.id} leadId={lead.id} organizationId={organizationId} /> : null}
       {followUp.isError ? <RequestError error={followUp.error} /> : null}
       <LeadScore organizationId={organizationId} leadId={lead.id} />
       <div className="border-t border-border pt-4">
@@ -343,7 +351,7 @@ function LeadDetail({
             {interactionKinds.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
           </select>
           <Textarea placeholder="What happened?" {...noteForm.register("body")} />
-          {noteForm.formState.errors.body ? <p className="text-sm text-red-300">{noteForm.formState.errors.body.message}</p> : null}
+          {noteForm.formState.errors.body ? <p className="text-sm text-destructive">{noteForm.formState.errors.body.message}</p> : null}
           {note.isError ? <RequestError error={note.error} /> : null}
           <Button type="submit" disabled={note.isPending}>{note.isPending ? "Saving…" : "Add interaction"}</Button>
         </form>
@@ -419,7 +427,7 @@ function LeadFields({
       <div className="grid gap-1.5">
         <Label htmlFor={`${formId}-title`}>Title</Label>
         <Input id={`${formId}-title`} {...form.register("title")} />
-        {form.formState.errors.title ? <p className="text-sm text-red-300">{form.formState.errors.title.message}</p> : null}
+        {form.formState.errors.title ? <p className="text-sm text-destructive">{form.formState.errors.title.message}</p> : null}
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor={`${formId}-status`}>Status</Label>

@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { createCompany, deleteCompany, listCompanies, listContacts, listInquiries, listLeads, restoreCompany, updateCompany } from "@/lib/records-api";
+import { createCompany, getCompany, deleteCompany, listCompanies, listContacts, listInquiries, listLeads, restoreCompany, updateCompany } from "@/lib/records-api";
 import { blankToNull, type Company } from "@/lib/records";
 
 const schema = z.object({
@@ -46,16 +46,16 @@ function payload(values: FormValues) {
   };
 }
 
-type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string }) => void;
+type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string | null }) => void;
 
 export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavigate }: { organizationId: string; selectedId?: string | null; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [includeArchived, setIncludeArchived] = useState(Boolean(requestedId));
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
+  const selectedId = requestedId ?? null;
   const companies = useQuery({
     queryKey: ["companies", organizationId, query, page, includeArchived],
     queryFn: () => listCompanies(organizationId, { q: query, page, includeArchived }),
@@ -74,7 +74,13 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  const selected = companies.data?.items.find((item) => item.id === selectedId) ?? null;
+  const selectedInList = companies.data?.items.find((item) => item.id === selectedId);
+  const record = useQuery({
+    queryKey: ["companies", organizationId, "record", selectedId],
+    queryFn: () => getCompany(organizationId, selectedId ?? ""),
+    enabled: Boolean(selectedId && !selectedInList),
+  });
+  const selected = selectedInList ?? record.data ?? null;
 
   return (
     <div className={selected ? "grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.8fr)]" : "min-w-0"}>
@@ -137,13 +143,14 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
           <Pager page={companies.data.page} pageSize={companies.data.page_size} total={companies.data.total} onPage={setPage} />
         ) : null}
       </section>
+      {record.isError && !selectedInList ? <RequestError error={record.error} /> : null}
       <CompanyEditor
         organizationId={organizationId}
         company={selected}
         related={related.data}
         onNavigate={onNavigate}
         onDeleted={() => {
-          setSelectedId(null);
+          onNavigate({ tab: "companies", id: null });
           void queryClient.invalidateQueries({ queryKey: ["companies", organizationId] });
         }}
         onSaved={() => void queryClient.invalidateQueries({ queryKey: ["companies", organizationId] })}
@@ -153,7 +160,7 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
         open={open}
         onOpenChange={setOpen}
         onCreated={(company) => {
-          setSelectedId(company.id);
+          onNavigate({ tab: "companies", id: company.id });
           void queryClient.invalidateQueries({ queryKey: ["companies", organizationId] });
         }}
       />

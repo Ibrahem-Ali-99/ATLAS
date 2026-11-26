@@ -63,7 +63,11 @@ def snapshot(
             ),
         },
         "conversion": _conversion(db, organization_id, scope),
-        "lead_trend": _trend(db, organization_id, start, selected_end, scope),
+        "lead_trend": [
+            {"day": day.isoformat(), "count": count}
+            for day, count in _daily_counts(db, Lead, organization_id, start, end, scope).items()
+        ],
+        "customer_activity": _customer_activity(db, organization_id, start, end, scope),
         "agent_outcomes": _grouped(db, AgentRun.status, AgentRun, organization_id, scope),
         "failed_runs": failed_run_count(db, organization_id, scope),
         "approvals": _approvals(db, organization_id, scope),
@@ -104,29 +108,6 @@ def _sales(
         .group_by(Opportunity.stage)
         .order_by(Opportunity.stage)
     ).all()
-    conversation_ids = select(InboxConversation.id).where(*filters).subquery()
-    inbound = db.execute(
-        select(InboxMessage.conversation_id, func.min(InboxMessage.created_at))
-        .where(
-            InboxMessage.organization_id == organization_id,
-            InboxMessage.conversation_id.in_(select(conversation_ids.c.id)),
-            InboxMessage.direction == "inbound",
-        )
-        .group_by(InboxMessage.conversation_id)
-    ).all()
-    response_seconds = []
-    for conversation_id, opened_at in inbound:
-        responded = db.scalar(
-            select(func.min(InboxMessage.created_at)).where(
-                InboxMessage.organization_id == organization_id,
-                InboxMessage.conversation_id == conversation_id,
-                InboxMessage.direction == "outbound",
-                InboxMessage.delivery_status.not_in(["failed", "needs_attention"]),
-                InboxMessage.created_at >= opened_at,
-            )
-        )
-        if responded is not None:
-            response_seconds.append((responded - opened_at).total_seconds())
     won = db.execute(
         select(func.count(), func.coalesce(func.sum(Opportunity.value), 0)).where(
             *filters, Opportunity.stage == "won"
@@ -278,29 +259,41 @@ def _support(
         .group_by(trend_day, InboxConversation.channel)
         .order_by(trend_day)
     ).all()
-    conversation_ids = select(InboxConversation.id).where(*filters).subquery()
-    inbound = db.execute(
-        select(InboxMessage.conversation_id, func.min(InboxMessage.created_at))
+    conversation_ids = select(InboxConversation.id).where(*filters)
+    inbound = (
+        select(
+            InboxMessage.conversation_id.label("conversation_id"),
+            func.min(InboxMessage.created_at).label("opened_at"),
+        )
         .where(
             InboxMessage.organization_id == organization_id,
-            InboxMessage.conversation_id.in_(select(conversation_ids.c.id)),
+            InboxMessage.conversation_id.in_(conversation_ids),
             InboxMessage.direction == "inbound",
         )
         .group_by(InboxMessage.conversation_id)
-    ).all()
-    response_seconds = []
-    for conversation_id, opened_at in inbound:
-        responded = db.scalar(
-            select(func.min(InboxMessage.created_at)).where(
-                InboxMessage.organization_id == organization_id,
-                InboxMessage.conversation_id == conversation_id,
-                InboxMessage.direction == "outbound",
-                InboxMessage.delivery_status.not_in(["failed", "needs_attention"]),
-                InboxMessage.created_at >= opened_at,
+        .subquery()
+    )
+    responses = (
+        select(
+            func.extract("epoch", func.min(InboxMessage.created_at) - inbound.c.opened_at).label(
+                "seconds"
             )
         )
-        if responded is not None:
-            response_seconds.append((responded - opened_at).total_seconds())
+        .select_from(inbound)
+        .join(InboxMessage, InboxMessage.conversation_id == inbound.c.conversation_id)
+        .where(
+            InboxMessage.organization_id == organization_id,
+            InboxMessage.direction == "outbound",
+            InboxMessage.delivery_status.in_(["sent", "delivered", "read"]),
+            InboxMessage.created_at >= inbound.c.opened_at,
+            InboxMessage.created_at <= end,
+        )
+        .group_by(inbound.c.conversation_id, inbound.c.opened_at)
+        .subquery()
+    )
+    average_response, response_count = db.execute(
+        select(func.avg(responses.c.seconds), func.count()).select_from(responses)
+    ).one()
     return {
         "by_channel": [
             {
@@ -315,7 +308,7 @@ def _support(
                 select(func.count())
                 .select_from(InboxConversation)
                 .where(
-                    InboxConversation.organization_id == organization_id,
+                    *filters,
                     InboxConversation.handoff_requested.is_(True),
                 )
             )
@@ -326,9 +319,9 @@ def _support(
             for item, name, count in trend
         ],
         "average_first_response_seconds": None
-        if not response_seconds
-        else round(sum(response_seconds) / len(response_seconds), 1),
-        "first_response_sample_size": len(response_seconds),
+        if average_response is None
+        else round(float(average_response), 1),
+        "first_response_sample_size": int(response_count),
     }
 
 
@@ -339,6 +332,7 @@ def _ai(
         select(OperationTrace.status, func.count())
         .where(
             OperationTrace.organization_id == organization_id,
+            OperationTrace.operation.in_(["assistant_response", "agent_run"]),
             OperationTrace.started_at >= start,
             OperationTrace.started_at <= end,
         )
@@ -346,11 +340,12 @@ def _ai(
     ).all()
     total = sum(int(row[1]) for row in rows)
     failed = sum(int(row[1]) for row in rows if str(row[0]).lower() in {"failed", "error"})
-    day = func.date_trunc("day", OperationTrace.started_at)
+    day = func.date_trunc("day", OperationTrace.started_at).label("day")
     trend_rows = db.execute(
         select(day, OperationTrace.status, func.count())
         .where(
             OperationTrace.organization_id == organization_id,
+            OperationTrace.operation.in_(["assistant_response", "agent_run"]),
             OperationTrace.started_at >= start,
             OperationTrace.started_at <= end,
         )
@@ -418,7 +413,7 @@ def _workflow_performance(
         WorkflowStatus.needs_attention.value, 0
     )
     terminal = successful + failed
-    day = func.date_trunc("day", WorkflowRun.created_at)
+    day = func.date_trunc("day", WorkflowRun.created_at).label("day")
     trend_rows = db.execute(
         select(day, WorkflowRun.status, func.count())
         .where(*filters)
@@ -514,23 +509,34 @@ def _conversion(db: Session, organization_id: uuid.UUID, scope: DataScope) -> di
     }
 
 
-def _trend(
-    db: Session, organization_id: uuid.UUID, start: datetime, today: Any, scope: DataScope
-) -> list[dict[str, Any]]:
-    bucket = func.date_trunc("day", Lead.created_at)
+def _daily_counts(
+    db: Session,
+    model: type[Lead] | type[Inquiry] | type[Interaction],
+    organization_id: uuid.UUID,
+    start: datetime,
+    end: datetime,
+    scope: DataScope,
+) -> dict[date, int]:
+    bucket = func.date_trunc("day", func.timezone("UTC", model.created_at))
     rows = db.execute(
         select(bucket, func.count())
-        .where(*_filters(Lead, organization_id, scope), Lead.created_at >= start)
+        .where(*_filters(model, organization_id, scope), model.created_at.between(start, end))
         .group_by(bucket)
-        .order_by(bucket)
     ).all()
     counts = {value.date(): int(count) for value, count in rows if value is not None}
-    days = []
-    cursor = start.date()
-    while cursor <= today:
-        days.append({"day": cursor.isoformat(), "count": counts.get(cursor, 0)})
-        cursor += timedelta(days=1)
-    return days
+    days = (start.date() + timedelta(days=index) for index in range((end - start).days + 1))
+    return {day: counts.get(day, 0) for day in days}
+
+
+def _customer_activity(
+    db: Session, organization_id: uuid.UUID, start: datetime, end: datetime, scope: DataScope
+) -> list[dict[str, str | int]]:
+    inquiries = _daily_counts(db, Inquiry, organization_id, start, end, scope)
+    interactions = _daily_counts(db, Interaction, organization_id, start, end, scope)
+    return [
+        {"day": day.isoformat(), "inquiries": count, "interactions": interactions[day]}
+        for day, count in inquiries.items()
+    ]
 
 
 def _approvals(db: Session, organization_id: uuid.UUID, scope: DataScope) -> dict[str, int]:

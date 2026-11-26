@@ -9,6 +9,7 @@ from app.domains.approvals.models import ActionType, Approval, ApprovalStatus
 from app.domains.automation.models import (
     CalendarBooking,
     EmailMessage,
+    EmailStatus,
     ExecutionAttempt,
     ExecutionIntent,
     IntentStatus,
@@ -17,13 +18,18 @@ from app.domains.automation.models import (
 )
 from app.domains.crm.models import Company, Lead
 from app.domains.provenance.origin import DataScope, scope_clause
+from app.integrations.google_calendar import active_connection
 
 
 def snapshot(
     db: Session, organization_id: uuid.UUID, scope: DataScope = DataScope.operational
 ) -> dict[str, Any]:
     settings = get_settings()
-    key = db.scalar(select(WebhookKey.id).where(WebhookKey.organization_id == organization_id))
+    key = db.scalar(
+        select(WebhookKey.id).where(
+            WebhookKey.organization_id == organization_id, WebhookKey.revoked_at.is_(None)
+        )
+    )
     counts = _status_counts(db, organization_id, scope)
     awaiting_review = _awaiting_review(db, organization_id, scope)
     webhook_ready = key is not None
@@ -58,7 +64,7 @@ def snapshot(
     )
     return {
         "email_mode": settings.email_mode,
-        "calendar_provider": "simulation",
+        "calendar_provider": "google" if active_connection(db, organization_id) else "simulation",
         "n8n_configured": bool(settings.n8n_lead_webhook_url),
         "webhook_configured": key is not None,
         "automations": [
@@ -138,8 +144,9 @@ def _email_activity(
         db.scalars(
             select(ExecutionIntent)
             .where(
-                ExecutionIntent.organization_id == organization_id,
+                *_scoped(ExecutionIntent, organization_id, scope),
                 ExecutionIntent.action_type == ActionType.prepare_customer_response,
+                func.coalesce(ExecutionIntent.payload["channel"].as_string(), "email") == "email",
             )
             .order_by(ExecutionIntent.created_at.desc())
             .limit(50)
@@ -166,7 +173,7 @@ def _email_activity(
                 "lead_id": _uuid_or_none(payload.get("lead_id")),
                 "status": message.status.value if message else intent.status.value,
                 "state": state,
-                "mode": message.mode if message else "sandbox",
+                "mode": message.mode if message else payload.get("delivery_mode", "sandbox"),
                 "provider_message_id": message.provider_message_id if message else None,
                 "error": message.error if message else intent.last_error,
                 "sent_at": message.sent_at if message else None,
@@ -197,14 +204,13 @@ def _email_activity(
 def _email_state(status: str, approval_status: str | None) -> str:
     if approval_status in {ApprovalStatus.pending.value, ApprovalStatus.approved.value}:
         return (
-            "awaiting_approval"
-            if approval_status == ApprovalStatus.pending.value
-            else "approved"
+            "awaiting_approval" if approval_status == ApprovalStatus.pending.value else "approved"
         )
     return {
         IntentStatus.pending.value: "queued",
         IntentStatus.dispatching.value: "sending",
         IntentStatus.succeeded.value: "accepted",
+        EmailStatus.sent.value: "accepted",
         IntentStatus.failed.value: "failed",
         IntentStatus.needs_attention.value: "needs_attention",
     }.get(status, status)

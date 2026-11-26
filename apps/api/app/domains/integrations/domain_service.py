@@ -13,7 +13,7 @@ from app.domains.integrations.domain_models import (
     DomainVerificationStatus,
     EmailDomainVerification,
 )
-from app.domains.integrations.models import IntegrationConfig, IntegrationType
+from app.domains.integrations.models import IntegrationConfig, IntegrationStatus, IntegrationType
 from app.integrations.domain_verification import DomainProvider, ResendDomainProvider
 
 
@@ -24,7 +24,12 @@ def provider_for_email(db: Session, organization_id: uuid.UUID) -> DomainProvide
             IntegrationConfig.integration_type == IntegrationType.email,
         )
     )
-    if config is None or config.provider != "smtp" or not config.encrypted_credentials:
+    if (
+        config is None
+        or config.provider != "smtp"
+        or not config.encrypted_credentials
+        or config.status == IntegrationStatus.disabled
+    ):
         raise AppError(
             503, "email_provider_unconfigured", "Email provider credentials are unavailable."
         )
@@ -50,7 +55,6 @@ def register_domain(
     normalized = domain.strip().casefold().rstrip(".")
     if not normalized or "@" in normalized or "." not in normalized:
         raise AppError(422, "invalid_domain", "A valid sending domain is required.")
-    provider = provider_for_email(db, organization_id)
     email_config = db.scalar(
         select(IntegrationConfig).where(
             IntegrationConfig.organization_id == organization_id,
@@ -59,7 +63,6 @@ def register_domain(
     )
     if email_config is None:
         raise AppError(503, "email_provider_unconfigured", "Email provider is unavailable.")
-    result = provider.register(normalized)
     record = db.scalar(
         select(EmailDomainVerification).where(
             EmailDomainVerification.organization_id == organization_id,
@@ -71,6 +74,7 @@ def register_domain(
         DomainVerificationStatus.revoked,
     }:
         raise AppError(409, "domain_already_registered", "This domain is already registered.")
+    result = provider_for_email(db, organization_id).register(normalized)
     if record is None:
         record = EmailDomainVerification(organization_id=organization_id, domain=normalized)
         db.add(record)
@@ -95,24 +99,28 @@ def check_domain(db: Session, record: EmailDomainVerification) -> EmailDomainVer
             IntegrationConfig.integration_type == IntegrationType.email,
         )
     )
-    if email_config is None or email_config.credential_version != record.credential_version:
-        record.status = DomainVerificationStatus.revoked
-        record.verified_at = None
+    provider_domain_id = record.provider_domain_id
+    if (
+        email_config is None
+        or not provider_domain_id
+        or record.status == DomainVerificationStatus.revoked
+    ):
         raise AppError(
-            409,
-            "domain_evidence_stale",
-            "Provider credentials changed; verify the domain again.",
+            409, "domain_unavailable", "Register this sending domain before verification"
         )
-    result = provider_for_email(db, record.organization_id).status(record.provider_domain_id or "")
+    provider = provider_for_email(db, record.organization_id)
+    result = provider.status(provider_domain_id)
+    if not result.verified:
+        provider.start_verification(provider_domain_id)
+        result = provider.status(provider_domain_id)
     record.status = (
-        DomainVerificationStatus.verified
-        if result.verified
-        else DomainVerificationStatus.pending
+        DomainVerificationStatus.verified if result.verified else DomainVerificationStatus.pending
     )
     record.dns_records = [item.__dict__ for item in result.records]
     record.evidence = result.evidence
     record.checked_at = datetime.now(UTC)
     record.verified_at = datetime.now(UTC) if result.verified else None
+    record.credential_version = email_config.credential_version
     return record
 
 

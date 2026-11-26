@@ -1,4 +1,6 @@
 from datetime import timedelta
+from urllib.parse import urlencode
+from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Request
@@ -81,15 +83,18 @@ def me(db: DbSession, user: CurrentUser, session: CurrentSession) -> AuthRespons
 
 @router.post("/forgot-password", status_code=202)
 def forgot_password(body: PasswordResetRequest, db: DbSession) -> dict[str, str]:
-    token = create_password_reset(db, str(body.email))
+    allowed_origins = get_settings().cors_origin_list
+    token = create_password_reset(db, str(body.email)) if allowed_origins else None
     if token:
+        web_url = allowed_origins[0]
+        link = f"{web_url.rstrip('/')}/reset-password#{urlencode({'token': token})}"
         try:
             send_email(
                 OutboundEmail(
                     recipient=str(body.email),
                     subject="Reset your ATLAS password",
-                    body=f"Use this one-time reset token in the ATLAS password reset form: {token}",
-                    idempotency_key=f"password-reset:{token}",
+                    body=f"Use this link within one hour to reset your ATLAS password:\n\n{link}",
+                    idempotency_key=uuid4().hex,
                 )
             )
         except Exception:

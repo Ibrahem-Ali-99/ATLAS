@@ -50,7 +50,7 @@ export function SignOutDialog({
           </DialogDescription>
         </DialogHeader>
         {mutation.isError ? (
-          <p role="alert" className="mt-4 text-sm text-red-300">
+          <p role="alert" className="mt-4 text-sm text-destructive">
             {mutation.error.message}
           </p>
         ) : null}

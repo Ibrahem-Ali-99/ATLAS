@@ -6,6 +6,8 @@ import structlog
 def configure_logging(level: str, environment: str) -> None:
     log_level = getattr(logging, level.upper(), logging.INFO)
     logging.basicConfig(format="%(message)s", level=log_level, force=True)
+    # RequestContextMiddleware logs request metadata with widget tokens removed.
+    logging.getLogger("uvicorn.access").disabled = True
 
     if environment == "development":
         renderer: structlog.types.Processor = structlog.dev.ConsoleRenderer()

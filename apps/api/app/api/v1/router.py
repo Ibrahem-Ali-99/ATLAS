@@ -7,6 +7,7 @@ from app.api.v1 import (
     auth,
     automation,
     billing,
+    calendar,
     campaigns,
     crm,
     health,
@@ -34,7 +35,10 @@ router.include_router(agents.router)
 router.include_router(approvals.router)
 router.include_router(automation.router)
 router.include_router(billing.router)
+router.include_router(calendar.router)
 router.include_router(campaigns.router)
+router.include_router(campaigns.preferences)
+router.include_router(campaigns.feedback)
 router.include_router(onboarding.router)
 router.include_router(inbox.router)
 router.include_router(inbox.public_widget_router)

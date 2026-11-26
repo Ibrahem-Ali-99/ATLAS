@@ -26,6 +26,7 @@ def eligible_config(**updates: object) -> SimpleNamespace:
         status="configured",
         encrypted_credentials="encrypted",
         verified_at=datetime.now(UTC),
+        credential_version=1,
         config=config,
     )
 

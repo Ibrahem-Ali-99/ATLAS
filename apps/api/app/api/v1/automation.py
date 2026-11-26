@@ -1,23 +1,30 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.errors import AppError
 from app.domains.approvals import service as approvals
 from app.domains.approvals.schemas import ApprovalOut
 from app.domains.automation import status
-from app.domains.automation.hooks import create_webhook_key
-from app.domains.automation.models import WorkflowTask
+from app.domains.automation.hooks import create_webhook_key, revoke_webhook_key, rotate_webhook_key
+from app.domains.automation.models import (
+    BookingStatus,
+    CalendarBooking,
+    WebhookEvent,
+    WebhookKey,
+    WorkflowTask,
+)
 from app.domains.automation.schemas import (
     AutomationSnapshot,
     BookingOut,
     EmailActivityOut,
     WebhookKeyOut,
+    WebhookKeyStatus,
 )
-from app.domains.identity.dependencies import CsrfAdmin, CsrfMember, DbSession, Member
+from app.domains.identity.dependencies import Admin, CsrfAdmin, CsrfMember, DbSession, Member
 from app.domains.identity.models import Membership, User
 from app.domains.provenance.origin import DataScope
 from app.integrations.calendar import calendar_adapter
@@ -177,9 +184,42 @@ def get_email_activity(
 
 
 @router.post("/integrations/webhook-keys", response_model=WebhookKeyOut, status_code=201)
-def create_key(member: CsrfAdmin, db: DbSession) -> WebhookKeyOut:
-    key, secret = create_webhook_key(db, member.organization.id)
+def create_key(member: CsrfAdmin, db: DbSession, response: Response) -> WebhookKeyOut:
+    key, secret = create_webhook_key(db, member.organization.id, actor_id=member.user.id)
+    response.headers["Cache-Control"] = "no-store"
     return WebhookKeyOut(id=key.id, name=key.name, secret=secret)
+
+
+@router.get("/integrations/webhook-keys", response_model=WebhookKeyStatus | None)
+def webhook_key_status(member: Admin, db: DbSession) -> WebhookKeyStatus | None:
+    key = db.scalar(select(WebhookKey).where(WebhookKey.organization_id == member.organization.id))
+    if key is None:
+        return None
+    received = select(func.max(WebhookEvent.received_at)).where(
+        WebhookEvent.key_id == key.id, WebhookEvent.organization_id == member.organization.id
+    )
+    if key.rotated_at is not None:
+        received = received.where(WebhookEvent.received_at >= key.rotated_at)
+    return WebhookKeyStatus(
+        id=key.id,
+        name=key.name,
+        created_at=key.created_at,
+        rotated_at=key.rotated_at,
+        revoked_at=key.revoked_at,
+        last_accepted_at=db.scalar(received),
+    )
+
+
+@router.post("/integrations/webhook-keys/rotate", response_model=WebhookKeyOut)
+def rotate_key(member: CsrfAdmin, db: DbSession, response: Response) -> WebhookKeyOut:
+    key, secret = rotate_webhook_key(db, member.organization.id, member.user.id)
+    response.headers["Cache-Control"] = "no-store"
+    return WebhookKeyOut(id=key.id, name=key.name, secret=secret)
+
+
+@router.post("/integrations/webhook-keys/revoke", status_code=204)
+def revoke_key(member: CsrfAdmin, db: DbSession) -> None:
+    revoke_webhook_key(db, member.organization.id, member.user.id)
 
 
 @router.post("/approvals/{approval_id}/execute", response_model=ApprovalOut)
@@ -200,4 +240,42 @@ def cancel_booking(booking_id: uuid.UUID, member: CsrfAdmin, db: DbSession) -> B
         starts_at=booking.starts_at,
         ends_at=booking.ends_at,
         provider_event_id=booking.provider_event_id,
+    )
+
+
+@router.get("/calendar/bookings/{booking_id}/export")
+def export_booking(booking_id: uuid.UUID, member: Member, db: DbSession) -> Response:
+    booking = db.scalar(
+        select(CalendarBooking).where(
+            CalendarBooking.id == booking_id,
+            CalendarBooking.organization_id == member.organization.id,
+            CalendarBooking.status == BookingStatus.booked,
+        )
+    )
+    if booking is None:
+        raise AppError(404, "booking_unavailable", "An active booking was not found")
+    content = "\r\n".join(
+        (
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//ATLAS//Customer Appointments//EN",
+            "BEGIN:VEVENT",
+            f"UID:{booking.id}@atlas",
+            f"DTSTAMP:{booking.updated_at.astimezone(UTC):%Y%m%dT%H%M%SZ}",
+            f"DTSTART:{booking.starts_at.astimezone(UTC):%Y%m%dT%H%M%SZ}",
+            f"DTEND:{booking.ends_at.astimezone(UTC):%Y%m%dT%H%M%SZ}",
+            "SUMMARY:ATLAS customer appointment",
+            "CLASS:PRIVATE",
+            "END:VEVENT",
+            "END:VCALENDAR",
+            "",
+        )
+    )
+    return Response(
+        content,
+        media_type="text/calendar",
+        headers={
+            "Content-Disposition": 'attachment; filename="atlas-appointment.ics"',
+            "Cache-Control": "private, no-store",
+        },
     )

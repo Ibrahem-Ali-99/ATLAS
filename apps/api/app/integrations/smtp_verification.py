@@ -12,23 +12,33 @@ class SmtpVerification:
 
 
 def verify_smtp(
-    *, host: str, port: int, username: str | None, password: str | None,
-    starttls: bool, use_tls: bool, timeout: float = 5,
+    *,
+    host: str,
+    port: int,
+    username: str | None,
+    password: str | None,
+    starttls: bool,
+    use_tls: bool,
+    timeout: float = 5,
 ) -> SmtpVerification:
+    if username or password:
+        if not username or not password:
+            return SmtpVerification(False, "SMTP username and password must be supplied together.")
+        if not starttls and not use_tls:
+            return SmtpVerification(
+                False, "Select TLS or STARTTLS before testing SMTP credentials."
+            )
     try:
+        context = ssl.create_default_context()
         client: smtplib.SMTP | smtplib.SMTP_SSL
         if use_tls:
-            client = smtplib.SMTP_SSL(host, port, timeout=timeout)
+            client = smtplib.SMTP_SSL(host, port, timeout=timeout, context=context)
         else:
             client = smtplib.SMTP(host, port, timeout=timeout)
         with client:
             if starttls:
-                client.starttls()
-            if username or password:
-                if not username or not password:
-                    return SmtpVerification(
-                        False, "SMTP username and password must be supplied together."
-                    )
+                client.starttls(context=context)
+            if username and password:
                 client.login(username, password)
         return SmtpVerification(
             True,

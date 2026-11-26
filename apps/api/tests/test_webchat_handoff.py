@@ -51,9 +51,52 @@ def test_handoff_takeover_staff_delivery_and_duplicate_protection(
         json={"message": "Please connect me with a human", "client_message_id": "visitor-1"},
     )
     assert sent.status_code == 200
+    retry = api.post(
+        f"/api/v1/widget/{public_id}/sessions/{token}/messages",
+        json={"message": "Please connect me with a human", "client_message_id": "visitor-1"},
+    )
+    assert retry.status_code == 200 and retry.json()["status"] == "duplicate"
+    conflicting = api.post(
+        f"/api/v1/widget/{public_id}/sessions/{token}/messages",
+        json={"message": "Different content", "client_message_id": "visitor-1"},
+    )
+    assert conflicting.status_code == 409
     api.cookies.clear()
     admin = login(api, "webchat-admin@example.com", PASSWORD)
     headers = _csrf(admin)
+    assignees = api.get(f"/api/v1/organizations/{org_id}/inbox/assignees")
+    assert assignees.status_code == 200, assignees.text
+    assert [item["email"] for item in assignees.json()] == ["webchat-admin@example.com"]
+    widget = api.get(f"/api/v1/organizations/{org_id}/inbox/widget")
+    assert widget.status_code == 200, widget.text
+    assert widget.json()["public_id"] == public_id
+    thread_path = f"/api/v1/organizations/{org_id}/inbox/{conversation_id}"
+    thread = api.get(thread_path)
+    assert thread.status_code == 200, thread.text
+    assert thread.json()["id"] == conversation_id
+    assert thread.json()["unread_count"] == 1
+    assert api.get(thread_path).json()["unread_count"] == 1
+    assert (
+        api.patch(
+            f"{thread_path}/read", json={"updated_at": thread.json()["updated_at"]}
+        ).status_code
+        == 403
+    )
+    second_message = api.post(
+        f"/api/v1/widget/{public_id}/sessions/{token}/messages",
+        json={"message": "Are you available today?", "client_message_id": "visitor-2"},
+    )
+    assert second_message.status_code == 200, second_message.text
+    stale_read = api.patch(
+        f"{thread_path}/read", json={"updated_at": thread.json()["updated_at"]}, headers=headers
+    )
+    assert stale_read.json() == {"marked": False}
+    current = api.get(thread_path).json()
+    assert current["unread_count"] == 2
+    assert api.patch(
+        f"{thread_path}/read", json={"updated_at": current["updated_at"]}, headers=headers
+    ).json() == {"marked": True}
+    assert api.get(thread_path).json()["unread_count"] == 0
     takeover = api.post(
         f"/api/v1/organizations/{org_id}/inbox/{conversation_id}/takeover", headers=headers
     )
@@ -90,10 +133,24 @@ def test_human_only_widget_does_not_auto_reply_and_sessions_are_isolated(
     )
     assert sent.status_code == 200
     assert (db.scalar(select(func.count()).select_from(InboxMessage)) or 0) == message_count + 1
-    stolen = api.get(
-        f"/api/v1/widget/{public_id}/sessions/{uuid.uuid4()}/messages"
-    )
+    stolen = api.get(f"/api/v1/widget/{public_id}/sessions/{uuid.uuid4()}/messages")
     assert stolen.status_code == 401
+    widget_path = f"/api/v1/widget/{public_id}/sessions/{session['session_token']}/messages"
+    external_origin = {"origin": "https://storefront.example"}
+    other_origin = api.get(widget_path, headers=external_origin)
+    assert other_origin.status_code == 401
+    options = {
+        **external_origin,
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type",
+    }
+    widget_preflight = api.options(widget_path, headers=options)
+    assert widget_preflight.status_code == 200
+    assert widget_preflight.headers["access-control-allow-origin"] == "*"
+    assert "access-control-allow-credentials" not in widget_preflight.headers
+    workspace_preflight = api.options("/api/v1/auth/login", headers=options)
+    assert workspace_preflight.status_code == 400
+    assert "access-control-allow-origin" not in workspace_preflight.headers
     api.cookies.clear()
     staff = login(api, "human-only@example.com", PASSWORD)
     resume = api.post(

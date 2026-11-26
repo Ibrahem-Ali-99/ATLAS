@@ -61,6 +61,8 @@ class WorkflowDefinition(Base):
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     active: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     definition: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -154,6 +156,8 @@ class WebhookKey(Base):
     )
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     secret: Mapped[str] = mapped_column(Text, nullable=False)
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -327,6 +331,7 @@ class CalendarBooking(Base):
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     origin: Mapped[Origin] = origin_column()
     provider_event_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    provider_calendar_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

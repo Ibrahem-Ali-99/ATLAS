@@ -21,15 +21,23 @@ def resolve_settings(
     kind: Literal["chat", "embedding"],
     *,
     base_settings: Settings | None = None,
+    for_verification: bool = False,
 ) -> Settings:
     settings = base_settings or get_settings()
-    record = db.query(IntegrationConfig).filter(
-        IntegrationConfig.organization_id == organization_id,
-        IntegrationConfig.integration_type == IntegrationType(kind),
-    ).one_or_none()
+    record = (
+        db.query(IntegrationConfig)
+        .populate_existing()
+        .filter(
+            IntegrationConfig.organization_id == organization_id,
+            IntegrationConfig.integration_type == IntegrationType(kind),
+        )
+        .one_or_none()
+    )
     if record is None:
         return settings
-    if record.status != IntegrationStatus.configured:
+    if record.status != IntegrationStatus.configured and not (
+        for_verification and record.status == IntegrationStatus.verification_failed
+    ):
         raise AppError(503, "integration_disabled", "The organization integration is disabled.")
     requires_credential = kind == "chat" or record.provider not in {"ollama", "double"}
     if requires_credential and not record.encrypted_credentials:

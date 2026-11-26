@@ -10,12 +10,14 @@ test("Knowledge upload, indexing, search, inspection, and removal", async ({ pag
 
   await page.goto("/knowledge");
   await expect(page.getByRole("heading", { name: "Company knowledge" })).toBeVisible();
+  await page.getByRole("button", { name: "Upload document", exact: true }).click();
   await page.getByLabel("Document origin").selectOption("demo");
   await page.locator('input[type="file"]').setInputFiles({
     name: `${title}.txt`,
     mimeType: "text/plain",
     buffer: Buffer.from(`DEMO KNOWLEDGE FIXTURE. The warehouse reference is ${token}.`),
   });
+  await page.getByRole("button", { name: "Upload and index" }).click();
 
   const row = page.getByRole("row", { name: title });
   await expect(row).toBeVisible();
@@ -26,17 +28,30 @@ test("Knowledge upload, indexing, search, inspection, and removal", async ({ pag
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
   await expect(page.getByText(`DEMO KNOWLEDGE FIXTURE. The warehouse reference is ${token}.`)).toBeVisible();
 
-  await page.getByLabel("Search documents").fill("");
-  await page.getByLabel("Search documents").fill(token);
-  await page.getByLabel("Search documents").fill("");
+  await page.getByLabel("Filter by file type").selectOption("pdf");
+  await expect(row).toHaveCount(0);
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(row).toBeVisible();
+  await page.getByRole("button", { name: "Semantic search" }).click();
   await page.getByLabel("Search documents").fill(token);
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByText(`DEMO KNOWLEDGE FIXTURE. The warehouse reference is ${token}.`)).toBeVisible();
 
+  await page.goto("/assistant");
+  await page.getByRole("textbox", { name: "Message to ATLAS" }).fill(token);
+  await page.getByRole("button", { name: "Send" }).click();
+  const answer = page.getByRole("article").filter({ hasText: title });
+  await expect(answer.getByText(title, { exact: true })).toBeVisible();
+  await answer.getByRole("button", { name: /View exact excerpt/ }).click();
+  await expect(page.getByText(`DEMO KNOWLEDGE FIXTURE. The warehouse reference is ${token}.`, { exact: true }).last()).toBeVisible();
+
+  await page.goto("/knowledge");
   await row.getByRole("button", { name: "Delete" }).click();
   await page.getByRole("button", { name: "Confirm delete" }).click();
   await expect(page.getByRole("row", { name: title })).toHaveCount(0);
 
+  await page.getByRole("button", { name: "Semantic search" }).click();
+  await page.getByLabel("Search documents").fill(token);
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByText(new RegExp(`No indexed excerpts matched.*${token}`))).toBeVisible();
   await page.goto("/assistant");

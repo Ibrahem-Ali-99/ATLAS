@@ -3,7 +3,7 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
@@ -65,9 +65,7 @@ def get_active_session(db: Session, session_id: uuid.UUID) -> UserSession | None
     return record
 
 
-def list_memberships(
-    db: Session, user_id: uuid.UUID
-) -> list[tuple[Organization, Membership]]:
+def list_memberships(db: Session, user_id: uuid.UUID) -> list[tuple[Organization, Membership]]:
     rows = db.execute(
         select(Organization, Membership)
         .join(Membership, Membership.organization_id == Organization.id)
@@ -83,9 +81,7 @@ def get_membership(
     row = db.execute(
         select(Organization, Membership)
         .join(Membership, Membership.organization_id == Organization.id)
-        .where(
-            Membership.user_id == user_id, Membership.organization_id == organization_id
-        )
+        .where(Membership.user_id == user_id, Membership.organization_id == organization_id)
     ).one_or_none()
     if row is None:
         return None
@@ -142,9 +138,7 @@ def update_membership_role(
     return membership
 
 
-def remove_membership(
-    db: Session, organization_id: uuid.UUID, membership_id: uuid.UUID
-) -> None:
+def remove_membership(db: Session, organization_id: uuid.UUID, membership_id: uuid.UUID) -> None:
     membership = db.scalar(
         select(Membership)
         .where(
@@ -177,17 +171,27 @@ def remove_membership(
 
 
 def create_password_reset(db: Session, email: str) -> str | None:
-    user = db.scalar(
-        select(User).where(User.email == normalize_email(email)).with_for_update()
-    )
+    user = db.scalar(select(User).where(User.email == normalize_email(email)).with_for_update())
     if user is None or not user.is_active:
+        return None
+    now = datetime.now(UTC)
+    recent = db.scalar(
+        select(PasswordResetToken.id)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.created_at > now - timedelta(minutes=1),
+        )
+        .limit(1)
+    )
+    if recent is not None:
         return None
     token = secrets.token_urlsafe(32)
     db.add(
         PasswordResetToken(
             user_id=user.id,
             token_hash=hashlib.sha256(token.encode()).hexdigest(),
-            expires_at=datetime.now(UTC) + timedelta(hours=1),
+            expires_at=now + timedelta(hours=1),
         )
     )
     db.commit()
@@ -195,25 +199,25 @@ def create_password_reset(db: Session, email: str) -> str | None:
 
 
 def reset_password(db: Session, token: str, password: str) -> User:
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    user_id = db.scalar(
+        select(PasswordResetToken.user_id).where(PasswordResetToken.token_hash == digest)
+    )
+    user = db.scalar(select(User).where(User.id == user_id).with_for_update()) if user_id else None
     row = db.scalar(
-        select(PasswordResetToken)
-        .where(
-            PasswordResetToken.token_hash == hashlib.sha256(token.encode()).hexdigest()
-        )
-        .with_for_update()
+        select(PasswordResetToken).where(PasswordResetToken.token_hash == digest).with_for_update()
     )
     now = datetime.now(UTC)
     if row is None or row.used_at is not None or row.expires_at <= now:
-        raise AppError(
-            400, "invalid_reset_token", "This reset link is invalid or expired"
-        )
-    user = db.get(User, row.user_id)
+        raise AppError(400, "invalid_reset_token", "This reset link is invalid or expired")
     if user is None or not user.is_active:
-        raise AppError(
-            400, "invalid_reset_token", "This reset link is invalid or expired"
-        )
+        raise AppError(400, "invalid_reset_token", "This reset link is invalid or expired")
     user.password_hash = hash_password(password)
-    row.used_at = now
+    db.execute(
+        update(PasswordResetToken)
+        .where(PasswordResetToken.user_id == user.id, PasswordResetToken.used_at.is_(None))
+        .values(used_at=now)
+    )
     db.query(UserSession).filter(UserSession.user_id == user.id).update(
         {UserSession.revoked_at: now}, synchronize_session=False
     )
@@ -263,9 +267,7 @@ def upsert_membership(
         )
     )
     if membership is None:
-        membership = Membership(
-            user_id=user.id, organization_id=organization.id, role=role
-        )
+        membership = Membership(user_id=user.id, organization_id=organization.id, role=role)
         db.add(membership)
         db.flush()
         return membership

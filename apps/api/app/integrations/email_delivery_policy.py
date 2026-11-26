@@ -1,8 +1,4 @@
-"""Fail-closed gates for future organization-specific live email delivery.
-
-This module only evaluates eligibility.  Actual delivery remains sandbox-only in
-``app.integrations.email`` until a later, explicitly enabled phase.
-"""
+"""Check eligibility for approved organization-specific live email delivery."""
 
 from __future__ import annotations
 
@@ -33,8 +29,7 @@ def live_delivery_eligibility(
 ) -> LiveDeliveryEligibility:
     """Evaluate all live-delivery gates for an immutable approved intent.
 
-    The caller must still keep sandbox transport active.  This function never
-    opens credentials and never sends a message.
+    Transport opens credentials only after eligibility succeeds.
     """
     config = db.scalar(
         select(IntegrationConfig).where(
@@ -63,6 +58,7 @@ def live_delivery_eligibility(
             EmailDomainVerification.domain == sender_domain,
             EmailDomainVerification.provider == "resend",
             EmailDomainVerification.status == DomainVerificationStatus.verified,
+            EmailDomainVerification.credential_version == config.credential_version,
         )
     )
     if verified_domain is None or verified_domain.verified_at is None:
@@ -84,6 +80,7 @@ def live_delivery_eligibility(
         select(Contact).where(
             Contact.id == contact_uuid,
             Contact.organization_id == intent.organization_id,
+            Contact.archived_at.is_(None),
         )
     )
     if contact is None or not contact.email:

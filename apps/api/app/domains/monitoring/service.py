@@ -84,7 +84,14 @@ def diagnostics(
     costs = [trace.cost_usd for trace in traces if trace.cost_usd is not None]
     now = datetime.now(UTC)
     workers = list(db.scalars(select(WorkerHeartbeat).order_by(WorkerHeartbeat.worker_kind)))
-    ingestion = list(db.scalars(select(IngestionJob).where(IngestionJob.organization_id == organization_id).order_by(IngestionJob.updated_at.desc()).limit(50)))
+    ingestion = list(
+        db.scalars(
+            select(IngestionJob)
+            .where(IngestionJob.organization_id == organization_id)
+            .order_by(IngestionJob.updated_at.desc())
+            .limit(50)
+        )
+    )
     return {
         "scope": scope.value,
         "hint_notice": "Hints name a recorded error code. They are not a root-cause finding.",
@@ -127,7 +134,9 @@ def diagnostics(
             {
                 "id": row.worker_id,
                 "kind": row.worker_kind,
-                "status": "stalled" if (now - row.heartbeat_at).total_seconds() > 30 else row.status,
+                "status": (
+                    "stalled" if (now - row.heartbeat_at).total_seconds() > 30 else row.status
+                ),
                 "heartbeat_at": row.heartbeat_at,
                 "last_success_at": row.last_success_at,
                 "processed_count": row.processed_count,

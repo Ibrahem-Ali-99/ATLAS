@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.errors import AppError
 from app.domains.audit.service import record_event
@@ -184,6 +184,7 @@ def put_integration(
         data,
         expected_version=body.expected_version,
         actor_id=admin.user.id,
+        merge_email_credentials=body.merge_email_credentials,
     )
     db.commit()
     return safe_metadata(db, admin.organization.id, record.integration_type)  # type: ignore[return-value]
@@ -280,20 +281,24 @@ def verify(
     record = read_metadata(db, admin.organization.id, integration_type)
     if record is None:
         raise AppError(404, "integration_not_found", "Integration configuration not found")
-    metadata = safe_metadata(db, admin.organization.id, integration_type)
-    assert metadata is not None
+    if record.status == IntegrationStatus.disabled:
+        raise AppError(409, "integration_disabled", "Enable this integration before testing it")
+    if integration_type == IntegrationType.n8n:
+        raise AppError(422, "verification_unsupported", "Verify n8n using a signed callback")
+    record_id = record.id
+    version = record.credential_version
+    verification_started = datetime.now(UTC)
+    error = None
     try:
         if integration_type == IntegrationType.chat:
-            get_chat_client(db, admin.organization.id).complete(
+            get_chat_client(db, admin.organization.id, for_verification=True).complete(
                 "Respond with one short word.", "verification"
             )
         elif integration_type == IntegrationType.embedding:
-            get_embedding_client(db, admin.organization.id).embed(
+            get_embedding_client(db, admin.organization.id, for_verification=True).embed(
                 ["ATLAS integration verification"]
             )
         elif integration_type == IntegrationType.email:
-            if record.status == IntegrationStatus.disabled:
-                raise AppError(409, "integration_disabled", "Email integration is disabled.")
             credentials = (
                 open_integration_secret(record.encrypted_credentials)
                 if record.encrypted_credentials
@@ -352,41 +357,70 @@ def verify(
                 raise AppError(
                     504, "whatsapp_provider_timeout", "WhatsApp connection test timed out"
                 ) from exc
+            except httpx.HTTPError as exc:
+                raise AppError(
+                    502, "whatsapp_unreachable", "WhatsApp could not be reached"
+                ) from exc
             if response.status_code >= 400:
+                try:
+                    provider_error = response.json().get("error", {})
+                except (ValueError, AttributeError):
+                    provider_error = {}
+                if isinstance(provider_error, dict) and provider_error.get("error_subcode") == 463:
+                    raise AppError(
+                        422, "whatsapp_credentials_expired", "WhatsApp access token expired"
+                    )
                 raise AppError(
                     502, "whatsapp_provider_error", "WhatsApp rejected the connection test"
+                )
+            try:
+                confirmed_phone = response.json().get("id")
+            except (ValueError, AttributeError):
+                confirmed_phone = None
+            if confirmed_phone != phone_id:
+                raise AppError(
+                    502, "whatsapp_provider_error", "WhatsApp could not confirm this phone number"
                 )
         else:
             raise AppError(
                 422, "verification_unsupported", "This integration has no provider test."
             )
     except AppError as exc:
-        record.status = IntegrationStatus.verification_failed
-        record.verified_at = datetime.now(UTC)
-        record.verification_detail = exc.message[:500]
-        record_event(
-            db,
-            admin.organization.id,
-            "integration_verification_status_changed",
-            {"integration_type": integration_type.value, "verified": False},
-            actor_id=admin.user.id,
+        error = exc
+    verified = error is None
+    detail = error.message if error else "Provider verification succeeded."
+    applied = db.scalar(
+        update(IntegrationConfig)
+        .where(
+            IntegrationConfig.id == record_id,
+            IntegrationConfig.organization_id == admin.organization.id,
+            IntegrationConfig.credential_version == version,
+            IntegrationConfig.status != IntegrationStatus.disabled,
+            (
+                IntegrationConfig.verified_at.is_(None)
+                | (IntegrationConfig.verified_at < verification_started)
+            ),
         )
-        db.commit()
-        metadata = safe_metadata(db, admin.organization.id, integration_type)
-        assert metadata is not None
-        return VerificationResult(
-            integration=metadata,
-            verified=False,
-            detail=exc.message,
+        .values(
+            status=IntegrationStatus.configured
+            if verified
+            else IntegrationStatus.verification_failed,
+            verified_at=verification_started,
+            verification_detail=detail[:500],
         )
-    record.status = IntegrationStatus.configured
-    record.verified_at = datetime.now(UTC)
-    record.verification_detail = "Provider verification succeeded."
+        .returning(IntegrationConfig.id)
+    )
+    if applied is None:
+        raise AppError(
+            409,
+            "integration_verification_stale",
+            "The integration changed while it was being tested. Test it again.",
+        )
     record_event(
         db,
         admin.organization.id,
         "integration_verification_status_changed",
-        {"integration_type": integration_type.value, "verified": True},
+        {"integration_type": integration_type.value, "verified": verified},
         actor_id=admin.user.id,
     )
     db.commit()
@@ -394,6 +428,6 @@ def verify(
     assert metadata is not None
     return VerificationResult(
         integration=metadata,
-        verified=True,
-        detail="Provider verification succeeded.",
+        verified=verified,
+        detail=detail,
     )

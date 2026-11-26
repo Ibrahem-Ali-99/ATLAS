@@ -117,10 +117,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate development and staging Compose configuration
+        run: |
+          docker compose --env-file .env.example -f infrastructure/compose.yaml config --quiet
+          docker compose --env-file infrastructure/staging/.env.example -f infrastructure/compose.staging.yaml config --quiet
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Verify staging preflight rules
+        run: uv run --project apps/api --frozen pytest -c apps/api/pyproject.toml -o addopts= -q infrastructure/staging/test_preflight.py
       - name: Build the API image
         run: docker build -t atlas-api:ci apps/api
       - name: Build the web image
         run: docker build -t atlas-web:ci apps/web
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Audit the JavaScript lockfile
+        working-directory: apps/web
+        run: npm audit --audit-level=high
+      - name: Export locked Python runtime dependencies
+        if: always()
+        id: python-lock
+        working-directory: apps/api
+        run: uv export --locked --no-dev --no-emit-project --output-file "$RUNNER_TEMP/api-requirements.txt"
+      - name: Audit locked Python runtime dependencies
+        if: always() && steps.python-lock.outcome == 'success'
+        run: uvx --python 3.12 pip-audit@2.10.1 --disable-pip --require-hashes --strict -r "$RUNNER_TEMP/api-requirements.txt"
 
   secrets:
     runs-on: ubuntu-latest

@@ -1,4 +1,5 @@
 """Durable PostgreSQL-backed knowledge ingestion worker."""
+
 from __future__ import annotations
 
 import logging
@@ -8,6 +9,7 @@ import uuid
 import structlog
 
 from app.core.database import SessionLocal
+from app.domains.knowledge.reindex import run_batch
 from app.domains.knowledge.service import claim_ingestion_job, run_ingestion_job
 from app.domains.observability.workers import touch
 
@@ -20,9 +22,11 @@ def run_once(worker_id: str | None = None) -> bool:
     heartbeat = SessionLocal()
     touch(heartbeat, effective_worker_id, "knowledge", status="idle")
     heartbeat.close()
+    with SessionLocal() as reindex_db:
+        rebuilt_index = run_batch(reindex_db)
     job = claim_ingestion_job(effective_worker_id)
     if job is None:
-        return False
+        return rebuilt_index
     try:
         run_ingestion_job(job, effective_worker_id)
         heartbeat = SessionLocal()

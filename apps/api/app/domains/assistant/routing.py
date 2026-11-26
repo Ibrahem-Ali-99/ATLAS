@@ -64,6 +64,10 @@ _UNGROUNDED = re.compile(
     r"^(ok|okay|yes|no|sure|got it)\b"
 )
 _REPHRASE = re.compile(r"\b(rephrase|say that again|explain that|more simply|in simpler terms)\b")
+_HANDOFF = re.compile(
+    r"\b(speak|talk|chat) (to|with) (a |an )?(human|person|agent|representative)\b|"
+    r"\b(connect|transfer|hand) me (over )?to (a |an )?(human|person|agent|representative)\b"
+)
 
 
 class Intent(enum.StrEnum):
@@ -75,6 +79,7 @@ class Intent(enum.StrEnum):
     leads = "leads"
     recall = "recall"
     mutation = "mutation"
+    handoff = "handoff"
     greeting = "greeting"
     grounded = "grounded"
     general = "general"
@@ -134,6 +139,8 @@ def normalize_question(question: str) -> str:
 
 def route_question(question: str, *, has_history: bool) -> Intent:
     text = normalize_question(question)
+    if _HANDOFF.search(text):
+        return Intent.handoff
     if _MUTATION_VERB.search(text) and _MUTATION_OBJECT.search(text):
         return Intent.mutation
     if _DOCUMENTS.search(text):

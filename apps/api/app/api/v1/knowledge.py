@@ -1,6 +1,6 @@
 # ruff: noqa: E501
 import uuid
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Form, Query, Request, Response, UploadFile
 from sqlalchemy import select
@@ -10,9 +10,14 @@ from app.core.errors import AppError
 from app.domains.assistant.service import evaluate_response
 from app.domains.billing.service import enforce_limit
 from app.domains.crm.service import page_bounds
-from app.domains.identity.dependencies import CsrfAdmin, CsrfMember, DbSession, Member
-from app.domains.knowledge import service
-from app.domains.knowledge.models import EvaluationQuestion, EvaluationRun, IngestionJob
+from app.domains.identity.dependencies import Admin, CsrfAdmin, CsrfMember, DbSession, Member
+from app.domains.knowledge import reindex, service
+from app.domains.knowledge.models import (
+    DocumentStatus,
+    EvaluationQuestion,
+    EvaluationRun,
+    IngestionJob,
+)
 from app.domains.knowledge.retrieval import search_chunks
 from app.domains.knowledge.schemas import (
     ChunkOut,
@@ -34,6 +39,24 @@ from app.integrations.language import (
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["knowledge"])
 
 
+@router.get("/knowledge/embedding-reindex")
+def embedding_reindex_status(admin: Admin, db: DbSession) -> dict[str, object] | None:
+    return reindex.progress(db, admin.organization.id)
+
+
+@router.post("/knowledge/embedding-reindex", status_code=202)
+def start_embedding_reindex(
+    body: reindex.ReindexRequest, admin: CsrfAdmin, db: DbSession
+) -> dict[str, object] | None:
+    reindex.start(db, admin.organization.id, admin.user.id, body)
+    return reindex.progress(db, admin.organization.id)
+
+
+@router.delete("/knowledge/embedding-reindex", status_code=204)
+def cancel_embedding_reindex(admin: CsrfAdmin, db: DbSession) -> None:
+    reindex.cancel(db, admin.organization.id)
+
+
 def organization_embedder(request: Request, member: Member, db: DbSession) -> EmbeddingClient:
     override = request.app.dependency_overrides.get(get_embedding_client)
     if override is not None:
@@ -53,11 +76,19 @@ def list_documents(
     member: Member,
     db: DbSession,
     q: str | None = None,
+    status: DocumentStatus | None = None,
+    file_type: Literal["pdf", "txt"] | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> DocumentPage:
     items, total = service.list_documents(
-        db, member.organization.id, q=q, page=page, page_size=page_size
+        db,
+        member.organization.id,
+        q=q,
+        page=page,
+        page_size=page_size,
+        status=status,
+        file_type=file_type,
     )
     safe_page, safe_size = page_bounds(page, page_size)
     return DocumentPage(
@@ -224,8 +255,17 @@ def run_evaluation(
             "escalated": True,
             "reason": exc.code,
         }
-    actual_behavior = "handoff" if ai_result["escalated"] else "answer"
+    actual_behavior = {
+        "grounded": "answer",
+        "fallback": "fallback",
+        "handoff": "handoff",
+    }.get(str(ai_result["grounding"]), "provider_failure")
     behavior_match = behavior_match and actual_behavior == question.expected_behavior
+    if question.expected_answer:
+        behavior_match = (
+            behavior_match
+            and question.expected_answer.casefold() in str(ai_result["response"]).casefold()
+        )
     case_result = {
         "scenario": question.scenario,
         "expected_behavior": question.expected_behavior,
@@ -322,17 +362,23 @@ def compare_evaluation_runs(member: Member, db: DbSession) -> dict[str, object]:
     if not rows:
         return {"current": None, "previous": None, "regressions": [], "improvements": []}
     current = rows[0]
-    previous = next(
-        (row for row in rows[1:] if row.question_id == current.question_id), None
-    )
+    previous = next((row for row in rows[1:] if row.question_id == current.question_id), None)
     regressions: list[dict[str, object]] = []
     improvements: list[dict[str, object]] = []
     if previous is not None and current.answer_grounded != previous.answer_grounded:
         target = regressions if not current.answer_grounded else improvements
-        target.append({"question_id": str(current.question_id), "from": previous.answer_grounded, "to": current.answer_grounded})
+        target.append(
+            {
+                "question_id": str(current.question_id),
+                "from": previous.answer_grounded,
+                "to": current.answer_grounded,
+            }
+        )
     return {
         "current": EvaluationRunOut.model_validate(current).model_dump(mode="json"),
-        "previous": None if previous is None else EvaluationRunOut.model_validate(previous).model_dump(mode="json"),
+        "previous": None
+        if previous is None
+        else EvaluationRunOut.model_validate(previous).model_dump(mode="json"),
         "regressions": regressions,
         "improvements": improvements,
     }

@@ -1,5 +1,7 @@
 # ATLAS Functional and Production-Readiness Audit
 
+> Historical checkpoint. See [the product completion backlog](product-completion-backlog.md) for current status.
+
 **Audit basis:** repository inspection at `9dac4dd`, including current working-tree files as evidence only. No application or data changes were made for this audit.
 
 ## Executive verdict
@@ -28,7 +30,7 @@ It is not production-ready as a hosted multi-tenant SaaS. The main blockers are 
 | Roles | Fully implemented and tested for current scope | Only `admin` and `staff` exist; `require_member`/`require_admin` in `domains/identity/dependencies.py`; `tests/test_authorization.py`. Granular permissions are absent. |
 | CSRF | Fully implemented and tested | `require_csrf`, `CsrfMember`, `CsrfAdmin`; mutation routes require `X-CSRF-Token`. |
 | Tenant isolation | Fully implemented for tested routes | Organization membership is derived from authenticated user and services filter `organization_id`; covered by auth/CRM/knowledge/assistant tests. Non-HTTP worker review remains necessary for every new path. |
-| Invitations | Implemented but insufficiently tested | New `domains/identity/invitation_models.py`, `invitation_service.py`, `api/v1/invitations.py`, migration `20261124_0019`, and admin Settings card provide single-use, seven-day, staff invitations. The token is hashed at rest and returned once because outbound email is not enabled. Static migration generation and test collection pass; a direct TCP probe still fails from Codex with Windows error `10035`. Operator-side verification is prepared in `scripts/verify-invitations.ps1`; runtime security tests have not passed here. |
+| Invitations | Implemented but insufficiently tested | New `domains/identity/invitation_models.py`, `invitation_service.py`, `api/v1/invitations.py`, migration `20261124_0019`, and admin Settings card provide single-use, seven-day, staff invitations. The token is hashed at rest and returned once because outbound email is not enabled. Static migration generation and test collection pass; a direct TCP probe still fails from the audit host with Windows error `10035`. Operator-side verification is prepared in `scripts/verify-invitations.ps1`; runtime security tests have not passed here. |
 | Password reset/recovery | Missing | No reset-token model, route, email flow, or UI; seed/reset scripts are operator-only. |
 | MFA/SSO/profile/session administration | Missing | No MFA, SAML/OIDC, profile/password-change, device/session UI, or admin deprovisioning flow. |
 

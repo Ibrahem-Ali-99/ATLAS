@@ -10,6 +10,7 @@ import type {
   Conversation,
   ConversationDetail,
   DocumentOrigin,
+  DocumentStatus,
   Inquiry,
   InquiryInput,
   Interaction,
@@ -51,6 +52,10 @@ export function listCompanies(organizationId: string, params: ListParams = {}): 
   return apiFetch(organizationPath(organizationId, `/companies${listQuery(params)}`));
 }
 
+export function getCompany(organizationId: string, recordId: string): Promise<Company> {
+  return apiFetch(organizationPath(organizationId, `/companies/${recordId}`));
+}
+
 export function createCompany(organizationId: string, input: CompanyInput): Promise<Company> {
   return apiFetch(organizationPath(organizationId, "/companies"), {
     method: "POST",
@@ -79,6 +84,10 @@ export function restoreCompany(organizationId: string, companyId: string): Promi
 
 export function listContacts(organizationId: string, params: ListParams = {}): Promise<PageResult<Contact>> {
   return apiFetch(organizationPath(organizationId, `/contacts${listQuery(params)}`));
+}
+
+export function getContact(organizationId: string, recordId: string): Promise<Contact> {
+  return apiFetch(organizationPath(organizationId, `/contacts/${recordId}`));
 }
 
 export function createContact(organizationId: string, input: ContactInput): Promise<Contact> {
@@ -119,6 +128,10 @@ export function listLeads(
     include_archived: params.includeArchived ? "true" : undefined,
   });
   return apiFetch(organizationPath(organizationId, `/leads${search}`));
+}
+
+export function getLead(organizationId: string, recordId: string): Promise<Lead> {
+  return apiFetch(organizationPath(organizationId, `/leads/${recordId}`));
 }
 
 export function createLead(organizationId: string, input: LeadInput): Promise<Lead> {
@@ -166,6 +179,10 @@ export function listInquiries(organizationId: string, params: ListParams = {}): 
   return apiFetch(organizationPath(organizationId, `/inquiries${listQuery(params)}`));
 }
 
+export function getInquiry(organizationId: string, recordId: string): Promise<Inquiry> {
+  return apiFetch(organizationPath(organizationId, `/inquiries/${recordId}`));
+}
+
 export function createInquiry(organizationId: string, input: InquiryInput): Promise<Inquiry> {
   return apiFetch(organizationPath(organizationId, "/inquiries"), {
     method: "POST",
@@ -194,9 +211,16 @@ export function restoreInquiry(organizationId: string, inquiryId: string): Promi
 
 export function listDocuments(
   organizationId: string,
-  params: ListParams = {},
+  params: ListParams & { status?: DocumentStatus; fileType?: "pdf" | "txt" } = {},
 ): Promise<PageResult<KnowledgeDocument>> {
-  return apiFetch(organizationPath(organizationId, `/documents${listQuery(params)}`));
+  const query = queryString({
+    q: params.q,
+    page: params.page,
+    page_size: params.pageSize,
+    status: params.status,
+    file_type: params.fileType,
+  });
+  return apiFetch(organizationPath(organizationId, `/documents${query}`));
 }
 
 export function uploadDocument(organizationId: string, file: File, origin: DocumentOrigin = "operational"): Promise<KnowledgeDocument> {
@@ -217,7 +241,8 @@ export function searchDocuments(organizationId: string, q: string): Promise<{ it
 }
 
 export function createKnowledgeEvaluation(organizationId: string, question: string, expectedEvidence: string[], scenario = "grounded") {
-  return apiFetch<{ id: string; question: string }>(organizationPath(organizationId, "/knowledge/evaluations/questions"), { method: "POST", body: JSON.stringify({ question, expected_evidence: expectedEvidence, scenario, expected_behavior: scenario === "grounded" ? "answer" : "fallback" }) });
+  const expectedBehavior = scenario === "grounded" ? "answer" : scenario === "human_handoff" ? "handoff" : "fallback";
+  return apiFetch<{ id: string; question: string }>(organizationPath(organizationId, "/knowledge/evaluations/questions"), { method: "POST", body: JSON.stringify({ question, expected_evidence: expectedEvidence, scenario, expected_behavior: expectedBehavior }) });
 }
 
 export function runKnowledgeEvaluation(organizationId: string, questionId: string) {

@@ -58,8 +58,7 @@ def test_injected_transport_covers_success_auth_timeout_and_network_failure() ->
     assert unavailable.value.code == "llm_unavailable"
 
 
-def test_injected_embedding_transport_redacts_secret_from_response_and_uses_it_only_on_request(
-) -> None:
+def test_embedding_transport_uses_the_secret_only_on_the_request() -> None:
     secret = "organization-secret-that-must-not-return"
 
     def handler(request: httpx.Request) -> httpx.Response:

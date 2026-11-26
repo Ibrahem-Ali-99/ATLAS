@@ -1,18 +1,24 @@
 import hashlib
-import hmac
-import json
 
 from fastapi import APIRouter, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.domains.billing.models import BillingWebhookEvent, SubscriptionPlan
-from app.domains.billing.provider import create_checkout_url
+from app.domains.billing.provider import (
+    create_checkout_url,
+    create_portal_url,
+    ensure_customer,
+    verified_event,
+)
 from app.domains.billing.service import (
     change_subscription,
     ensure_plans,
+    entitlement_plan_code,
     get_subscription,
     plan_for,
     reconcile_provider_event,
@@ -41,9 +47,11 @@ def plans(member: Member, db: DbSession) -> list[dict[str, object]]:
 @router.get("/organizations/{organization_id}/billing")
 def status(member: Member, db: DbSession) -> dict[str, object]:
     row = get_subscription(db, member.organization.id)
-    plan = plan_for(db, row.plan_code)
+    plan = plan_for(db, entitlement_plan_code(row))
     db.commit()
     return {
+        "mode": get_settings().billing_provider,
+        "portal_available": row.provider == "stripe" and bool(row.provider_customer_id),
         "subscription": {
             "plan_code": row.plan_code,
             "billing_interval": row.billing_interval,
@@ -59,47 +67,77 @@ def status(member: Member, db: DbSession) -> dict[str, object]:
 
 @router.post("/organizations/{organization_id}/billing/checkout")
 def checkout(body: CheckoutBody, admin: CsrfAdmin, db: DbSession) -> dict[str, object]:
-    provider_url = create_checkout_url(
-        body.plan_code, body.billing_interval, str(admin.organization.id)
-    )
+    if get_settings().billing_provider == "stripe":
+        if body.plan_code == "free":
+            raise AppError(422, "billing_price_unavailable", "Choose a paid plan for checkout")
+        row = get_subscription(db, admin.organization.id, lock=True)
+        plan_for(db, body.plan_code)
+        customer_id = row.provider_customer_id
+        if customer_id is None:
+            customer_id = ensure_customer(str(admin.organization.id))
+            row.provider_customer_id = customer_id
+            # Webhook reconciliation must see the customer binding before checkout can start.
+            db.commit()
+            get_subscription(db, admin.organization.id, lock=True)
+        provider_url = create_checkout_url(
+            body.plan_code,
+            body.billing_interval,
+            str(admin.organization.id),
+            customer_id,
+        )
+        db.commit()
+        return {"mode": "stripe", "checkout_url": provider_url, "status": "pending"}
     row = change_subscription(
         db, admin.organization.id, admin.user.id, body.plan_code, body.billing_interval
     )
     return {
-        "mode": get_settings().billing_provider,
-        "checkout_url": provider_url or f"/settings?billing=updated&plan={row.plan_code}",
+        "mode": "sandbox",
+        "checkout_url": f"/settings?billing=updated&plan={row.plan_code}",
         "status": row.status.value,
     }
 
 
 @router.post("/organizations/{organization_id}/billing/portal")
-def portal(admin: CsrfAdmin) -> dict[str, str]:
-    return {"portal_url": "/settings?billing=manage"}
+def portal(admin: CsrfAdmin, db: DbSession) -> dict[str, str]:
+    row = get_subscription(db, admin.organization.id)
+    if row.provider != "stripe" or not row.provider_customer_id:
+        raise AppError(
+            503, "billing_portal_unavailable", "A self-service billing portal is unavailable"
+        )
+    return {"portal_url": create_portal_url(row.provider_customer_id)}
 
 
 @router.post("/billing/webhooks/stripe")
 async def stripe_webhook(request: Request, db: DbSession) -> dict[str, str]:
     body = await request.body()
-    secret = get_settings().stripe_webhook_secret
-    supplied = request.headers.get("x-atlas-webhook-signature", "")
-    if not secret or not hmac.compare_digest(
-        supplied, hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    ):
-        raise AppError(400, "invalid_webhook_signature", "Webhook signature is invalid")
-    payload = json.loads(body)
-    event_id = str(payload.get("id", ""))
-    if not event_id:
-        raise AppError(400, "invalid_webhook", "Webhook event id is required")
-    if (
-        db.scalar(select(BillingWebhookEvent).where(BillingWebhookEvent.event_id == event_id))
-        is not None
-    ):
-        return {"status": "already_processed", "event_id": event_id}
-    db.add(
-        BillingWebhookEvent(
-            provider="stripe", event_id=event_id, payload_hash=hashlib.sha256(body).hexdigest()
-        )
+    return await run_in_threadpool(
+        _accept_stripe_event, db, body, request.headers.get("stripe-signature", "")
     )
+
+
+def _accept_stripe_event(db: DbSession, body: bytes, signature: str) -> dict[str, str]:
+    if get_settings().billing_provider != "stripe":
+        raise AppError(503, "billing_provider_unavailable", "Stripe billing is disabled")
+    payload = verified_event(body, signature)
+    event_id = payload.get("id")
+    if not isinstance(event_id, str) or not 1 <= len(event_id) <= 200:
+        raise AppError(400, "invalid_webhook", "Webhook event id is required")
+    digest = hashlib.sha256(body).hexdigest()
+    receipt = db.scalar(
+        insert(BillingWebhookEvent)
+        .values(provider="stripe", event_id=event_id, payload_hash=digest)
+        .on_conflict_do_nothing(index_elements=[BillingWebhookEvent.event_id])
+        .returning(BillingWebhookEvent.id)
+    )
+    if receipt is None:
+        previous_hash = db.scalar(
+            select(BillingWebhookEvent.payload_hash).where(BillingWebhookEvent.event_id == event_id)
+        )
+        if previous_hash != digest:
+            raise AppError(
+                409, "webhook_event_conflict", "Webhook event differs from its recorded receipt"
+            )
+        return {"status": "already_processed", "event_id": event_id}
     reconcile_provider_event(db, payload)
     db.commit()
     return {"status": "accepted", "event_id": event_id}

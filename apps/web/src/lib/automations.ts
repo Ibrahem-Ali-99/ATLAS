@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import { resolveApiBaseUrl } from "@/lib/api-base";
 import type { DataScope } from "@/lib/provenance";
 
 export type WorkflowAttempt = {
@@ -90,6 +91,11 @@ export function cancelBooking(organizationId: string, bookingId: string): Promis
   return apiFetch(organizationPath(organizationId, `/calendar/bookings/${bookingId}/cancel`), {
     method: "POST",
   });
+}
+
+export function calendarExportUrl(organizationId: string, bookingId: string): string {
+  return resolveApiBaseUrl(process.env.NEXT_PUBLIC_API_URL) +
+    organizationPath(organizationId, `/calendar/bookings/${bookingId}/export`);
 }
 
 export function getEmailActivity(

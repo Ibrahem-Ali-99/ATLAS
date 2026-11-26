@@ -157,4 +157,3 @@ def test_background_ingestion_fails_closed_for_disabled_originating_org(db: Sess
     db.refresh(document)
     assert document.status == DocumentStatus.failed
     assert document.error_message
-

@@ -54,6 +54,10 @@ export function executeApproval(organizationId: string, approvalId: string): Pro
   });
 }
 
+export function getApproval(organizationId: string, approvalId: string): Promise<Approval> {
+  return apiFetch(organizationPath(organizationId, `/approvals/${approvalId}`));
+}
+
 export function decideApproval(
   organizationId: string,
   approvalId: string,

@@ -18,7 +18,11 @@ from app.domains.knowledge.models import (
     IngestionJob,
     IngestionJobStatus,
 )
-from app.domains.knowledge.vectors import store_chunk_embedding
+from app.domains.knowledge.vectors import (
+    index_identity,
+    lock_embedding_index,
+    store_chunk_embedding,
+)
 from app.domains.provenance.origin import Origin
 from app.integrations.language import EmbeddingClient, get_embedding_client
 from app.integrations.resolver import resolve_settings
@@ -28,18 +32,36 @@ ALLOWED_TYPES = {"application/pdf", "text/plain", "application/octet-stream"}
 
 
 def list_documents(
-    db: Session, organization_id: uuid.UUID, *, q: str | None, page: int, page_size: int
+    db: Session,
+    organization_id: uuid.UUID,
+    *,
+    q: str | None,
+    page: int,
+    page_size: int,
+    status: DocumentStatus | None = None,
+    file_type: str | None = None,
 ) -> tuple[list[Document], int]:
     from app.domains.crm.service import page_bounds
 
     safe_page, safe_size = page_bounds(page, page_size)
     query = select(Document).where(Document.organization_id == organization_id)
     if q and q.strip():
-        term = f"%{q.strip()}%"
-        query = query.where(or_(Document.title.ilike(term), Document.filename.ilike(term)))
+        term = q.strip()
+        query = query.where(
+            or_(
+                Document.title.icontains(term, autoescape=True),
+                Document.filename.icontains(term, autoescape=True),
+            )
+        )
+    if status is not None:
+        query = query.where(Document.status == status)
+    if file_type is not None:
+        query = query.where(
+            func.lower(Document.filename).endswith(f".{file_type}", autoescape=True)
+        )
     total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
     rows = db.scalars(
-        query.order_by(Document.created_at.desc())
+        query.order_by(Document.created_at.desc(), Document.id.desc())
         .offset((safe_page - 1) * safe_size)
         .limit(safe_size)
     ).all()
@@ -98,17 +120,20 @@ def store_upload(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(payload)
     document.storage_path = str(path)
-    db.add(IngestionJob(
-        organization_id=organization_id,
-        document_id=document.id,
-        idempotency_key=f"document:{document.id}:v1",
-    ))
+    db.add(
+        IngestionJob(
+            organization_id=organization_id,
+            document_id=document.id,
+            idempotency_key=f"document:{document.id}:v1",
+        )
+    )
     db.commit()
     db.refresh(document)
     return document
 
 
 def delete_document(db: Session, organization_id: uuid.UUID, document_id: uuid.UUID) -> None:
+    lock_embedding_index(db, organization_id)
     document = get_document(db, organization_id, document_id)
     path = Path(document.storage_path)
     db.execute(delete(IngestionJob).where(IngestionJob.document_id == document.id))
@@ -123,13 +148,16 @@ def mark_reindex(db: Session, organization_id: uuid.UUID, document_id: uuid.UUID
     document.error_message = None
     existing = db.scalar(select(IngestionJob).where(IngestionJob.document_id == document.id))
     if existing is None:
-        db.add(IngestionJob(
-            organization_id=organization_id,
-            document_id=document.id,
-            idempotency_key=f"document:{document.id}:v1",
-        ))
+        db.add(
+            IngestionJob(
+                organization_id=organization_id,
+                document_id=document.id,
+                idempotency_key=f"document:{document.id}:v1",
+            )
+        )
     else:
         existing.status = IngestionJobStatus.queued
+        existing.attempts = 0
         existing.next_attempt_at = datetime.now(UTC)
         existing.error_message = None
         existing.lease_owner = None
@@ -178,11 +206,13 @@ def resume_incomplete_documents(embedder: EmbeddingClient | None = None) -> int:
                 select(IngestionJob).where(IngestionJob.document_id == document_id)
             )
             if existing is None:
-                db.add(IngestionJob(
-                    organization_id=document.organization_id,
-                    document_id=document_id,
-                    idempotency_key=f"document:{document_id}:v1",
-                ))
+                db.add(
+                    IngestionJob(
+                        organization_id=document.organization_id,
+                        document_id=document_id,
+                        idempotency_key=f"document:{document_id}:v1",
+                    )
+                )
             elif existing.status in {
                 IngestionJobStatus.succeeded,
                 IngestionJobStatus.failed,
@@ -247,15 +277,15 @@ def retry_ingestion_job(
 ) -> Document:
     document = get_document(db, organization_id, document_id)
     job = db.scalar(
-        select(IngestionJob).where(
+        select(IngestionJob)
+        .where(
             IngestionJob.document_id == document.id,
             IngestionJob.organization_id == organization_id,
-        ).with_for_update()
+        )
+        .with_for_update()
     )
     if job is None:
-        raise AppError(
-            404, "ingestion_job_not_found", "No ingestion job exists for this document"
-        )
+        raise AppError(404, "ingestion_job_not_found", "No ingestion job exists for this document")
     if job.status not in {IngestionJobStatus.failed, IngestionJobStatus.retrying}:
         raise AppError(
             409,
@@ -359,6 +389,15 @@ def ingest_document(
         ):
             _record_failure(db, document, "The embedding provider returned an unexpected response")
             return
+        lock_embedding_index(db, document.organization_id)
+        db.expire_all()
+        current = resolve_settings(db, document.organization_id, "embedding")
+        if index_identity(current) != index_identity(resolved):
+            raise AppError(
+                409,
+                "embedding_model_changed",
+                "The workspace index changed during ingestion. Retry this document.",
+            )
         db.execute(delete(Chunk).where(Chunk.document_id == document.id))
         for piece, vector in zip(pieces, vectors, strict=True):
             chunk = Chunk(

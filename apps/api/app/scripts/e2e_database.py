@@ -1,4 +1,4 @@
-"""Create the isolated atlas_e2e database used by the browser test.
+"""Create and seed a fresh database for one browser acceptance run.
 
 Does not print the database URL or seed passwords.
 """
@@ -6,19 +6,28 @@ Does not print the database URL or seed passwords.
 from __future__ import annotations
 
 import os
+import re
+
+
+def database_name() -> str:
+    name = os.environ.get("ATLAS_E2E_DATABASE_NAME", "")
+    if not re.fullmatch(r"atlas_e2e_[0-9a-f]{32}", name):
+        raise RuntimeError("The browser runner must provide a generated acceptance database name.")
+    return name
 
 
 def main() -> None:
     from tests.bootstrap import ensure_database, postgres_url
 
-    ensure_database("atlas_e2e")
-    url = postgres_url("atlas_e2e")
+    name = database_name()
+    ensure_database(name, require_new=True)
+    url = postgres_url(name)
     os.environ["ALEMBIC_DATABASE_URL"] = url
     os.environ["ATLAS_DATABASE_URL"] = url
     os.environ["ATLAS_ENVIRONMENT"] = "development"
 
     from alembic.config import Config
-    from sqlalchemy import func, select, text
+    from sqlalchemy import func, select
 
     from alembic import command
     from app.core.config import get_settings
@@ -34,19 +43,6 @@ def main() -> None:
     get_settings.cache_clear()
     db = SessionLocal()
     try:
-        db.execute(
-            text(
-                "TRUNCATE TABLE message_sources, messages, conversations, chunks, documents, "
-                "ingestion_jobs, "
-                "lead_predictions, evaluation_runs, operation_traces, model_versions, "
-                "email_messages, calendar_bookings, execution_attempts, execution_intents, "
-                "workflow_runs, webhook_events, webhook_keys, integration_configs, "
-                "agent_events, approvals, agent_runs, audit_events, interactions, inquiries, "
-                "leads, contacts, companies, sessions, memberships, users, organizations "
-                "RESTART IDENTITY CASCADE"
-            )
-        )
-        db.commit()
         seed_settings = SeedSettings()
         seed_identity(db, seed_settings)
         atlas = db.scalar(select(Organization).where(Organization.slug == "northwind"))

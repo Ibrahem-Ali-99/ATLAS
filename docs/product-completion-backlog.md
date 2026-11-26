@@ -1,24 +1,83 @@
 # ATLAS product-completion backlog
 
-## Phase 1 — first-run experience
+## Current implementation — product functionality and customer experience
 
-- [x] Truthful readiness checklist for organization, providers, embeddings, knowledge, CRM, delivery modes, n8n, assistant, and approvals.
-- [x] Link every checklist item to an existing supported action.
-- [x] Distinguish `Not configured`, `Needs attention`, `Ready`, and `Verified`.
-- [x] Keep provider credentials operator-managed when runtime persistence is unavailable.
-- [ ] Add a clean-install acceptance flow that uploads a safe fixture and verifies a grounded answer in the disposable environment.
+| Area | Implemented | Open acceptance |
+| --- | --- | --- |
+| Workflows | The canvas supports all/any conditions, matching and otherwise paths, and reordering within a path. Validation checks workspace stages and approval placement. Execution persists the selected branch before approval and rejects reuse of a manual request for a different record. | Review advanced workflows with representative customer data. The canvas follows the current two-path execution model. |
+| Workspace setup | The checklist uses persisted operational CRM data, indexed knowledge, a sourced answer, and successful workflow execution. Continue setup opens the next unfinished step the current role can complete. Administrators can jump to provider setup or team invitations. | Verify the setup journey on staging with the selected chat and embedding providers. |
+| Website chat | Discovered and configured from Integrations. Pausing the embed blocks public sessions and messages while preserving Inbox conversations. Staff can continue reviewing existing messages. | Confirm embed behavior on the intended public deployment. |
+| WhatsApp | A verified connection accepts signed inbound messages. Approved outbound replies use the linked phone, current conversation and a separate live gate. Uncertain sends require review. | Prove incoming messages, approved replies, delivery updates and disconnect with Meta test identities on a published HTTPS endpoint. |
+| Email | Signed gateway requests bind the recipient workspace and timestamp. Incoming messages thread by sender, mailbox and subject. Approved live replies use an allowlisted, verified SMTP relay with TLS authentication. Resend domain verification can be refreshed after credential rotation. | Connect the intended gateway and verify actual SMTP receipts and domain setup with approved test accounts. |
+| Campaigns | Campaigns pin their delivery mode at scheduling, recheck consent and suppression before each message, include a signed unsubscribe link, and expose recipient outcomes. Resend feedback can record delivery, failure, bounce and complaint, with automatic suppression on bounce and complaint. | Run the externally approved Resend test from DNS verification through delivery feedback and unsubscribe. |
+| Calendar | Google Calendar OAuth uses session-bound single-use state and PKCE. CRM staff can check a chosen time and request approval. Approved Google bookings check availability again, write a private event, and record the owning calendar for cancellation. Disconnect removes the local grant and attempts provider revocation. ATLAS-only reservations retain calendar export. | Qualify OAuth consent, live availability, event creation and removal, and revocation with a dedicated test account. Direct edits made in Google do not update the stored ATLAS record. |
+| n8n | Administrators can issue, rotate, and disconnect signing keys from Integrations. A discontinued key fails callback verification and is excluded from new outbound workflow dispatch. | Prove callbacks and installed workflow activation against the intended n8n deployment. |
+| Language providers | OpenAI and Groq settings support workspace-scoped credentials, connection testing, disabling, and credential removal. A failed connection can be retested. A test result cannot overwrite newer settings. | Run the intended live providers with test credentials. |
+| Embedding providers | OpenAI and Ollama settings control tenant-specific indexing and retrieval. Administrators can build and cancel a replacement index. The worker stages vectors in batches and switches provider settings and vectors atomically, preserving documents, chunks and citation identifiers. | Verify availability during a production-size build and qualify the chosen provider using approved external credentials. |
+| CRM and Inbox | Staff can create a lead and inquiry directly from an Inbox conversation with a linked contact. Retrying returns the existing records. The mobile thread groups real messages by date and follows new replies unless the reader has scrolled back. CRM leads with an inquiry can request an appointment. | Continue equivalent-state visual comparisons across the remaining CRM and Inbox detail and failure states. |
 
-## Remaining limitations
+Verification uses disposable local data. The [provider activation procedure](provider-activation.md) covers technical setup, live acceptance and disconnect. External credentials and reachable HTTPS infrastructure are still required for production verification.
 
-- [ ] Add a secure operator-managed provider configuration path with explicit restart/apply semantics; do not add a browser save button until secrets can be stored safely.
-- [ ] Add knowledge onboarding progress and a citation-focused test-question flow after a document is indexed.
-- [ ] Add explicit demo-data loading controls that remain separate from operational records.
-- [ ] Add n8n webhook-key provisioning and activation checks without exposing the signing secret.
-- [ ] Add a clear sandbox Mailpit test action and a clearly simulated calendar test action.
-- [ ] Add a first-run path for creating the first operational company, contact, lead, and inquiry.
-- [ ] Add an approval-controlled agent demonstration that stops before external side effects in sandbox mode.
-- [ ] Add integration failure, invalid-credential, network-failure, and cross-organization acceptance coverage for the checklist state.
-- [ ] Add onboarding persistence or dismiss/revisit behavior if product discovery confirms it is needed.
-- [ ] Add public deployment readiness checks for TLS, Groq/OpenAI credentials, webhook activation, and off-host backups.
+## Work order after handoff
 
-The product is not complete until the unsupported items are either implemented or explicitly documented as operator-only deployment steps.
+1. Compare matched CRM and Inbox states against the approved archive at desktop and mobile widths, including validation and failure states. Apply the same approach to the remaining routes.
+2. Qualify embedding rebuilds at production scale and review ambiguous booking and delivery recovery. Google Calendar currently supports ATLAS-originated events and the workflow builder supports two ordered paths.
+3. Complete approved provider acceptance, staging HTTPS and restore qualification, and connected advisory checks. Follow [provider activation](provider-activation.md).
+4. Evaluate self-service organization provisioning and shared rate limits separately. The current application uses operator bootstrap and invitations.
+
+### Product regression evidence
+
+- `var/native-acceptance-f0f29c7581a449aea669765f07f64cac/api.log` verifies Google Calendar expiration reporting and recovery alongside the signed-in OAuth, booking, cancellation, and disconnect path.
+- `var/native-acceptance-a561781ee7f94667ad4895cb82628698/browser.log` records four passing Inbox and workflow scenarios, including mobile appointment review, task configuration, and alternate-path persistence.
+- `var/native-acceptance-45f05ae1c4124987acbb6d34158a2c89/` records five API checks and two production browser scenarios. It verifies the Google Calendar integration against a controlled HTTP fixture, a failed and cancelled index build followed by a successful cutover, workflow task deadlines, and a mobile path from website conversation to lead, inquiry and appointment approval. Staging Compose rendering and three preflight tests passed locally.
+- `var/native-acceptance-6773afb5e71747d5b67e0fd23d6aebd2/browser.log` records the production browser review of the intended recipient, one approved email accepted by the local SMTP sink, and a persistent Email Activity entry.
+- `var/native-acceptance-ac65e6866d4749adb6bac7624ce188de/api.log` records 24 passing checks after adding one-click suppression, approved message transport pinning, and the WhatsApp approval path. The accompanying campaign browser scenario passed against actual local SMTP.
+- `var/native-acceptance-6e6dbf7703a24145bb512b639e9ad4f4/` records 21 API checks and five browser scenarios, including first-workspace setup, knowledge citation, sender-domain registration, verification and revocation with a disposable provider, and download of an active calendar reservation.
+- `var/native-acceptance-e9e88af64a734326860136319bd7c557/` records 15 focused API checks and five browser scenarios. The browser received one campaign in the local SMTP sink, opened the unsubscribe link from that email, and confirmed suppression in the workspace. It also verified alternate-path node ordering after reload at mobile width and live website-chat replies between a visitor and staff.
+- `var/native-acceptance-c3b93af62ef04ca2821b85c81241699d/api.log` records 31 passing Inbox, mail policy, workflow, and automation checks. The external WhatsApp transport was intercepted in the approval test. Tenant and timestamp binding were exercised against the actual inbound email endpoint.
+- `var/native-acceptance-5d552f6bf8db43fc90553d8a6cafeab2/` records 219 passing API tests and one skipped live-provider test. It also records 29 passing browser cases, including workflow approval and archival, n8n disconnect, website chat pause, and shareable opportunity details.
+- `var/native-acceptance-84789a865d6649ecb0db93ef3ff2d999/browser.log` records three passing follow-up cases, including the full workspace journey after updating its Workflows navigation assertion and the SMTP settings check.
+- `var/native-acceptance-663b17c666394f10b16296e6191f2034/api.log` records six passing integration API cases, including independent SMTP and Resend credential updates.
+
+## Historical candidate follow-up — 2026-11-26
+
+The earlier full local acceptance remains the baseline. The changes below were verified with focused runs on fresh databases and disposable provider fixtures.
+
+| Workstream | Implemented and verified | Remaining acceptance |
+| --- | --- | --- |
+| Rendered interface | Built the approved archive from the extracted source using the installed React, TypeScript, Tailwind, and webpack toolchain. Captured 19 routes and account states per viewport at 1440×960 and 390×844. Matched shell grouping, breadcrumbs, workspace search, the Billing destination, and the Overview pipeline layout. Added a working opportunity creation dialog and grouped Settings navigation. | Complete state-level parity across populated and empty detail views. The prototype uses different sample states for several workflows. Verify the application against equivalent live fixtures before treating those states as matched. |
+| Campaigns | Workspace administrators can send immediately or set a future schedule in the local mail sandbox. The worker persists a deduplicated audience and checks eligibility before delivery. Cancellation removes queued work. An uncertain SMTP outcome requires review. Twelve focused API and migration tests passed, and the browser observed one SMTP receipt that survived reload. | Qualify marketing transport, unsubscribe handling, and delivery feedback before enabling live campaign mail. |
+| Providers and callbacks | Added administrator key status and rotation, rejected conflicting reuse of an idempotency key, and made callback bookkeeping atomic with workflow completion. n8n lead callbacks are limited to configured ATLAS origins. The browser shows accepted callback status with no secret display. The Stripe return URLs now land on Billing. | Qualify signed callbacks on the pinned n8n image and test Stripe Checkout and portal access with an external test account. |
+| Dependency verification | Added a connected CI job for the JavaScript lockfile and Python runtime dependencies. Exported 102 pinned Python requirement entries from the locked resolution. Replaced the staging n8n 1.70.3 pin with 2.49.6 and updated inactive import handling. | npm advisory and PyPI requests failed DNS resolution. Run the connected job and review image advisories before staging acceptance. Prove the n8n image and workflow startup in a fresh project. |
+| Staging | Wired the production encryption keyring and test billing settings into Compose. Added a redacted, non-mutating preflight. Development and staging Compose configuration passed. Six staging preflight and restore-contract tests passed. | The existing staging environment lacks an independent keyring. Docker denied daemon access. HTTPS startup, live provider checks, and off-host recovery remain open. |
+
+Focused evidence:
+
+- `var/ui-reference/rendered/screenshots/evidence.json` records reference routes, dimensions, and headings. The renderer used installed package versions and local font fallback.
+- `var/native-acceptance-7edc2d55ae4b4d23b531d2f833695fe3/` contains 12 campaign, mail, and migration results and the sandbox SMTP browser scenario.
+- `var/native-acceptance-3686ea8735654437bba78d6ec7847386/api.log` records 38 passing automation, billing, migration, keyring, and isolated process tests.
+- `var/native-acceptance-43e5edbcc1934e40b85c30a3b31aa4c2/api.log` records 24 passing n8n and webhook tests after the workflow contract change.
+- `var/native-acceptance-2544e60607eb456888ad1afbd9e17b1d/` contains three passing Overview, Analytics, Billing, and navigation browser checks and four desktop and mobile captures.
+- `var/native-acceptance-38eb1e98419e41099b8373074b727b2c/browser.log` records 11 passing Settings, organization selection, authentication, and provider configuration checks.
+- `var/native-acceptance-fd8e09a9e91445a7bd928c46dee652d6/screenshots/design-comparison/` contains 38 application screenshots and measurements. The capture pass reported no horizontal overflow.
+- `var/native-acceptance-950d93aca5f845eaa6e8a79c3cb15dc2/api.log` verifies production-mode API startup, bootstrap without demo records, duplicate bootstrap refusal, secure session attributes, and CSRF enforcement against a disposable database. The HTTP test transport did not verify TLS or container startup.
+- `var/native-acceptance-9cfdcaee8cbb4b809e776a65aa70cc08/` contains four passing browser checks for the final Billing layout, subscription change, invitation, workspace search, and opportunity creation.
+- `var/native-acceptance-8dd0a237025c48b89042f0797168336e/api.log` records three passing tests for the final webhook header validation, rate limiting, replay handling, and key rotation changes.
+- `var/native-acceptance-8662d15134dd498cbab810c0097b6be6/browser.log` verifies creation and activation of a workflow, lead-triggered task creation, persisted completion, and pause after the workflow layout change.
+
+## Prior full local acceptance — 2026-11-26
+
+The Windows working tree passed the full local acceptance run against a fresh PostgreSQL 18 cluster and a production frontend build. All 32 browser tests passed. The API suite passed 213 tests and skipped the opt-in live Groq and Ollama check. The candidate remains local and production qualification is open.
+
+| Milestone | Verified evidence | Remaining acceptance |
+| --- | --- | --- |
+| Interface parity | Reconciled the Inbox thread and customer context, campaign library and audience review, analytics trends, workflow definition inspector, and shareable Approvals, Agent Runs, and Monitoring details. The browser captured 14 routes at 1440 and 390 pixels and checked horizontal overflow. All 20 extracted reference source files matched the approved archive. | A rendered side-by-side review of the reference detail, empty, and error states remains outstanding. The subsequent rendered comparison used available packages and a local font fallback. |
+| Core functionality | A separate storefront rendered the shipped embed. A visitor message reached the mobile Inbox and received one staff reply. A recorded CRM consent enrolled a contact in a campaign preview, suppression removed it, and an email address change revoked prior consent. An activated workflow created a task for a new lead, and its completion survived reload. | This initial checkpoint covered draft review. Later focused checks covered dispatch, scheduling and unsubscribe. |
+| Authentication, workflow, billing, integrations | Single-use invitation, SMTP password reset, administrator and staff permissions, setup persistence, signed billing reconciliation with a provider double, and integration configuration and concurrency checks passed. Checkout preserves entitlements until provider confirmation. | Qualify Stripe against a test account and verify external provider credentials and signed webhook delivery on staging. |
+| Flagship journey | The production browser followed inquiry intake, linked CRM lead, knowledge indexing, a visible citation, approval, sandbox SMTP receipt, analytics, and a successful run event. A completed approval also reopened from its URL. | Staging verification with the intended provider configuration. |
+| Security and reliability | The widget isolates credential-free public requests, binds sessions to their issuing origin, deduplicates retries, and redacts visitor tokens in structured logs. The suite verified tenant boundaries, CSRF, worker-backed indexing, and workflow execution. Native recovery restored migration `20261125_0045` with two organizations, ten leads, and four document rows. Three uploaded files matched the restored references by size and SHA-256. Four standalone restore-contract tests also passed. | Verify image startup, TLS, advisory scans, and full staging recovery. Both Docker contexts and the Windows Linux subsystem denied access. The npm advisory endpoint failed DNS resolution. |
+| Release candidate | Next.js production build, Ruff lint and format, mypy, ESLint, TypeScript, seven frontend unit tests, and development and staging Compose configuration all passed. The 414-file candidate manifest matched the working tree after verification. | Production qualification remains open. |
+
+Evidence is under `var/native-acceptance-9cff1e4c8f8d4585aa74ae7dee5c0e97/`. It contains the API and browser logs, 28 viewport captures, build output, populated database and upload restore evidence, and `candidate-source.sha256`. The manifest SHA-256 is `f0aa97e31f5af46974cccef2c4db177601a4e4991583af5bd2a43288c1836dc8`. The checkout base revision is `4cdffa824878488cb6fe6e3457ec72b42b9a6132`.
+
+The interface uses system fonts to avoid a runtime dependency on an external font host. The verification runner used deterministic provider implementations and a local SMTP sink.

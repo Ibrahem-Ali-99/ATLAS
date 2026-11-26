@@ -1,6 +1,8 @@
 import uuid
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi.testclient import TestClient
+from pytest import MonkeyPatch
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -8,8 +10,36 @@ from app.core.config import get_settings
 from app.core.security import sign_session_id
 from app.domains.identity.login_limit import clear_login_attempts
 from app.domains.identity.models import MembershipRole, UserSession
+from app.integrations.email import OutboundEmail
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
 from tests.helpers import login
+
+
+def test_password_recovery_delivers_one_time_link_and_revokes_sessions(
+    client: TestClient, db: Session, monkeypatch: MonkeyPatch
+) -> None:
+    user = make_user(db, "recovery@example.com")
+    login(client, user.email, PASSWORD)
+    outbound: list[OutboundEmail] = []
+    monkeypatch.setattr("app.api.v1.auth.send_email", outbound.append)
+
+    request = client.post("/api/v1/auth/forgot-password", json={"email": user.email})
+    unknown = client.post("/api/v1/auth/forgot-password", json={"email": "unknown@example.com"})
+    repeat = client.post("/api/v1/auth/forgot-password", json={"email": user.email})
+    assert request.status_code == unknown.status_code == repeat.status_code == 202
+    assert request.json() == unknown.json() == repeat.json()
+    assert len(outbound) == 1
+    link = urlsplit(outbound[0].body.splitlines()[-1])
+    assert link.path == "/reset-password"
+    assert not link.query
+    token = parse_qs(link.fragment)["token"][0]
+    assert token not in outbound[0].idempotency_key
+
+    change = {"token": token, "password": "replacement-password"}
+    assert client.post("/api/v1/auth/reset-password", json=change).status_code == 204
+    assert client.get("/api/v1/auth/me").status_code == 401
+    assert client.post("/api/v1/auth/reset-password", json=change).status_code == 400
+    assert login(client, user.email, change["password"])["user"]
 
 
 def test_login_and_current_user(client: TestClient, db: Session) -> None:

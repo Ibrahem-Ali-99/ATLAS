@@ -52,7 +52,7 @@ async function openOverview(page: import("@playwright/test").Page): Promise<void
   await expect(page.getByTestId("overview-workspace")).toBeVisible();
   await assertWorkspace(page);
   await expect(page.getByTestId("overview-kpi-companies")).toBeVisible();
-  await expect(page.getByTestId("overview-kpi-active-opportunities")).toBeVisible();
+  await expect(page.getByTestId("overview-kpi-active-leads")).toBeVisible();
   await expect(page.getByTestId("overview-kpi-customer-requests")).toBeVisible();
 }
 
@@ -95,7 +95,7 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   const inquiriesBefore = await metric(page, "Open inquiries");
   console.log(JSON.stringify({ metricsBefore: { companies: companiesBefore, leads: leadsBefore, openInquiries: inquiriesBefore } }));
   await openOverview(page);
-  const activeLeadsBefore = await metric(page, "Active opportunities");
+  const activeLeadsBefore = await metric(page, "Active leads");
   console.log(JSON.stringify({ activeLeadsBefore }));
   await allRecords(page);
   await expect(page.getByRole("link", { name: /Companies/ })).toBeVisible();
@@ -128,7 +128,7 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   await openOverview(page);
   await allRecords(page);
   await expect.poll(() => metric(page, "Companies")).toBe(companiesBefore + 1);
-  await expect.poll(() => metric(page, "Active opportunities")).toBe(activeLeadsBefore + 1);
+  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore + 1);
   await expect.poll(() => metric(page, "Customer requests")).toBe(inquiriesBefore + 1);
   console.log(JSON.stringify({ metricsAfterCreate: { companies: companiesBefore + 1, totalLeads: leadsBefore + 1, activeLeads: activeLeadsBefore + 1, openInquiries: inquiriesBefore + 1 } }));
 
@@ -161,7 +161,7 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   await expect(page.getByRole("button", { name: company })).toBeVisible();
   await openOverview(page);
   await allRecords(page);
-  await page.getByRole("link", { name: "Active opportunities" }).click();
+  await page.getByRole("link", { name: "Active leads" }).click();
   await expect(page).toHaveURL(/\/crm\?tab=leads/);
   await page.getByLabel("Search leads").fill(lead);
   await expect(page.getByRole("button", { name: lead })).toBeVisible();
@@ -171,21 +171,21 @@ test("Overview and Analytics follow CRM changes", async ({ page }) => {
   await page.getByRole("button", { name: "Confirm archive" }).click();
   await openOverview(page);
   await allRecords(page);
-  await expect.poll(() => metric(page, "Active opportunities")).toBe(activeLeadsBefore);
+  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore);
   console.log(JSON.stringify({ metricsAfterArchive: { activeLeads: activeLeadsBefore } }));
-  await page.getByRole("link", { name: "Active opportunities" }).click();
+  await page.getByRole("link", { name: "Active leads" }).click();
   await page.getByLabel("Show archived").check();
   await page.getByLabel("Search leads").fill(lead);
   await page.getByRole("button", { name: lead }).click();
   await page.getByRole("button", { name: "Restore" }).click();
 
   await openOverview(page);
-  await expect.poll(() => metric(page, "Active opportunities")).toBe(activeLeadsBefore + 1);
+  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore + 1);
   await page.reload();
   await expect(page).toHaveURL(/\/overview$/);
   await expect(page.getByTestId("overview-workspace")).toBeVisible();
-  await expect(page.getByTestId("overview-kpi-active-opportunities")).toBeVisible();
-  await expect.poll(() => metric(page, "Active opportunities")).toBe(activeLeadsBefore + 1);
+  await expect(page.getByTestId("overview-kpi-active-leads")).toBeVisible();
+  await expect.poll(() => metric(page, "Active leads")).toBe(activeLeadsBefore + 1);
   console.log(JSON.stringify({ metricsAfterRestore: { activeLeads: activeLeadsBefore + 1 } }));
   await screenshot(page, "overview-after-restore.png");
 

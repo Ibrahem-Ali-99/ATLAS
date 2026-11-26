@@ -6,6 +6,7 @@ credentials from callers and refuses to send while ATLAS is in sandbox mode.
 # ruff: noqa: E501
 
 import json
+import re
 import uuid
 from typing import Any
 
@@ -17,9 +18,19 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.domains.automation.signatures import open_integration_secret
 from app.domains.integrations.models import IntegrationConfig, IntegrationStatus, IntegrationType
+from app.integrations.outcomes import OutcomeUncertain
 
 
-def parse_cloud_webhook(payload: dict[str, Any]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+def normalize_phone(value: str) -> str:
+    normalized = re.sub(r"[ ()-]", "", value.strip()).removeprefix("+")
+    if not re.fullmatch(r"[1-9][0-9]{7,14}", normalized):
+        raise AppError(422, "invalid_whatsapp_recipient", "Use a WhatsApp number with country code")
+    return normalized
+
+
+def parse_cloud_webhook(
+    payload: dict[str, Any],
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     """Extract supported text messages and delivery statuses from Meta's envelope."""
     messages: list[dict[str, str]] = []
     statuses: list[dict[str, str]] = []
@@ -33,10 +44,23 @@ def parse_cloud_webhook(payload: dict[str, Any]) -> tuple[list[dict[str, str]], 
                 text = item.get("text", {}).get("body")
                 sender = item.get("from")
                 if isinstance(text, str) and isinstance(sender, str) and text.strip():
-                    messages.append({"id": str(item["id"]), "sender": sender, "body": text, "phone_number_id": phone_id})
+                    messages.append(
+                        {
+                            "id": str(item["id"]),
+                            "sender": sender,
+                            "body": text,
+                            "phone_number_id": phone_id,
+                        }
+                    )
             for item in value.get("statuses", []):
                 if item.get("id") and item.get("status"):
-                    statuses.append({"id": str(item["id"]), "status": str(item["status"]), "phone_number_id": phone_id})
+                    statuses.append(
+                        {
+                            "id": str(item["id"]),
+                            "status": str(item["status"]),
+                            "phone_number_id": phone_id,
+                        }
+                    )
     return messages, statuses
 
 
@@ -49,7 +73,8 @@ def send_whatsapp_text(
     template_name: str | None = None,
     template_language: str = "en_US",
 ) -> str:
-    if get_settings().email_mode != "live":
+    settings = get_settings()
+    if settings.email_mode != "live" or not settings.whatsapp_live_enabled:
         raise AppError(
             409, "sandbox_delivery_only", "WhatsApp delivery is disabled in sandbox mode"
         )
@@ -58,10 +83,11 @@ def send_whatsapp_text(
             IntegrationConfig.organization_id == organization_id,
             IntegrationConfig.integration_type == IntegrationType.whatsapp,
             IntegrationConfig.status == IntegrationStatus.configured,
+            IntegrationConfig.verified_at.is_not(None),
         )
     )
     if record is None or not record.encrypted_credentials:
-        raise AppError(503, "whatsapp_unconfigured", "WhatsApp is not configured")
+        raise AppError(503, "whatsapp_unconfigured", "Verify the workspace WhatsApp connection")
     try:
         credentials = json.loads(open_integration_secret(record.encrypted_credentials))
     except (ValueError, json.JSONDecodeError) as exc:
@@ -70,10 +96,16 @@ def send_whatsapp_text(
         ) from exc
     token = credentials.get("access_token") if isinstance(credentials, dict) else None
     phone_id = record.config.get("phone_number_id")
-    if not isinstance(token, str) or not isinstance(phone_id, str):
+    if (
+        not isinstance(token, str)
+        or not token.strip()
+        or not isinstance(phone_id, str)
+        or not re.fullmatch(r"[0-9]{1,32}", phone_id)
+    ):
         raise AppError(
             503, "whatsapp_configuration_incomplete", "WhatsApp configuration is incomplete"
         )
+    recipient = normalize_phone(recipient)
     if template_name:
         message: dict[str, Any] = {
             "messaging_product": "whatsapp",
@@ -95,16 +127,16 @@ def send_whatsapp_text(
             json=message,
             timeout=30.0,
         )
-    except httpx.TimeoutException as exc:
-        raise AppError(
-            504, "whatsapp_provider_timeout", "WhatsApp delivery outcome is unknown"
-        ) from exc
-    if response.status_code >= 400:
+    except httpx.RequestError as exc:
+        raise OutcomeUncertain("whatsapp_transport_error") from exc
+    if response.status_code >= 500 or response.status_code == 408:
+        raise OutcomeUncertain("whatsapp_provider_unavailable")
+    if not response.is_success:
         raise AppError(502, "whatsapp_provider_error", "WhatsApp did not accept the message")
     try:
         message_id = response.json()["messages"][0]["id"]
     except (KeyError, IndexError, TypeError, ValueError) as exc:
-        raise AppError(
-            409, "whatsapp_provider_uncertain", "WhatsApp returned an ambiguous delivery result"
-        ) from exc
-    return str(message_id)
+        raise OutcomeUncertain("whatsapp_receipt_invalid") from exc
+    if not isinstance(message_id, str) or not 1 <= len(message_id) <= 200:
+        raise OutcomeUncertain("whatsapp_receipt_invalid")
+    return message_id

@@ -11,6 +11,8 @@ from typing import Protocol, cast
 
 import httpx
 
+from app.core.errors import AppError
+
 
 @dataclass(frozen=True)
 class DnsRecord:
@@ -32,6 +34,8 @@ class DomainProvider(Protocol):
 
     def status(self, provider_domain_id: str) -> DomainStatus: ...
 
+    def start_verification(self, provider_domain_id: str) -> None: ...
+
     def revoke(self, provider_domain_id: str) -> None: ...
 
 
@@ -41,31 +45,51 @@ class ResendDomainProvider:
         self._timeout = timeout
 
     def register(self, domain: str) -> DomainStatus:
-        response = httpx.post(
-            "https://api.resend.com/domains",
-            headers=self._headers,
-            json={"name": domain},
-            timeout=self._timeout,
-        )
-        response.raise_for_status()
-        return _domain_status(response.json())
+        return self._read(self._request("POST", "", body={"name": domain}))
 
     def status(self, provider_domain_id: str) -> DomainStatus:
-        response = httpx.get(
-            f"https://api.resend.com/domains/{provider_domain_id}",
-            headers=self._headers,
-            timeout=self._timeout,
-        )
-        response.raise_for_status()
-        return _domain_status(response.json())
+        return self._read(self._request("GET", f"/{provider_domain_id}"))
+
+    def start_verification(self, provider_domain_id: str) -> None:
+        self._request("POST", f"/{provider_domain_id}/verify")
 
     def revoke(self, provider_domain_id: str) -> None:
-        response = httpx.delete(
-            f"https://api.resend.com/domains/{provider_domain_id}",
-            headers=self._headers,
-            timeout=self._timeout,
+        self._request("DELETE", f"/{provider_domain_id}")
+
+    def _request(
+        self, method: str, path: str, *, body: dict[str, str] | None = None
+    ) -> httpx.Response:
+        try:
+            response = httpx.request(
+                method,
+                f"https://api.resend.com/domains{path}",
+                headers=self._headers,
+                json=body,
+                timeout=self._timeout,
+            )
+        except httpx.RequestError as exc:
+            raise AppError(502, "resend_unavailable", "Resend could not be reached") from exc
+        if response.status_code in {401, 403}:
+            raise AppError(422, "resend_credentials_rejected", "Check the Resend key permissions")
+        if response.status_code == 404:
+            raise AppError(
+                404, "resend_domain_missing", "This domain is unavailable to the Resend key"
+            )
+        if not response.is_success:
+            raise AppError(502, "resend_domain_error", "Resend rejected the domain request")
+        return response
+
+    @staticmethod
+    def _read(response: httpx.Response) -> DomainStatus:
+        try:
+            payload = response.json()
+            if isinstance(payload, dict) and payload.get("id") and payload.get("status"):
+                return _domain_status(payload)
+        except (TypeError, ValueError):
+            pass
+        raise AppError(
+            502, "resend_domain_response_invalid", "Resend returned an invalid domain response"
         )
-        response.raise_for_status()
 
 
 def _domain_status(payload: dict[str, object]) -> DomainStatus:

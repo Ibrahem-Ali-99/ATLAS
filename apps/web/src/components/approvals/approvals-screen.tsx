@@ -1,21 +1,22 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useRef, useState } from "react";
 
 import { Pager } from "@/components/pager";
+import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { executionSummary, type Approval, type ApprovalStatus } from "@/lib/agent";
-import { decideApproval, executeApproval, listApprovals, resumeAgentRun } from "@/lib/agent-api";
-import { getAutomations } from "@/lib/automations";
+import { decideApproval, executeApproval, getApproval, listApprovals, resumeAgentRun } from "@/lib/agent-api";
 import { useWorkspace } from "@/lib/use-workspace";
 import { actionLabel, proposalChange, proposalRisk, proposalTarget } from "@/lib/approval-presentation";
+import { listWorkflowReviews } from "@/lib/workflow-definitions";
 
 const selectClass =
   "flex h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground";
@@ -23,53 +24,26 @@ const selectClass =
 export function ApprovalsScreen() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
-  const [status, setStatus] = useState<ApprovalStatus | "">("pending");
-  const requested = useSearchParams().get("approval");
-  const [selectedId, setSelectedId] = useState<string | null>(requested);
-  const [note, setNote] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
   if (!organizationId) {
     return <Skeleton className="h-40 w-full" />;
   }
-  return (
-    <ApprovalsBody
-      organizationId={organizationId}
-      isAdmin={workspace.role === "admin"}
-      status={status}
-      onStatus={setStatus}
-      selectedId={selectedId}
-      onSelect={setSelectedId}
-      note={note}
-      onNote={setNote}
-      notice={notice}
-      onNotice={setNotice}
-    />
-  );
+  return <ApprovalsBody key={organizationId} organizationId={organizationId} isAdmin={workspace.role === "admin"} />;
 }
 
-function ApprovalsBody({
-  organizationId,
-  isAdmin,
-  status,
-  onStatus,
-  selectedId,
-  onSelect,
-  note,
-  onNote,
-  notice,
-  onNotice,
-}: {
+function ApprovalsBody({ organizationId, isAdmin }: {
   organizationId: string;
   isAdmin: boolean;
-  status: ApprovalStatus | "";
-  onStatus: (status: ApprovalStatus | "") => void;
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-  note: string;
-  onNote: (note: string) => void;
-  notice: string | null;
-  onNotice: (notice: string | null) => void;
 }) {
+  const router = useRouter();
+  const selectedId = useSearchParams().get("approval");
+  const [status, setStatus] = useState<ApprovalStatus | "">("pending");
+  const [note, setNote] = useState<{ id: string; text: string } | null>(null);
+  const [notice, setNotice] = useState<{ id: string; text: string } | null>(null);
+  const select = (id: string | null) => {
+    setNote(null);
+    setNotice(null);
+    router.replace(id ? `/approvals?approval=${encodeURIComponent(id)}` : "/approvals", { scroll: false });
+  };
   const queryClient = useQueryClient();
   const executeGuard = useRef(false);
   const [page, setPage] = useState(1);
@@ -82,9 +56,16 @@ function ApprovalsBody({
       return selected?.status === "executing" ? 1000 : false;
     },
   });
-  const automations = useQuery({
-    queryKey: ["automations", organizationId],
-    queryFn: () => getAutomations(organizationId),
+  const detail = useQuery({
+    queryKey: ["approval", organizationId, selectedId],
+    queryFn: () => getApproval(organizationId, selectedId ?? ""),
+    enabled: Boolean(selectedId),
+    refetchInterval: (query) => query.state.data?.status === "executing" ? 1000 : false,
+  });
+  const workflowReviews = useQuery({
+    queryKey: ["workflow-reviews", organizationId],
+    queryFn: () => listWorkflowReviews(organizationId),
+    enabled: isAdmin,
   });
   const needle = query.trim().toLowerCase();
   const visible = (approvals.data?.items ?? []).filter((approval) => {
@@ -94,7 +75,7 @@ function ApprovalsBody({
     const haystack = `${approval.action_type} ${JSON.stringify(approval.payload)}`.toLowerCase();
     return haystack.includes(needle);
   });
-  const selected = visible.find((item) => item.id === selectedId)
+  const selected = detail.data ?? visible.find((item) => item.id === selectedId)
     ?? approvals.data?.items.find((item) => item.id === selectedId)
     ?? null;
   const decide = useMutation({
@@ -102,20 +83,21 @@ function ApprovalsBody({
       if (!selected) {
         throw new Error("Select an approval first");
       }
-      return decideApproval(organizationId, selected.id, decision, note);
+      return decideApproval(organizationId, selected.id, decision, note?.id === selected.id ? note.text : "");
     },
-    onSuccess: async (_approval, decision) => {
-      onNote("");
+    onSuccess: async (approval, decision) => {
+      setNote(null);
       // Keep the decided proposal visible and selected. The default Pending
       // filter would otherwise remove it from the loaded list immediately,
       // unmounting the detail panel before the operator can execute it.
-      onStatus("");
-      onNotice(
-        decision === "approve"
+      setStatus("");
+      queryClient.setQueryData(["approval", organizationId, approval.id], approval);
+      setNotice({ id: approval.id, text: decision === "approve"
           ? "Approved. Execute writes the stored payload. Nothing is sent until then."
           : "Rejected. No CRM change or external action was written.",
-      );
+      });
       await queryClient.invalidateQueries({ queryKey: ["approvals", organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ["approval", organizationId, selectedId] });
       await queryClient.invalidateQueries({ queryKey: ["agent-runs", organizationId] });
     },
   });
@@ -141,11 +123,11 @@ function ApprovalsBody({
     },
     onSuccess: async (approval) => {
       executeGuard.current = false;
-      onNotice(
-        approval.status === "executing"
+      queryClient.setQueryData(["approval", organizationId, approval.id], approval);
+      setNotice({ id: approval.id, text: approval.status === "executing"
           ? "Queued. The sandbox worker is processing the stored result."
           : "Executed. The stored result is on this approval.",
-      );
+      });
       await queryClient.invalidateQueries({ queryKey: ["approvals", organizationId] });
       await queryClient.invalidateQueries({ queryKey: ["agent-runs", organizationId] });
       await queryClient.invalidateQueries({ queryKey: ["automations", organizationId] });
@@ -156,16 +138,26 @@ function ApprovalsBody({
   });
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-6">
-    <header>
-      <h1 className="text-[31px] leading-none text-foreground">Decisions</h1>
-      <p className="mt-3 max-w-3xl text-sm text-muted-foreground">
-        A person approves, rejects, or executes the stored proposal. Approve stores a decision. Execute writes the payload. Reject writes nothing.
-      </p>
-    </header>
+    <div className="mx-auto flex w-full max-w-[1240px] min-w-0 flex-col gap-5">
+    <PageHeader title="Approvals" eyebrow="Governed actions" actions={
+      <Button asChild variant="outline"><Link href="/agent-runs">View execution history</Link></Button>
+    }>Review proposed workspace changes before applying them.</PageHeader>
+    {workflowReviews.error ? <RequestError error={workflowReviews.error} /> : null}
+    {workflowReviews.data?.length ? <aside className="rounded-xl border border-border bg-card p-4" aria-label="Pending workflow approvals">
+      <h2 className="text-sm font-semibold">Workflows awaiting approval</h2>
+      <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+        {workflowReviews.data.map((entry) => <li key={entry.id}>
+          <Link className="block rounded-md border border-border px-3 py-2 hover:bg-accent"
+            href={`/workflows?workflow=${entry.workflow_id}&run=${entry.id}${entry.archived ? "&archived=1" : ""}`}>
+            <span className="block break-words text-sm font-medium">{entry.name}</span>
+            {entry.note ? <span className="mt-0.5 block break-words text-xs text-muted-foreground">{entry.note}</span> : null}
+          </Link>
+        </li>)}
+      </ul>
+    </aside> : null}
     <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-      <section className="min-w-0 rounded-[10px] bg-muted">
-        <div className="flex flex-col gap-3 p-4">
+      <section className="min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-border bg-muted/40 p-4">
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -177,7 +169,7 @@ function ApprovalsBody({
             aria-label="Filter approvals"
             value={status}
             onChange={(event) => {
-              onStatus(event.target.value as ApprovalStatus | "");
+              setStatus(event.target.value as ApprovalStatus | "");
               setPage(1);
             }}
           >
@@ -203,12 +195,13 @@ function ApprovalsBody({
               key={approval.id}
               type="button"
               data-approval-id={approval.id}
+              aria-current={approval.id === selectedId || undefined}
               className={`block w-full px-4 py-3 text-left ${approval.id === selectedId ? "bg-accent/40" : ""}`}
-              onClick={() => onSelect(approval.id)}
+              onClick={() => select(approval.id)}
             >
               <span className="font-medium">{actionLabel(approval.action_type)}</span>
               <span className="mt-1 block text-sm text-muted-foreground">
-                {scopeLabel(approval.action_type, automations.data?.email_mode, automations.data?.calendar_provider)}
+                {scopeLabel(approval)}
                 {" · "}
                 <span className={statusClass(approval.status)}>{approval.status}</span>
               </span>
@@ -219,17 +212,18 @@ function ApprovalsBody({
           <Pager page={approvals.data.page} pageSize={approvals.data.page_size} total={approvals.data.total} onPage={setPage} />
         ) : null}
       </section>
-      <section className="rounded-[10px] bg-muted p-4">
-        {notice ? <p className="mb-3 text-sm text-muted-foreground">{notice}</p> : null}
-        {!selected ? <p className="text-sm text-muted-foreground">Select a proposal to review the requested change and its impact.</p> : null}
+      <section aria-label="Approval details" className="min-w-0 rounded-lg border border-border bg-card p-5 shadow-sm">
+        {selectedId ? <Button className="mb-3" size="sm" variant="outline" onClick={() => select(null)}>Close approval details</Button> : null}
+        {notice && notice.id === selectedId ? <p className="mb-3 text-sm text-muted-foreground" role="status">{notice.text}</p> : null}
+        {detail.isError ? <RequestError error={detail.error} /> : null}
+        {selectedId && !selected && detail.isPending ? <Skeleton className="h-24" /> : null}
+        {!selectedId ? <p className="text-sm text-muted-foreground">Select a proposal to review the requested change and its impact.</p> : null}
         {selected ? (
           <ApprovalDetail
             approval={selected}
             isAdmin={isAdmin}
-            emailMode={automations.data?.email_mode}
-            calendarProvider={automations.data?.calendar_provider}
-            note={note}
-            onNote={onNote}
+            note={note?.id === selected.id ? note.text : ""}
+            onNote={(text) => setNote({ id: selected.id, text })}
             deciding={decide.isPending}
             resuming={resume.isPending}
             executing={execute.isPending}
@@ -248,8 +242,6 @@ function ApprovalsBody({
 function ApprovalDetail({
   approval,
   isAdmin,
-  emailMode,
-  calendarProvider,
   note,
   onNote,
   deciding,
@@ -262,8 +254,6 @@ function ApprovalDetail({
 }: {
   approval: Approval;
   isAdmin: boolean;
-  emailMode: string | undefined;
-  calendarProvider: string | undefined;
   note: string;
   onNote: (note: string) => void;
   deciding: boolean;
@@ -274,18 +264,44 @@ function ApprovalDetail({
   onResume: () => void;
   onExecute: () => void;
 }) {
+  const message = approval.action_type === "prepare_customer_response" ? approval.payload : null;
+  const whatsapp = message?.channel === "whatsapp";
+  const template = whatsapp && typeof message?.template_name === "string" ? message.template_name : "";
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-foreground">{actionLabel(approval.action_type)}</h2>
           <p className={`mt-1 text-xs uppercase tracking-[0.12em] ${approval.action_type === "prepare_customer_response" || approval.action_type === "request_appointment" ? "text-warning" : "text-success"}`}>
-            {scopeLabel(approval.action_type, emailMode, calendarProvider)}
+            {scopeLabel(approval)}
           </p>
           <p className="text-sm text-muted-foreground">Requested {new Date(approval.created_at).toLocaleString()}</p>
         </div>
         <p className={`text-xs uppercase tracking-[0.12em] ${statusClass(approval.status)}`}>{approval.status}</p>
       </div>
+      {message ? (
+        <section aria-label="Approved message preview" className="rounded-lg border border-border bg-background p-4">
+          <h3 className="text-sm font-semibold">Message preview</h3>
+          <dl className="mt-2 grid gap-2 text-sm">
+            <div><dt className="text-muted-foreground">Recipient</dt><dd className="break-all">{String(message.to ?? message.recipient ?? "Unavailable")}</dd></div>
+            {!whatsapp && message.subject ? <div><dt className="text-muted-foreground">Subject</dt><dd className="break-words">{String(message.subject)}</dd></div> : null}
+            {template ? <div><dt className="text-muted-foreground">WhatsApp template</dt><dd className="break-words">{template} · {String(message.template_language ?? "en_US")}</dd></div> : null}
+          </dl>
+          {template ? <p className="mt-3 text-sm text-muted-foreground">Review this template in WhatsApp Business before approving.</p> :
+            <p className="mt-3 max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-sm">{typeof message.body === "string" ? message.body : "Message is unavailable."}</p>}
+        </section>
+      ) : null}
+      {approval.action_type === "request_appointment" ? (
+        <dl className="grid gap-2 rounded-lg border border-border bg-background p-4 text-sm sm:grid-cols-2">
+          {(["starts_at", "ends_at"] as const).map((key) => {
+            const date = approval.payload[key];
+            return typeof date === "string" ? <div key={key}>
+              <dt className="text-muted-foreground">{key === "starts_at" ? "Starts at" : "Ends at"}</dt>
+              <dd><time dateTime={date}>{new Date(date).toLocaleString()}</time></dd>
+            </div> : null;
+          })}
+        </dl>
+      ) : null}
       <div className="rounded-lg border border-border bg-card p-4">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Proposed action</p>
         <p className="mt-2 text-sm font-medium">{proposalChange(approval.action_type, approval.payload)}</p>
@@ -299,8 +315,7 @@ function ApprovalDetail({
         {approval.executed_at ? <div>Executed {new Date(approval.executed_at).toLocaleString()}</div> : null}
         {approval.decision_note ? <div>Note: {approval.decision_note}</div> : null}
       </dl>
-      <p className="text-xs text-subtle">Previous field values are not stored on this proposal. The fields below are the stored payload.</p>
-      <p className="text-sm leading-6 text-muted-foreground">{sideEffect(approval.action_type, approval.status)}</p>
+      <p className="text-sm leading-6 text-muted-foreground">{sideEffect(approval)}</p>
       {isAdmin ? (
         <details className="rounded-[10px] border border-border bg-background p-3">
           <summary className="cursor-pointer text-sm font-medium">Technical details</summary>
@@ -310,7 +325,7 @@ function ApprovalDetail({
       {executionSummary(approval.execution_result) ? (
         <p className="text-sm text-muted-foreground">{executionSummary(approval.execution_result)}</p>
       ) : null}
-      {approval.execution_error ? <p className="text-sm text-red-300">{approval.execution_error}</p> : null}
+      {approval.execution_error ? <p className="text-sm text-destructive">{approval.execution_error}</p> : null}
       {approval.status === "pending" && isAdmin ? (
         <div className="space-y-3">
           <Textarea value={note} onChange={(event) => onNote(event.target.value)} placeholder="Optional note" aria-label="Decision note" />
@@ -368,40 +383,37 @@ function statusClass(status: string): string {
   return "text-primary";
 }
 
-function scopeLabel(actionType: string, emailMode: string | undefined, calendarProvider: string | undefined): string {
+function scopeLabel(approval: Approval): string {
+  const { action_type: actionType, payload } = approval;
   if (actionType === "create_lead" || actionType === "update_lead") {
     return "Internal CRM write";
   }
   if (actionType === "prepare_customer_response") {
-    if (emailMode === "live") {
+    if (payload.channel === "whatsapp") return "WhatsApp reply";
+    if (payload.delivery_mode === "live") {
       return "External email";
     }
-    if (emailMode === "sandbox") {
-      return "Sandbox email";
-    }
-    return "Email on execute";
+    return "Sandbox email";
   }
   if (actionType === "request_appointment") {
-    if (calendarProvider === "simulation") {
-      return "Simulated calendar";
-    }
-    if (calendarProvider) {
-      return "External calendar";
-    }
-    return "Calendar on execute";
+    return payload.provider_calendar_id ? "Google Calendar" : "ATLAS reservation";
   }
   return "Stored action";
 }
 
-function sideEffect(actionType: string, status: string): string {
+function sideEffect(approval: Approval): string {
+  const { action_type: actionType, status, payload } = approval;
   if (status === "needs_attention") {
     return "The outcome could not be confirmed, so this was not marked successful. Check Workflows before running it again.";
   }
   if (actionType === "prepare_customer_response") {
-    return "Approve stores this text. Execute sends it through the configured email mode. Sandbox mode reaches the local mailbox, not a customer inbox. Reject sends nothing.";
+    if (payload.channel === "whatsapp") return "Execute sends the approved WhatsApp reply to the linked phone number.";
+    if (payload.delivery_mode === "live") return "Execute submits the approved email to the verified SMTP relay.";
+    return "Execute sends the approved email to the local SMTP sink.";
   }
   if (actionType === "request_appointment") {
-    return "Approve stores this time. Execute writes a simulated calendar booking in ATLAS. No external calendar is contacted. Reject books nothing.";
+    if (payload.provider_calendar_id) return "Execute checks the connected Google Calendar again and creates a private event.";
+    return "Execute reserves this time in ATLAS. Download the event from Workflows to import it into a calendar.";
   }
   if (actionType === "update_lead" || actionType === "create_lead") {
     return "Approve does not change CRM. Execute writes this payload. Reject writes nothing.";

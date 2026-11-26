@@ -44,6 +44,17 @@ def test_legacy_v1_records_remain_readable(monkeypatch) -> None:
     assert open_integration_secret(legacy) == "legacy-token"
 
 
+def test_configured_keyring_can_read_development_v2_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("ATLAS_CREDENTIAL_ENCRYPTION_KEYS", "")
+    legacy = seal_integration_secret("legacy-token")
+    assert legacy.startswith("enc:v2:legacy-secret-key:")
+
+    monkeypatch.setenv("ATLAS_CREDENTIAL_ENCRYPTION_KEYS", "current=independent-test-key")
+    get_settings.cache_clear()
+    assert open_integration_secret(legacy) == "legacy-token"
+    assert seal_integration_secret("replacement").startswith("enc:v2:current:")
+
+
 def test_unknown_or_tampered_credential_fails_closed(monkeypatch) -> None:
     monkeypatch.setenv("ATLAS_CREDENTIAL_ENCRYPTION_KEYS", "current=alpha-secret")
     get_settings.cache_clear()

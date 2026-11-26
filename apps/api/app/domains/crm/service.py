@@ -4,10 +4,11 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
+from app.domains.campaigns.models import MarketingConsent
 from app.domains.crm.models import Company, Contact, Inquiry, Interaction, Lead
 from app.domains.identity.service import get_membership
 from app.domains.provenance.origin import Origin, stated_origin
@@ -58,10 +59,11 @@ def _contact(db: Session, organization_id: uuid.UUID, contact_id: uuid.UUID) -> 
     )
 
 
-def _lead(db: Session, organization_id: uuid.UUID, lead_id: uuid.UUID) -> Lead:
-    return _require(
-        db.scalar(select(Lead).where(Lead.id == lead_id, Lead.organization_id == organization_id))
-    )
+def _lead(
+    db: Session, organization_id: uuid.UUID, lead_id: uuid.UUID, *, lock: bool = False
+) -> Lead:
+    query = select(Lead).where(Lead.id == lead_id, Lead.organization_id == organization_id)
+    return _require(db.scalar(query.with_for_update() if lock else query))
 
 
 def _owner(db: Session, organization_id: uuid.UUID, user_id: uuid.UUID) -> None:
@@ -95,7 +97,12 @@ def _archive_filter(query: Any, model: Any, include_archived: bool) -> Any:
 
 
 def list_companies(
-    db: Session, organization_id: uuid.UUID, *, q: str | None, page: int, page_size: int,
+    db: Session,
+    organization_id: uuid.UUID,
+    *,
+    q: str | None,
+    page: int,
+    page_size: int,
     include_archived: bool = False,
 ) -> tuple[list[Company], int]:
     query = _archive_filter(
@@ -192,10 +199,27 @@ def get_contact(db: Session, organization_id: uuid.UUID, contact_id: uuid.UUID) 
 def update_contact(
     db: Session, organization_id: uuid.UUID, contact_id: uuid.UUID, values: dict[str, object]
 ) -> Contact:
-    contact = _contact(db, organization_id, contact_id)
+    contact = _require(
+        db.scalar(
+            select(Contact)
+            .where(Contact.id == contact_id, Contact.organization_id == organization_id)
+            .with_for_update()
+        )
+    )
     if "company_id" in values and isinstance(values["company_id"], uuid.UUID):
         _company(db, organization_id, values["company_id"])
+    previous_email = (contact.email or "").strip().lower()
     _apply(contact, _editable(values))
+    if previous_email != (contact.email or "").strip().lower():
+        db.execute(
+            update(MarketingConsent)
+            .where(
+                MarketingConsent.organization_id == organization_id,
+                MarketingConsent.contact_id == contact_id,
+                MarketingConsent.status == "granted",
+            )
+            .values(status="revoked", source="email_changed", consented_at=datetime.now(UTC))
+        )
     db.commit()
     db.refresh(contact)
     return contact
@@ -283,8 +307,10 @@ def create_lead(
     return lead
 
 
-def get_lead(db: Session, organization_id: uuid.UUID, lead_id: uuid.UUID) -> Lead:
-    return _lead(db, organization_id, lead_id)
+def get_lead(
+    db: Session, organization_id: uuid.UUID, lead_id: uuid.UUID, *, lock: bool = False
+) -> Lead:
+    return _lead(db, organization_id, lead_id, lock=lock)
 
 
 def update_lead(
@@ -348,7 +374,9 @@ def list_inquiries(
     return _page(db, query, page, page_size)
 
 
-def create_inquiry(db: Session, organization_id: uuid.UUID, values: dict[str, object]) -> Inquiry:
+def create_inquiry(
+    db: Session, organization_id: uuid.UUID, values: dict[str, object], *, commit: bool = True
+) -> Inquiry:
     company_id = values.get("company_id")
     lead_id = values.get("lead_id")
     if isinstance(company_id, uuid.UUID):
@@ -359,8 +387,7 @@ def create_inquiry(db: Session, organization_id: uuid.UUID, values: dict[str, ob
             values["origin"] = parent.origin
     inquiry = Inquiry(organization_id=organization_id, **_with_origin(values))
     db.add(inquiry)
-    db.commit()
-    db.refresh(inquiry)
+    _persist(db, inquiry, commit=commit)
     return inquiry
 
 

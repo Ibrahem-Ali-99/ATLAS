@@ -35,6 +35,7 @@ export type AnalyticsSnapshot = {
     definition: string;
   };
   lead_trend: DayCount[];
+  customer_activity?: { day: string; inquiries: number; interactions: number }[];
   agent_outcomes: StatusCount[];
   failed_runs: number;
   approvals: {

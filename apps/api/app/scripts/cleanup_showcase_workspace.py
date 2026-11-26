@@ -8,7 +8,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 
@@ -34,7 +34,7 @@ def _organization(db: Any) -> Organization:
     organization = db.scalar(select(Organization).where(Organization.slug == SLUG))
     if organization is None:
         raise ValueError(f"required showcase organization {SLUG!r} was not found")
-    return organization
+    return cast(Organization, organization)
 
 
 def _changes(db: Any, organization: Organization) -> list[dict[str, str]]:

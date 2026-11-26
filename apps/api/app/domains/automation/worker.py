@@ -10,8 +10,9 @@ from sqlalchemy import select
 
 from app.core.database import SessionLocal
 from app.domains.automation.intents import dispatch_intent
-from app.domains.automation.models import ExecutionIntent, IntentStatus
-from app.domains.automation.workflows import dispatch_scheduled
+from app.domains.automation.models import ExecutionIntent, IntentStatus, WorkflowRun, WorkflowStatus
+from app.domains.automation.workflows import dispatch_scheduled, dispatch_workflow
+from app.domains.campaigns.dispatch import dispatch_due
 from app.domains.observability.workers import touch
 
 logger = structlog.get_logger(__name__)
@@ -19,7 +20,7 @@ _stdlib_logger = logging.getLogger(__name__)
 
 
 def run_once() -> int:
-    """Claim and dispatch each currently pending intent once.
+    """Dispatch pending approval intents and workflow runs.
 
     Claiming remains in ``dispatch_intent`` so multiple worker processes are safe.
     """
@@ -40,8 +41,28 @@ def run_once() -> int:
             try:
                 dispatch_intent(session, organization_id, intent_id)
             except Exception:
+                session.rollback()
                 logger.exception("automation_intent_failed", intent_id=str(intent_id))
             processed += 1
+        workflows = session.execute(
+            select(WorkflowRun.id, WorkflowRun.organization_id)
+            .where(WorkflowRun.status == WorkflowStatus.pending)
+            .order_by(WorkflowRun.created_at, WorkflowRun.id)
+            .limit(50)
+        ).all()
+        for run_id, organization_id in workflows:
+            try:
+                dispatch_workflow(session, organization_id, run_id)
+            except Exception:
+                session.rollback()
+                logger.exception("automation_workflow_failed", workflow_run_id=str(run_id))
+            processed += 1
+        try:
+            processed += dispatch_due(session)
+        except Exception:
+            session.rollback()
+            logger.exception("campaign_dispatch_failed")
+            raise
         if processed:
             logger.info("automation_worker_processed", count=processed)
             touch(session, worker_id, "automation", status="idle", success=True)

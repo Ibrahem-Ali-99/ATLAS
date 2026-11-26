@@ -34,12 +34,20 @@ class DeterministicChatClient:
         return None
 
     def complete(self, system: str, user: str) -> str:
+        if "subject and body only" in system:
+            return '{"subject":"Your ATLAS inquiry","body":"Thank you for your inquiry."}'
         if "json" in system.lower():
             return (
                 '{"category":"warehousing","contact_name":"Mina Patel","company_name":"Harbor",'
                 '"summary":"Rates for bonded storage","lead_title":"Bonded storage inquiry",'
                 '"draft_response":"We can discuss bonded storage."}'
             )
+        if "Answer using only DOCUMENT EXCERPTS and CRM RECORDS" in system:
+            for heading in ("DOCUMENT EXCERPTS (", "CRM RECORDS ("):
+                section = user.partition(f"\n{heading}")[2]
+                first_row = section.partition("\n")[2].split("\n", 1)[0]
+                if first_row.startswith("- ") and ": " in first_row:
+                    return first_row.split(": ", 1)[1]
         return "Grounded answer from the supplied company records."
 
     def stream(self, system: str, user: str) -> Iterator[str]:

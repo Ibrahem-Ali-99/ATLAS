@@ -1,9 +1,13 @@
+import json
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domains.identity.models import MembershipRole
 from app.domains.integrations.models import IntegrationConfig
+from app.domains.integrations.service import open_credentials
+from app.integrations.smtp_verification import verify_smtp
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
 from tests.helpers import login
 
@@ -53,6 +57,57 @@ def test_non_admin_cannot_modify_integration(client: TestClient, db: Session) ->
         headers={"X-CSRF-Token": str(session["csrf_token"])},
     )
     assert response.status_code == 403
+
+
+def test_email_credentials_can_be_updated_independently(client: TestClient, db: Session) -> None:
+    organization_id, headers = _admin(client, db)
+    path = f"/api/v1/organizations/{organization_id}/integration-configs/email"
+    payload = {
+        "provider": "smtp",
+        "config": {
+            "host": "smtp.example.test",
+            "port": 587,
+            "starttls": True,
+            "from_address": "noreply@example.test",
+        },
+        "merge_email_credentials": True,
+    }
+    created = client.put(
+        path, headers=headers, json={**payload, "credentials": '{"resend_api_key":"domain-token"}'}
+    )
+    assert created.is_success
+    updated = client.put(
+        path,
+        headers=headers,
+        json={
+            **payload,
+            "expected_version": created.json()["credential_version"],
+            "credentials": '{"username":"smtp-user","password":"smtp-pass"}',
+        },
+    )
+    assert updated.is_success
+    assert "smtp-pass" not in updated.text
+    record = db.scalar(
+        select(IntegrationConfig).where(
+            IntegrationConfig.organization_id == organization_id,
+        )
+    )
+    assert record is not None
+    assert json.loads(open_credentials(record) or "{}") == {
+        "resend_api_key": "domain-token",
+        "username": "smtp-user",
+        "password": "smtp-pass",
+    }
+    result = verify_smtp(
+        host="smtp.example.test",
+        port=25,
+        username="smtp-user",
+        password="smtp-pass",
+        use_tls=False,
+        starttls=False,
+    )
+    assert not result.verified
+    assert "TLS" in result.detail
 
 
 def test_email_configuration_is_encrypted_and_verification_is_bounded(

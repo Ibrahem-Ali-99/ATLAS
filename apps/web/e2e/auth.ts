@@ -21,7 +21,7 @@ export async function signInAsSeedUser(page: Page, user: SeedUser = "admin"): Pr
   const response = await loginResponse;
   const body = (await response.json().catch(() => ({}))) as { detail?: { code?: string } };
   console.log(
-    `e2e_login_status=${response.status()} api=${new URL(response.url()).origin} database=atlas_e2e`,
+    `e2e_login_status=${response.status()} api=${new URL(response.url()).origin} database=${process.env.ATLAS_E2E_DATABASE_NAME ?? "isolated"}`,
   );
   expect(
     response.ok(),

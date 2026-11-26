@@ -1,5 +1,7 @@
 # ATLAS Functional Roadmap
 
+> Historical checkpoint. See [the product completion backlog](product-completion-backlog.md) for current status.
+
 This roadmap is based on [`ATLAS_FUNCTIONAL_AUDIT.md`](./ATLAS_FUNCTIONAL_AUDIT.md). It prioritizes production safety and complete business workflows over additional UI work.
 
 ## Priority definitions
@@ -12,7 +14,7 @@ This roadmap is based on [`ATLAS_FUNCTIONAL_AUDIT.md`](./ATLAS_FUNCTIONAL_AUDIT.
 
 ### P0.1 Identity lifecycle and tenant administration
 
-**Progress:** The first vertical slice—admin-created, single-use, expiring staff invitations—has been implemented in migration `20261124_0019`. Static migration generation and test collection pass. Codex still cannot reach `127.0.0.1:5434` (`10035`), so `scripts/verify-invitations.ps1` is provided for the authorized Windows environment. It is not production-complete because the token is not delivered by a transactional email provider and runtime security tests remain pending.
+**Progress:** The first vertical slice—admin-created, single-use, expiring staff invitations—has been implemented in migration `20261124_0019`. Static migration generation and test collection pass. The audit host could not reach `127.0.0.1:5434` (`10035`), so `scripts/verify-invitations.ps1` is provided for the authorized Windows environment. It is not production-complete because the token is not delivered by a transactional email provider and runtime security tests remain pending.
 
 **Dependencies:** identity/API design, email delivery, token storage, audit events.
 

@@ -6,7 +6,7 @@ Numbers below are from commands run on this workstation. They are not a hosted l
 
 `.\scripts\check.ps1` runs Ruff, format, mypy, pytest, ESLint, the Next.js production build, TypeScript, and gitleaks. On 22 Nov 2026 that script reported 90 pytest tests passed, mypy clean for 94 files, and gitleaks with no leaks. The browser test is not part of that script. An earlier `npm run e2e` run passed in 17.8 seconds and was not repeated in this pass.
 
-`npm run e2e` in `apps/web` is the browser test. It uses database `atlas_e2e`, ports 8010 and 3010, and deterministic providers. It does not call a paid model.
+`npm run e2e` in `apps/web` is the browser test. It uses database `atlas_e2e`, ports 8011 and 3011, and deterministic providers. It does not call a paid model. The normal browser environment is separate: 127.0.0.1:3000 → 127.0.0.1:8000 → PostgreSQL host port 5434.
 
 GitHub Actions contains jobs for the API, the web build, the browser test, the container builds, and gitleaks. A green local run is not a green GitHub run.
 

@@ -200,6 +200,12 @@ def prepare_turn(
             intent = _classify_ambiguous(chat, content)
     if intent is Intent.mutation:
         return _stored_reply(db, conversation, MUTATION_ANSWER, _phases())
+    if intent is Intent.handoff:
+        conversation.needs_human_review = True
+        conversation.escalation_reason = "The workspace user requested a human review"
+        return _stored_reply(
+            db, conversation, "I marked this conversation for human review.", _phases()
+        )
     if intent is Intent.capability:
         return _stored_reply(db, conversation, CAPABILITY_ANSWER, _phases())
     if intent is Intent.greeting:
@@ -391,11 +397,8 @@ def _grounded_turn(
 def _evidence_confidence(
     documents: list[RetrievedChunk], crm_records: list[dict[str, str]]
 ) -> float:
-    if documents:
-        return max(0.0, min(1.0, max(item.score for item in documents)))
-    if crm_records:
-        return 0.6
-    return 0.0
+    document_confidence = max((item.confidence for item in documents), default=0.0)
+    return max(document_confidence, 0.6 if crm_records else 0.0)
 
 
 def _escalation_threshold(db: Session, organization_id: uuid.UUID) -> float:
@@ -416,6 +419,15 @@ def evaluate_response(
     history: list[tuple[str, str]] | None = None,
 ) -> dict[str, object]:
     """Evaluate an Assistant response without creating conversation side effects."""
+    if route_question(question, has_history=bool(history)) is Intent.handoff:
+        return {
+            "response": "A team member should review this request.",
+            "grounding": "handoff",
+            "evidence_confidence": 0.0,
+            "source_count": 0,
+            "escalated": True,
+            "reason": "The user requested a human handoff",
+        }
     turns = history or []
     documents = search_chunks(db, organization_id, question, embedder)
     crm_records = search_records(db, organization_id, question)
@@ -451,11 +463,23 @@ def evaluate_response(
             "escalated": True,
             "reason": "The language model returned an empty answer",
         }
+    answer, cited_documents, cited_records = _cited_context(
+        question, answer, documents, crm_records
+    )
+    if not cited_documents and not cited_records:
+        return {
+            "response": answer[:12000],
+            "grounding": "fallback",
+            "evidence_confidence": confidence,
+            "source_count": 0,
+            "escalated": True,
+            "reason": "The answer did not cite supporting evidence",
+        }
     return {
         "response": answer[:12000],
         "grounding": "grounded",
         "evidence_confidence": confidence,
-        "source_count": len(documents) + len(crm_records),
+        "source_count": len(cited_documents) + len(cited_records),
         "escalated": False,
         "reason": None,
     }
@@ -699,6 +723,7 @@ def _prior_document_chunks(
                 page_number=chunk.page_number,
                 content=chunk.content,
                 score=1.0,
+                confidence=0.85,
             )
         )
     return found

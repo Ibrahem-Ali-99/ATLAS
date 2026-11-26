@@ -10,6 +10,15 @@ class WebhookKeyOut(BaseModel):
     secret: str
 
 
+class WebhookKeyStatus(BaseModel):
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    rotated_at: datetime | None
+    revoked_at: datetime | None
+    last_accepted_at: datetime | None
+
+
 class AttemptOut(BaseModel):
     outcome: str
     error: str | None

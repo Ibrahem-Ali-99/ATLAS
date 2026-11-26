@@ -10,6 +10,10 @@ import {
   Workflow,
   Inbox,
   Megaphone,
+  BadgeCheck,
+  Bot,
+  Gauge,
+  CreditCard,
   type LucideIcon,
 } from "lucide-react";
 
@@ -30,16 +34,19 @@ const crm = { href: "/crm", label: "CRM", icon: Users };
 const knowledge = { href: "/knowledge", label: "Knowledge", icon: BookOpen };
 const inbox = { href: "/inbox", label: "Inbox", icon: Inbox };
 const campaigns = { href: "/campaigns", label: "Campaigns", icon: Megaphone };
+const agentRuns = { href: "/agent-runs", label: "Agent Runs", icon: Bot };
+const approvals = { href: "/approvals", label: "Approvals", icon: BadgeCheck };
 const automations = { href: "/workflows", label: "Workflows", icon: Workflow };
 const integrations = { href: "/integrations", label: "Integrations", icon: Plug };
 const analytics = { href: "/analytics", label: "Analytics", icon: BarChart3 };
+const monitoring = { href: "/monitoring", label: "Monitoring", icon: Gauge };
 const settings = { href: "/settings", label: "Settings", icon: Settings };
+const billing = { href: "/billing", label: "Billing", icon: CreditCard };
 const setup = { href: "/setup", label: "Setup", icon: ListChecks };
 
 export const navigationGroups: NavGroup[] = [
-  { label: "Business operations", items: [overview, assistant, crm, inbox, knowledge, campaigns] },
-  { label: "Automation", items: [automations, integrations] },
-  { label: "Insight & administration", items: [analytics, setup, settings] },
+  { label: "Work", items: [overview, crm, inbox, assistant, knowledge, approvals, automations, agentRuns, analytics, campaigns] },
+  { label: "Manage", items: [monitoring, integrations, billing, settings, setup] },
 ];
 
 export const navigation: NavItem[] = navigationGroups.flatMap((group) => group.items);

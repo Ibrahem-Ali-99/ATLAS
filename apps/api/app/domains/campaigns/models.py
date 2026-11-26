@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, Uuid, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,6 +27,7 @@ class CustomerSegment(Base):
 
 class Campaign(Base):
     __tablename__ = "campaigns"
+    __table_args__ = (Index("ix_campaigns_dispatch", "status", "scheduled_at"),)
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
@@ -41,12 +42,35 @@ class Campaign(Base):
     subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     objective: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivery_mode: Mapped[str] = mapped_column(
+        String(12), nullable=False, default="sandbox", server_default="sandbox"
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class CampaignDelivery(Base):
+    __tablename__ = "campaign_deliveries"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "email", name="uq_campaign_deliveries_email"),
+        Index("ix_campaign_deliveries_queue", "campaign_id", "status", "id"),
+        Index("ix_campaign_deliveries_message_id", "message_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False
+    )
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    message_id: Mapped[str | None] = mapped_column(String(255))
 
 
 class CampaignSuppression(Base):

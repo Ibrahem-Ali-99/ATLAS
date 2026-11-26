@@ -1,48 +1,501 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useDeferredValue, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { ArrowLeft, ExternalLink, Inbox, Mail, MessageCircle, PanelRight, Search, Send, Settings2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { assignInbox, draftInboxWithAi, getInbox, listInbox, listInboxAssignees, resolveInboxHandoff, resumeInboxAi, saveInboxDraft, sendStaffMessage, submitInboxApproval, takeOverInbox, updateInboxStatus } from "@/lib/inbox";
+import { assignInbox, draftInboxWithAi, getInbox, linkInboxLead, listInbox, listInboxAssignees, resolveInboxHandoff, resumeInboxAi, saveInboxDraft, sendStaffMessage, submitInboxApproval, takeOverInbox, updateInboxStatus } from "@/lib/inbox";
 import { useWorkspace } from "@/lib/use-workspace";
+import { recordInboxInquiry } from "@/lib/inbox";
 import { Button } from "@/components/ui/button";
-import { listContacts } from "@/lib/records-api";
+import { PageHeader } from "@/components/page-header";
+import { RequestError } from "@/components/request-error";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { getContact, getLead, listContacts, listLeads } from "@/lib/records-api";
+import { getInboxWidget, markInboxRead, saveInboxWidget, type InboxDetail, type InboxWidget, type WidgetSettings } from "@/lib/inbox";
+import { resolveApiBaseUrl } from "@/lib/api-base";
+
+const channelNames = { email: "Email", whatsapp: "WhatsApp", webchat: "Website chat" };
+const fieldClass = "h-9 w-full min-w-0 rounded-md border border-input bg-background px-2.5 text-sm text-foreground";
+const composerClass = "min-h-24 w-full rounded-md border border-input bg-background p-3 text-sm";
+const recordClass = "flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-accent";
+
+function displayDate(date: string) {
+  return new Date(date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
 
 export function InboxScreen() {
-  const { organizationId } = useWorkspace();
-  const id = organizationId ?? "";
+  const { organizationId, role } = useWorkspace();
+  return organizationId ? <InboxWorkspace key={organizationId} id={organizationId} isAdmin={role === "admin"} /> : null;
+}
+
+function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const deferredQuery = useDeferredValue(q);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [leadSearch, setLeadSearch] = useState("");
+  const deferredLeadSearch = useDeferredValue(leadSearch);
   const [assignmentFilter, setAssignmentFilter] = useState("all");
   const [channelFilter, setChannelFilter] = useState("all");
   const [draft, setDraft] = useState("");
   const [subject, setSubject] = useState("");
   const [templateName, setTemplateName] = useState("");
   const [newContactName, setNewContactName] = useState("");
-  const [newContactEmail, setNewContactEmail] = useState("");
+  const [newContactAddress, setNewContactAddress] = useState("");
   const [staffReply, setStaffReply] = useState("");
   const client = useQueryClient();
-  const conversations = useQuery({ queryKey: ["inbox", id, q, assignmentFilter, channelFilter], queryFn: () => listInbox(id, q, assignmentFilter, channelFilter), enabled: Boolean(id) });
-  const detail = useQuery({ queryKey: ["inbox-detail", id, selected], queryFn: () => getInbox(id, selected ?? ""), enabled: Boolean(id && selected) });
+  const conversations = useQuery({ queryKey: ["inbox", id, deferredQuery, assignmentFilter, channelFilter, statusFilter], queryFn: () => listInbox(id, deferredQuery, assignmentFilter, channelFilter, statusFilter), enabled: Boolean(id), refetchInterval: 8000 });
+  const detail = useQuery({ queryKey: ["inbox-detail", id, selected], queryFn: () => getInbox(id, selected ?? ""), enabled: Boolean(id && selected), refetchInterval: 5000 });
+  const { mutate: acknowledge } = useMutation({
+    mutationFn: ({ id: conversationId, updated_at }: InboxDetail) => markInboxRead(id, conversationId, updated_at),
+    onSuccess: ({ marked }, conversation) => {
+      if (!marked) return;
+      client.setQueryData<InboxDetail>(["inbox-detail", id, conversation.id], (current) =>
+        current?.updated_at === conversation.updated_at ? { ...current, unread_count: 0 } : current,
+      );
+      void client.invalidateQueries({ queryKey: ["inbox", id] });
+    },
+  });
+  const seenThread = detail.data;
+  useEffect(() => {
+    if (seenThread?.unread_count) acknowledge(seenThread);
+  }, [acknowledge, seenThread]);
   const assignees = useQuery({ queryKey: ["inbox-assignees", id], queryFn: () => listInboxAssignees(id), enabled: Boolean(id) });
   const contacts = useQuery({ queryKey: ["contacts", id], queryFn: () => listContacts(id, { page: 1, pageSize: 100 }), enabled: Boolean(id && selected && detail.data && !detail.data.contact_id) });
+  const leads = useQuery({
+    queryKey: ["inbox-leads", id, deferredLeadSearch],
+    queryFn: () => listLeads(id, { q: deferredLeadSearch, pageSize: 50 }),
+    enabled: Boolean(detail.data && detail.data.channel !== "webchat" && !detail.data.lead_id && deferredLeadSearch.trim()),
+  });
+  const linkLead = useMutation({ mutationFn: (leadId: string) => linkInboxLead(id, selected ?? "", leadId), onSuccess: () => invalidate() });
+  const latestInbound = detail.data?.messages.findLast((message) => message.direction === "inbound");
+  const savedDraft = detail.data?.messages.findLast((message) => message.delivery_status === "draft");
+  const recipient = detail.data?.reply_recipient ?? latestInbound?.sender ?? "";
   const invalidate = () => { void client.invalidateQueries({ queryKey: ["inbox", id] }); void client.invalidateQueries({ queryKey: ["inbox-detail", id, selected] }); };
-  const save = useMutation({ mutationFn: () => saveInboxDraft(id, selected ?? "", detail.data?.messages[0]?.sender ?? "", draft, subject), onSuccess: invalidate });
+  const save = useMutation({ mutationFn: () => saveInboxDraft(id, selected ?? "", recipient, draft, subject), onSuccess: invalidate });
   const status = useMutation({ mutationFn: (value: string) => updateInboxStatus(id, selected ?? "", value), onSuccess: invalidate });
   const assignment = useMutation({ mutationFn: (userId: string | null) => assignInbox(id, selected ?? "", userId), onSuccess: invalidate });
   const aiDraft = useMutation({ mutationFn: () => draftInboxWithAi(id, selected ?? ""), onSuccess: (result) => { setSubject(result.subject); setDraft(result.body); } });
-  const approval = useMutation({ mutationFn: () => submitInboxApproval(id, selected ?? "", detail.data?.messages[0]?.sender ?? "", draft, subject, templateName || undefined), onSuccess: invalidate });
+  const approval = useMutation({ mutationFn: () => submitInboxApproval(id, selected ?? "", recipient, draft, subject, templateName || undefined), onSuccess: invalidate });
   const linkContact = useMutation({ mutationFn: (contactId: string) => import("@/lib/inbox").then(({ linkInboxContact }) => linkInboxContact(id, selected ?? "", contactId)), onSuccess: invalidate });
-  const createContact = useMutation({ mutationFn: () => import("@/lib/inbox").then(({ createInboxContact }) => createInboxContact(id, selected ?? "", newContactName, newContactEmail)), onSuccess: () => { setNewContactName(""); setNewContactEmail(""); invalidate(); } });
+  const createContact = useMutation({ mutationFn: () => import("@/lib/inbox").then(({ createInboxContact }) => createInboxContact(id, selected ?? "", newContactName, detail.data?.channel === "whatsapp" ? { phone: newContactAddress } : { email: newContactAddress })), onSuccess: () => { setNewContactName(""); setNewContactAddress(""); invalidate(); } });
   const takeover = useMutation({ mutationFn: () => takeOverInbox(id, selected ?? ""), onSuccess: invalidate });
   const resolve = useMutation({ mutationFn: () => resolveInboxHandoff(id, selected ?? ""), onSuccess: invalidate });
   const resumeAi = useMutation({ mutationFn: () => resumeInboxAi(id, selected ?? ""), onSuccess: invalidate });
   const staffSend = useMutation({ mutationFn: () => sendStaffMessage(id, selected ?? "", staffReply, `staff-${Date.now()}-${Math.random().toString(36).slice(2)}`), onSuccess: () => { setStaffReply(""); invalidate(); } });
-  const open = (conversation: { id: string; subject: string }) => { setSelected(conversation.id); setSubject(conversation.subject); setDraft(""); };
-  return <div className="flex min-w-0 flex-col gap-6">
-    <header><h1 className="text-3xl font-semibold">Inbox</h1><p className="mt-2 text-sm text-muted-foreground">Customer conversations matched to your organization CRM.</p></header>
-    <div className="grid min-h-[520px] gap-4 lg:grid-cols-[320px_1fr]">
-      <section className="rounded-xl border border-border bg-card p-4"><div className="flex flex-wrap gap-2"><input aria-label="Search inbox" className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm" placeholder="Search conversations" value={q} onChange={(e) => setQ(e.target.value)} /><select aria-label="Assignment filter" className="h-10 rounded-md border border-input bg-background px-2 text-xs" value={assignmentFilter} onChange={(e) => setAssignmentFilter(e.target.value)}><option value="all">All</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option></select><select aria-label="Channel filter" className="h-10 rounded-md border border-input bg-background px-2 text-xs" value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)}><option value="all">All channels</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="webchat">Website chat</option></select></div><div className="mt-4 space-y-2">{conversations.data?.map((conversation) => <button key={conversation.id} type="button" className={`w-full rounded-md p-3 text-left ${selected === conversation.id ? "bg-accent" : "bg-muted"}`} onClick={() => open(conversation)}><p className="font-medium"><span className="mr-2 text-xs uppercase text-muted-foreground">{conversation.channel}</span>{conversation.subject}</p><p className="mt-1 text-xs text-muted-foreground">{conversation.status} {conversation.unread_count ? `· ${conversation.unread_count} unread` : ""}</p></button>)}{conversations.data?.length === 0 ? <p className="text-sm text-muted-foreground">No customer conversations yet.</p> : null}</div></section>
-      <section className="rounded-xl border border-border bg-card p-5">{detail.data ? <><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">{detail.data.subject}</h2><p className="text-sm text-muted-foreground">{detail.data.handoff_requested ? "Waiting for human" : detail.data.ai_resumed ? "AI active" : detail.data.status === "resolved" ? "Resolved" : "Staff handling"}{detail.data.handoff_reason ? ` · ${detail.data.handoff_reason}` : ""}</p></div><div className="flex flex-wrap gap-2"><select aria-label="Conversation assignee" value={detail.data.assigned_to ?? ""} onChange={(e) => assignment.mutate(e.target.value || null)}><option value="">Unassigned</option>{assignees.data?.map((person) => <option key={person.user_id} value={person.user_id}>{person.full_name}</option>)}</select><select aria-label="Conversation status" value={detail.data.status} onChange={(e) => status.mutate(e.target.value)}><option value="open">Open</option><option value="pending">Pending</option><option value="resolved">Resolved</option></select><Button variant="secondary" onClick={() => takeover.mutate()}>Accept handoff</Button>{detail.data.handoff_requested ? <Button variant="secondary" onClick={() => resolve.mutate()}>Resolve handoff</Button> : null}{detail.data.status === "resolved" ? <Button variant="secondary" onClick={() => resumeAi.mutate()}>Resume AI</Button> : null}</div></div>{!detail.data.contact_id ? <div className="mt-4 rounded-md border border-dashed p-3"><p className="text-sm font-medium">Link this conversation to a contact</p><div className="mt-2 flex flex-wrap gap-2"><select aria-label="Existing contact" value="" onChange={(e) => e.target.value && linkContact.mutate(e.target.value)}><option value="">Choose an existing contact</option>{contacts.data?.items.map((contact) => <option key={contact.id} value={contact.id}>{contact.full_name} · {contact.email ?? "no email"}</option>)}</select><input aria-label="New contact name" className="h-9 rounded-md border px-2 text-sm" placeholder="New contact name" value={newContactName} onChange={(e) => setNewContactName(e.target.value)} /><input aria-label="New contact email" className="h-9 rounded-md border px-2 text-sm" placeholder="Email" value={newContactEmail} onChange={(e) => setNewContactEmail(e.target.value)} /><Button variant="secondary" onClick={() => createContact.mutate()} disabled={!newContactName || !newContactEmail || createContact.isPending}>Create contact</Button></div></div> : null}<div className="mt-5 space-y-3">{detail.data.messages.map((message) => <article key={message.id} className={`rounded-lg p-3 ${message.direction === "inbound" ? "bg-muted" : "bg-accent"}`}><p className="text-xs text-muted-foreground">{message.channel} · {message.sender} · {message.delivery_status}</p><p className="mt-2 whitespace-pre-wrap text-sm">{message.body}</p></article>)}</div>{detail.data.channel === "webchat" ? <div className="mt-5 space-y-3"><textarea aria-label="Staff reply" className="min-h-24 w-full rounded-md border border-input bg-background p-3" placeholder="Reply to the visitor…" value={staffReply} onChange={(e) => setStaffReply(e.target.value)} /><Button onClick={() => staffSend.mutate()} disabled={!staffReply.trim() || staffSend.isPending}>Send to visitor</Button></div> : null}<div className="mt-5 space-y-3"><input aria-label="Reply subject" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" placeholder="Reply subject" value={subject} onChange={(e) => setSubject(e.target.value)} />{detail.data.channel === "whatsapp" ? <input aria-label="WhatsApp template name" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" placeholder="Template name (required outside service window)" value={templateName} onChange={(e) => setTemplateName(e.target.value)} /> : null}<textarea aria-label="Reply draft" className="min-h-24 w-full rounded-md border border-input bg-background p-3" placeholder="Write a reply draft…" value={draft} onChange={(e) => setDraft(e.target.value)} /><div className="flex flex-wrap gap-2"><Button onClick={() => aiDraft.mutate()} disabled={aiDraft.isPending}>{aiDraft.isPending ? "Drafting…" : "Draft with AI"}</Button><Button variant="secondary" onClick={() => save.mutate()} disabled={!draft.trim() || save.isPending}>Save draft</Button><Button variant="secondary" onClick={() => approval.mutate()} disabled={!draft.trim() || approval.isPending}>Submit for approval</Button></div>{aiDraft.error ? <p role="alert" className="text-sm text-destructive">AI drafting is unavailable. Check the configured provider and try again.</p> : null}{approval.isSuccess ? <p className="text-sm text-muted-foreground">Approval requested and available in Agent Runs.</p> : null}{approval.error ? <p role="alert" className="text-sm text-destructive">This reply could not be submitted for approval.</p> : null}</div></> : <p className="text-sm text-muted-foreground">Select a conversation to view its messages.</p>}</section>
+  const open = (conversation: { id: string; subject: string }) => {
+    if (conversation.id === selected || aiDraft.isPending || staffSend.isPending) return;
+    setSelected(conversation.id);
+    setSubject(conversation.subject);
+    setDraft("");
+    setStaffReply("");
+    setTemplateName("");
+    setLeadSearch("");
+    setNewContactName("");
+    setNewContactAddress("");
+    save.reset();
+    aiDraft.reset();
+    approval.reset();
+  };
+  const requestError = conversations.error ?? detail.error ?? assignment.error ?? status.error ??
+    save.error ?? takeover.error ?? resolve.error ?? resumeAi.error ?? staffSend.error ??
+    linkContact.error ?? createContact.error ?? linkLead.error;
+  const filtered = Boolean(q || assignmentFilter !== "all" || channelFilter !== "all" || statusFilter);
+  const clearFilters = () => {
+    setQ("");
+    setAssignmentFilter("all");
+    setChannelFilter("all");
+    setStatusFilter("");
+  };
+  const thread = detail.data;
+  const linkedContact = useQuery({
+    queryKey: ["inbox-contact", id, thread?.contact_id],
+    queryFn: () => getContact(id, thread!.contact_id!),
+    enabled: Boolean(thread?.contact_id),
+  });
+  const linkedLead = useQuery({
+    queryKey: ["inbox-lead", id, thread?.lead_id],
+    queryFn: () => getLead(id, thread!.lead_id!),
+    enabled: Boolean(thread?.lead_id),
+  });
+  const messages = thread?.messages.filter((message) => message.delivery_status !== "draft");
+  const threadLog = useRef<HTMLDivElement>(null);
+  const followMessages = useRef(true);
+  const visibleThreadId = thread?.id;
+  const lastMessageId = messages?.at(-1)?.id;
+  useEffect(() => { followMessages.current = true; }, [visibleThreadId]);
+  useEffect(() => {
+    const log = threadLog.current;
+    if (log && followMessages.current) log.scrollTop = log.scrollHeight;
+  }, [visibleThreadId, lastMessageId]);
+  const context = thread ? (
+    <div className="space-y-5">
+      <div className="grid gap-3">
+        <h3 className="text-sm font-semibold">Assignment and status</h3>
+        <label className="grid gap-1 text-xs text-muted-foreground">Conversation assignee
+          <select className={fieldClass} value={thread.assigned_to ?? ""} disabled={!assignees.data || assignment.isPending} onChange={(event) => assignment.mutate(event.target.value || null)}>
+            <option value="">Unassigned</option>
+            {assignees.data?.map((person) => <option key={person.user_id} value={person.user_id}>{person.full_name}</option>)}
+          </select>
+        </label>
+        {assignees.error ? <RequestError error={assignees.error} /> : null}
+        <label className="grid gap-1 text-xs text-muted-foreground">Conversation status
+          <select className={fieldClass} value={thread.status} disabled={status.isPending} onChange={(event) => status.mutate(event.target.value)}>
+            <option value="open">Open</option>
+            <option value="pending">Pending</option>
+            <option value="resolved">Resolved</option>
+          </select>
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" disabled={takeover.isPending} onClick={() => takeover.mutate()}>Accept handoff</Button>
+          {thread.handoff_requested ? <Button size="sm" variant="secondary" disabled={resolve.isPending} onClick={() => resolve.mutate()}>Resolve handoff</Button> : null}
+          {isAdmin && thread.channel === "webchat" && thread.status === "resolved" ? <Button size="sm" variant="secondary" disabled={resumeAi.isPending} onClick={() => resumeAi.mutate()}>Resume AI</Button> : null}
+        </div>
+      </div>
+      <div className="grid gap-3 border-t border-border pt-4">
+        <h3 className="text-sm font-semibold">Linked CRM records</h3>
+        {linkedContact.error ? <RequestError error={linkedContact.error} /> : null}
+        {thread.contact_id ? (
+          <Link className={recordClass} href={`/crm?tab=contacts&id=${thread.contact_id}`}>
+            {linkedContact.data?.full_name ?? "Open contact"} <ExternalLink size={13} />
+          </Link>
+        ) : (
+          <>
+            <label className="grid gap-1 text-xs text-muted-foreground">Existing contact
+              <select className={fieldClass} value="" disabled={linkContact.isPending} onChange={(event) => { if (event.target.value) linkContact.mutate(event.target.value); }}>
+                <option value="">Choose a contact</option>
+                {contacts.data?.items.map((contact) => <option key={contact.id} value={contact.id}>{contact.full_name}</option>)}
+              </select>
+            </label>
+            {contacts.error ? <RequestError error={contacts.error} /> : null}
+            <form className="grid gap-2" onSubmit={(event) => { event.preventDefault(); createContact.mutate(); }}>
+              <input aria-label="New contact name" className={fieldClass} placeholder="New contact name" value={newContactName} onChange={(event) => setNewContactName(event.target.value)} required />
+              <input aria-label={thread.channel === "whatsapp" ? "New contact phone" : "New contact email"} className={fieldClass} type={thread.channel === "whatsapp" ? "tel" : "email"} placeholder={thread.channel === "whatsapp" ? "Phone with country code" : "Email"} value={newContactAddress} onChange={(event) => setNewContactAddress(event.target.value)} required />
+              <Button size="sm" variant="secondary" type="submit" disabled={createContact.isPending}>Create contact</Button>
+            </form>
+          </>
+        )}
+        {linkedLead.error ? <RequestError error={linkedLead.error} /> : null}
+        {thread.lead_id ? (
+          <Link className={recordClass} href={`/crm?tab=leads&id=${thread.lead_id}`}>
+            {linkedLead.data?.title ?? "Open lead"} <ExternalLink size={13} />
+          </Link>
+        ) : thread.channel !== "webchat" ? (
+          <>
+            <label className="grid gap-1 text-xs text-muted-foreground">Link a CRM lead
+              <input className={fieldClass} value={leadSearch} onChange={(event) => setLeadSearch(event.target.value)} placeholder="Search lead titles" />
+            </label>
+            {leads.error ? <RequestError error={leads.error} /> : null}
+            {leads.data ? (
+              <select aria-label="Select a CRM lead" className={fieldClass} value="" disabled={linkLead.isPending} onChange={(event) => { if (event.target.value) linkLead.mutate(event.target.value); }}>
+                <option value="">Choose a matching lead</option>
+                {leads.data.items.filter((lead) => lead.contact_id && (!thread.contact_id || thread.contact_id === lead.contact_id)).map((lead) => <option key={lead.id} value={lead.id}>{lead.title}</option>)}
+              </select>
+            ) : null}
+          </>
+        ) : null}
+        {thread.contact_id && latestInbound ? (
+          <RecordInquiry key={thread.id} organizationId={id} conversationId={thread.id}
+            title={thread.subject} linked={Boolean(thread.lead_id)} onRecorded={invalidate} />
+        ) : null}
+      </div>
     </div>
+  ) : null;
+
+  return (
+    <div className="flex min-w-0 flex-col gap-5">
+      <PageHeader title="Inbox" eyebrow="Customer communications" actions={isAdmin ? (
+        <WidgetSettingsDialog organizationId={id} />
+      ) : undefined}>
+        Manage customer conversations across connected channels.
+      </PageHeader>
+      {requestError ? <RequestError error={requestError} /> : null}
+      <div className="grid min-w-0 overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)] min-[1440px]:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)_minmax(13rem,16rem)]">
+        <section aria-label="Conversation queue" className={`min-w-0 lg:border-r lg:border-border ${selected ? "hidden lg:block" : ""}`}>
+          <div className="space-y-3 border-b border-border p-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold">Conversations</h2>
+              {conversations.data ? <Badge variant="secondary">{conversations.data.length}</Badge> : null}
+            </div>
+            <label className="relative block">
+              <Search aria-hidden="true" size={15} className="pointer-events-none absolute top-3 left-3 text-muted-foreground" />
+              <input aria-label="Search inbox" className={`${fieldClass} pl-9`} placeholder="Search conversations" value={q} onChange={(event) => setQ(event.target.value)} />
+            </label>
+            <details className="text-sm" open={filtered || undefined}>
+              <summary className="cursor-pointer font-medium">Filters</summary>
+              <div className="mt-2 grid gap-2">
+                <select aria-label="Assignment filter" className={fieldClass} value={assignmentFilter} onChange={(event) => setAssignmentFilter(event.target.value)}>
+                  <option value="all">All assignees</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option>
+                </select>
+                <select aria-label="Channel filter" className={fieldClass} value={channelFilter} onChange={(event) => setChannelFilter(event.target.value)}>
+                  <option value="all">All channels</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="webchat">Website chat</option>
+                </select>
+                <select aria-label="Status filter" className={fieldClass} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                  <option value="">All statuses</option><option value="open">Open</option><option value="pending">Pending</option><option value="resolved">Resolved</option>
+                </select>
+                {filtered ? <Button size="sm" variant="ghost" onClick={clearFilters}>Clear filters</Button> : null}
+              </div>
+            </details>
+          </div>
+          {conversations.isPending ? <div className="p-4" role="status" aria-label="Loading conversations"><Skeleton className="h-12" /></div> : null}
+          <ul className="max-h-[65dvh] divide-y divide-border overflow-y-auto">
+            {conversations.data?.map((conversation) => {
+              const ChannelIcon = conversation.channel === "email" ? Mail : MessageCircle;
+              return (
+                <li key={conversation.id}>
+                  <button type="button" aria-current={selected === conversation.id || undefined}
+                    className={`flex w-full min-w-0 items-start gap-3 px-4 py-3 text-left hover:bg-accent ${selected === conversation.id ? "bg-accent" : ""}`}
+                    onClick={() => open(conversation)}>
+                    <span className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary"><ChannelIcon aria-hidden="true" size={16} /></span>
+                    <span className="grid min-w-0 flex-1 gap-1">
+                      <span className="break-words text-sm font-semibold">{conversation.subject}</span>
+                      <span className="text-xs text-muted-foreground">{channelNames[conversation.channel]} · <span className="capitalize">{conversation.status}</span></span>
+                      <time className="text-xs text-muted-foreground" dateTime={conversation.updated_at}>{displayDate(conversation.updated_at)}</time>
+                      {conversation.handoff_requested ? <span className="text-xs font-medium text-primary">Handoff requested</span> : null}
+                    </span>
+                    {conversation.unread_count > 0 ? <Badge aria-label={`${conversation.unread_count} unread`}>{conversation.unread_count}</Badge> : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {conversations.data?.length === 0 ? (
+            <div className="grid justify-items-center gap-2 p-8 text-center text-sm text-muted-foreground">
+              <Inbox size={24} aria-hidden="true" />
+              <p>{filtered ? "No matching conversations." : "No customer conversations yet."}</p>
+            </div>
+          ) : null}
+        </section>
+        <section aria-label="Conversation details" className={`min-w-0 ${selected ? "" : "hidden lg:block"}`}>
+          {selected && !thread ? <div className="space-y-3 p-4">
+            <Button size="sm" variant="ghost" className="lg:hidden" onClick={() => setSelected(null)}><ArrowLeft size={14} /> Conversations</Button>
+            {detail.isPending ? <div role="status" aria-label="Loading conversation"><Skeleton className="h-12" /></div> : null}
+          </div> : null}
+          {thread ? (
+            <>
+              <header className="flex flex-wrap items-center gap-3 border-b border-border p-4">
+                <Button size="icon" variant="ghost" className="lg:hidden" aria-label="Back to conversations" onClick={() => setSelected(null)}><ArrowLeft size={16} /></Button>
+                <div className="min-w-0 flex-1">
+                  <h2 className="break-words text-base font-semibold">{thread.subject}</h2>
+                  <p className="text-xs text-muted-foreground">{channelNames[thread.channel]}</p>
+                </div>
+                <Badge variant="secondary" className="capitalize">{thread.status}</Badge>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button size="icon" variant="ghost" className="min-[1440px]:hidden" aria-label="Show customer context"><PanelRight size={17} /></Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-h-[85dvh] overflow-y-auto">
+                    <DialogTitle>Customer context</DialogTitle>
+                    <DialogDescription className="mb-4">Manage the conversation and its CRM records.</DialogDescription>
+                    {requestError ? <RequestError error={requestError} /> : null}
+                    {context}
+                    <DialogClose asChild><Button variant="outline" className="mt-4">Close</Button></DialogClose>
+                  </DialogContent>
+                </Dialog>
+              </header>
+              {thread.handoff_requested ? (
+                <p className="border-b border-border bg-primary/5 px-4 py-3 text-sm">
+                  <strong>{thread.handoff_accepted_at ? "Staff handling" : "Waiting for staff"}</strong>
+                  {thread.handoff_reason ? ` · ${thread.handoff_reason}` : ""}
+                </p>
+              ) : null}
+              <div ref={threadLog} role="log" aria-label="Customer messages" className="flex max-h-[58dvh] min-h-36 flex-col gap-3 overflow-y-auto bg-muted/30 p-3 sm:p-4"
+                onScroll={(event) => {
+                  const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
+                  followMessages.current = scrollHeight - scrollTop - clientHeight < 80;
+                }}>
+                {messages?.length === 0 ? <p className="m-auto text-center text-sm text-muted-foreground">No messages in this conversation.</p> : null}
+                {messages?.map((message, index) => {
+                  const date = new Date(message.created_at);
+                  const day = date.toLocaleDateString(undefined, { dateStyle: "medium" });
+                  const previous = messages[index - 1];
+                  const showDay = !previous || day !== new Date(previous.created_at).toLocaleDateString(undefined, { dateStyle: "medium" });
+                  const inbound = message.direction === "inbound";
+                  return <Fragment key={message.id}>
+                    {showDay ? <div className="flex items-center gap-3 text-xs text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">{day}</div> : null}
+                    <article className={`grid max-w-[94%] min-w-0 gap-1 sm:max-w-[85%] ${inbound ? "self-start" : "self-end"}`}>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <span className="break-all font-medium">{message.sender}</span>
+                      <time dateTime={message.created_at}>{date.toLocaleTimeString(undefined, { timeStyle: "short" })}</time>
+                    </div>
+                    <p className={`break-words whitespace-pre-wrap rounded-lg border px-3 py-2 text-sm leading-6 ${inbound ? "border-border bg-card" : "border-primary/20 bg-accent"}`}>{message.body}</p>
+                    {!inbound ? <p className={`text-right text-xs capitalize ${message.delivery_status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{message.delivery_status.replaceAll("_", " ")}</p> : null}
+                    </article>
+                  </Fragment>;
+                })}
+              </div>
+              <div className="grid gap-3 border-t border-border p-4">
+                {thread.channel === "webchat" ? (
+                  <>
+                    <textarea aria-label="Staff reply" className={composerClass} placeholder="Reply to the visitor" value={staffReply} maxLength={5000} onChange={(event) => setStaffReply(event.target.value)} />
+                    <Button className="justify-self-end" onClick={() => staffSend.mutate()} disabled={!staffReply.trim() || staffSend.isPending}><Send size={15} /> Send to visitor</Button>
+                  </>
+                ) : (
+                  <>
+                    {savedDraft ? <Button className="justify-self-start" size="sm" variant="outline" onClick={() => { setSubject(thread.subject); setDraft(savedDraft.body); }}>Restore saved draft</Button> : null}
+                    {thread.channel === "email" ? <input aria-label="Reply subject" className={fieldClass} placeholder="Reply subject" value={subject} onChange={(event) => setSubject(event.target.value)} /> : null}
+                    {thread.channel === "whatsapp" ? <input aria-label="WhatsApp template name" className={fieldClass} placeholder="Template name" value={templateName} onChange={(event) => setTemplateName(event.target.value)} /> : null}
+                    <textarea aria-label="Reply draft" className={composerClass} placeholder="Write a reply draft" value={draft} onChange={(event) => setDraft(event.target.value)} />
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" onClick={() => aiDraft.mutate()} disabled={aiDraft.isPending}>{aiDraft.isPending ? "Drafting…" : "Draft with AI"}</Button>
+                      <Button variant="secondary" onClick={() => save.mutate()} disabled={!draft.trim() || !recipient || save.isPending}>Save draft</Button>
+                      <Button onClick={() => approval.mutate()} disabled={!draft.trim() || !thread.lead_id || !thread.reply_recipient || Boolean(thread.reply_unavailable) || approval.isPending}>Submit for approval</Button>
+                    </div>
+                    {!thread.lead_id || !thread.reply_recipient ? <p className="text-xs text-muted-foreground">Link a lead and a contact with a reply address to request approval.</p> : null}
+                    {save.isSuccess ? <p role="status" className="text-sm text-muted-foreground">Draft saved.</p> : null}
+                    {aiDraft.error ? <RequestError error={aiDraft.error} /> : null}
+                    {approval.isSuccess ? <Link className={recordClass} href={`/approvals?approval=${approval.data.approval_id}`}>Open requested approval <ExternalLink size={13} /></Link> : null}
+                    {thread.reply_unavailable ? <p className="text-xs text-muted-foreground">{thread.reply_unavailable}</p> : null}
+                    {approval.error ? <RequestError error={approval.error} /> : null}
+                  </>
+                )}
+              </div>
+            </>
+          ) : !selected ? (
+            <div className="grid min-h-[30rem] place-content-center justify-items-center gap-3 p-6 text-center text-sm text-muted-foreground">
+              <Inbox size={26} aria-hidden="true" />
+              <p>Select a conversation to view its messages.</p>
+            </div>
+          ) : null}
+        </section>
+        <aside aria-label="Customer context" className="hidden min-w-0 border-l border-border p-4 min-[1440px]:block">
+          <h2 className="mb-4 text-sm font-semibold">Customer context</h2>
+          {context ?? <p className="text-sm text-muted-foreground">Select a conversation to see linked records.</p>}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function RecordInquiry({ organizationId, conversationId, title, linked, onRecorded }: {
+  organizationId: string;
+  conversationId: string;
+  title: string;
+  linked: boolean;
+  onRecorded: () => void;
+}) {
+  const [name, setName] = useState(title);
+  const cache = useQueryClient();
+  const record = useMutation({
+    mutationFn: () => recordInboxInquiry(organizationId, conversationId, name.trim()),
+    onSuccess: () => {
+      void cache.invalidateQueries({ queryKey: ["leads", organizationId] });
+      void cache.invalidateQueries({ queryKey: ["inquiries", organizationId] });
+      onRecorded();
+    },
+  });
+  return <div className="grid gap-2">
+    {record.isSuccess ? <Link className="text-sm font-medium text-primary underline" href={`/crm?tab=inquiries&id=${record.data.inquiry_id}`}>Open CRM inquiry</Link> :
+      <details className="rounded-md border border-border p-2">
+        <summary className="cursor-pointer text-sm font-medium">Record customer inquiry</summary>
+        <form className="mt-2 grid gap-2" onSubmit={(event) => { event.preventDefault(); if (name.trim()) record.mutate(); }}>
+          {!linked ? <label className="grid gap-1 text-xs">Lead title
+            <input value={name} maxLength={200} onChange={(event) => setName(event.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" required />
+          </label> : null}
+          <p className="text-xs text-muted-foreground">Save the customer’s first message to CRM for follow-up.</p>
+          {record.error ? <RequestError error={record.error} /> : null}
+          <Button type="submit" size="sm" disabled={record.isPending || !name.trim()}>{record.isPending ? "Saving…" : linked ? "Save inquiry" : "Create lead and inquiry"}</Button>
+        </form>
+      </details>}
   </div>;
+}
+
+
+export function WidgetSettingsDialog({ organizationId }: { organizationId: string }) {
+  const [open, setOpen] = useState(false);
+  const widget = useQuery({
+    queryKey: ["inbox-widget", organizationId],
+    queryFn: () => getInboxWidget(organizationId),
+    enabled: open,
+  });
+  const client = useQueryClient();
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild><Button variant="outline"><Settings2 size={15} /> Website chat settings</Button></DialogTrigger>
+      <DialogContent className="max-h-[85dvh] overflow-y-auto">
+        <DialogTitle>Website chat settings</DialogTitle>
+        <DialogDescription className="mb-4">Choose which websites can open a chat and how the workspace handles new conversations.</DialogDescription>
+        {widget.isPending ? <div role="status" aria-label="Loading website chat settings"><Skeleton className="h-24" /></div> : null}
+        {widget.error ? <RequestError error={widget.error} /> : null}
+        {widget.isSuccess ? <WidgetSettingsForm organizationId={organizationId} widget={widget.data} onSave={(saved) => {
+          client.setQueryData(["inbox-widget", organizationId], saved);
+        }} /> : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function WidgetSettingsForm({ organizationId, widget, onSave }: {
+  organizationId: string;
+  widget: InboxWidget | null;
+  onSave: (widget: InboxWidget) => void;
+}) {
+  const [origins, setOrigins] = useState(widget?.allowed_domains.join("\n") ?? "");
+  const [welcome, setWelcome] = useState(widget?.welcome_message ?? "How can we help?");
+  const [mode, setMode] = useState<WidgetSettings["operating_mode"]>(widget?.operating_mode ?? "human_review");
+  const [enabled, setEnabled] = useState(widget?.enabled ?? true);
+  const [originError, setOriginError] = useState("");
+  const save = useMutation({
+    mutationFn: (settings: WidgetSettings) => saveInboxWidget(organizationId, settings),
+    onSuccess: onSave,
+  });
+  const siteOrigin = typeof window === "undefined" ? "" : window.location.origin;
+  const apiOrigin = resolveApiBaseUrl(process.env.NEXT_PUBLIC_API_URL) || siteOrigin;
+  const embed = widget && siteOrigin
+    ? `<script src="${siteOrigin}/atlas-chat-widget.js" data-widget-id="${widget.public_id}" data-api-base="${apiOrigin}" defer></script>`
+    : "";
+
+  return (
+    <form className="grid gap-4" onSubmit={(event) => {
+      event.preventDefault();
+      setOriginError("");
+      const values = [...new Set(origins.split(/[\n,]/).map((value) => value.trim()).filter(Boolean))];
+      try {
+        const allowed = [...new Set(values.map((value) => {
+          const url = new URL(value);
+          if (!["http:", "https:"].includes(url.protocol) || url.pathname !== "/" ||
+              url.search || url.hash || url.username || url.password) throw new Error();
+          return url.origin;
+        }))];
+        if (!allowed.length || allowed.length > 20) throw new Error();
+        save.mutate({ allowed_domains: allowed, welcome_message: welcome.trim(), operating_mode: mode, enabled });
+      } catch {
+        setOriginError("Enter 1 to 20 website origins, such as https://example.com, without paths.");
+      }
+    }}>
+      <label className="grid gap-1 text-sm font-medium">Allowed website origins
+        <textarea className={composerClass} value={origins} onChange={(event) => setOrigins(event.target.value)} placeholder="https://example.com" required />
+      </label>
+      <label className="flex items-start gap-2 text-sm">
+        <input className="mt-0.5 size-4" type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+        <span><span className="block font-medium">Accept website chats</span><span className="block text-xs text-muted-foreground">Turning this off pauses the embed. Existing conversations stay in Inbox.</span></span>
+      </label>
+      {originError ? <p role="alert" className="text-sm text-destructive">{originError}</p> : null}
+      <label className="grid gap-1 text-sm font-medium">Welcome message
+        <input className={fieldClass} value={welcome} onChange={(event) => setWelcome(event.target.value)} maxLength={500} required />
+      </label>
+      <label className="grid gap-1 text-sm font-medium">Operating mode
+        <select className={fieldClass} value={mode} onChange={(event) => setMode(event.target.value as WidgetSettings["operating_mode"])}>
+          <option value="human_review">Staff only</option>
+          <option value="ai_assist">Staff with draft assistance</option>
+          <option value="ai_auto_reply">Automatic replies with staff handoff</option>
+        </select>
+      </label>
+      {embed ? (
+        <label className="grid gap-1 text-sm font-medium">Website embed code
+          <textarea readOnly className={`${composerClass} font-mono text-xs`} value={embed} onFocus={(event) => event.currentTarget.select()} />
+        </label>
+      ) : null}
+      {save.isSuccess ? <p role="status" className="text-sm text-muted-foreground">{save.data?.enabled ? "Website chat settings saved." : "Website chat paused."}</p> : null}
+      {save.error ? <RequestError error={save.error} /> : null}
+      <div className="flex justify-end gap-2">
+        <DialogClose asChild><Button type="button" variant="outline">Close</Button></DialogClose>
+        <Button type="submit" disabled={!welcome.trim() || save.isPending}>Save website chat settings</Button>
+      </div>
+    </form>
+  );
 }

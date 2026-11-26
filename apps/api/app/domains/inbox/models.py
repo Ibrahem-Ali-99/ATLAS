@@ -38,10 +38,16 @@ class InboxConversation(Base):
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     unread_count: Mapped[int] = mapped_column(nullable=False, default=0)
-    handoff_requested: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    handoff_requested: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default="false"
+    )
     handoff_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    handoff_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    handoff_resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    handoff_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    handoff_resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     ai_resumed: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

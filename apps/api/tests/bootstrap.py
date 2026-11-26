@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -36,9 +37,7 @@ def postgres_url(database: str) -> str:
     password = quote_plus(os.environ.get("POSTGRES_PASSWORD", "atlas"))
     # Use IPv4 explicitly for disposable Windows/Docker runs. ``localhost`` can
     # resolve to an unreachable IPv6 listener before trying the mapped port.
-    host = os.environ.get("ATLAS_E2E_POSTGRES_HOST") or os.environ.get(
-        "POSTGRES_HOST", "127.0.0.1"
-    )
+    host = os.environ.get("ATLAS_E2E_POSTGRES_HOST") or os.environ.get("POSTGRES_HOST", "127.0.0.1")
     port = os.environ.get("POSTGRES_PORT", "5432")
     return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
 
@@ -73,8 +72,10 @@ os.environ["ATLAS_EMAIL_MODE"] = "sandbox"
 os.environ["ATLAS_N8N_LEAD_WEBHOOK_URL"] = ""
 
 
-def ensure_database(name: str) -> None:
-    if name not in {"atlas_test", "atlas_migration_test", "atlas_e2e"}:
+def ensure_database(name: str, *, require_new: bool = False) -> None:
+    if name not in {"atlas_test", "atlas_migration_test"} and not (
+        require_new and re.fullmatch(r"atlas_e2e_[0-9a-f]{32}", name)
+    ):
         raise RuntimeError(f"Refusing to create unexpected database {name}")
     admin = create_engine(
         ADMIN_DATABASE_URL,
@@ -91,6 +92,8 @@ def ensure_database(name: str) -> None:
                 text("SELECT 1 FROM pg_database WHERE datname = :name"),
                 {"name": name},
             ).scalar()
+            if exists == 1 and require_new:
+                raise RuntimeError("The generated browser database already exists.")
             if exists != 1:
                 connection.execute(text(f'CREATE DATABASE "{name}"'))
     finally:

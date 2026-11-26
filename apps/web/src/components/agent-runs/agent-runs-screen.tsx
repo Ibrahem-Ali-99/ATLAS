@@ -2,11 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { DataScopeControl } from "@/components/data-scope";
 import { Pager } from "@/components/pager";
+import { PageHeader } from "@/components/page-header";
 import { RequestError } from "@/components/request-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,22 +26,22 @@ const selectClass =
   "flex h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground";
 
 export function AgentRunsScreen() {
-  const workspace = useWorkspace();
-  const organizationId = workspace.organizationId;
-  const requestedRun = useSearchParams().get("run");
+  const { organizationId } = useWorkspace();
+  return organizationId ? <AgentRunsWorkspace key={organizationId} organizationId={organizationId} /> : <Skeleton className="h-40 w-full" />;
+}
+
+function AgentRunsWorkspace({ organizationId }: { organizationId: string }) {
+  const router = useRouter();
+  const selectedId = useSearchParams().get("run");
   const [status, setStatus] = useState<RunStatus | "">("");
-  const [selectedId, setSelectedId] = useState<string | null>(requestedRun);
   const [open, setOpen] = useState(false);
-  if (!organizationId) {
-    return <Skeleton className="h-40 w-full" />;
-  }
   return (
     <AgentRunsBody
       organizationId={organizationId}
       status={status}
       onStatus={setStatus}
       selectedId={selectedId}
-      onSelect={setSelectedId}
+      onSelect={(id) => router.replace(id ? `/agent-runs?run=${encodeURIComponent(id)}` : "/agent-runs", { scroll: false })}
       open={open}
       onOpen={setOpen}
     />
@@ -76,6 +77,7 @@ function AgentRunsBody({
     queryKey: ["agent-run", organizationId, selectedId],
     queryFn: () => getAgentRun(organizationId, selectedId ?? ""),
     enabled: selectedId !== null,
+    refetchInterval: (query) => query.state.data?.run.status === "running" ? 2000 : false,
   });
   const resume = useMutation({
     mutationFn: (runId: string) => resumeAgentRun(organizationId, runId),
@@ -92,16 +94,13 @@ function AgentRunsBody({
   );
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-6">
-    <header>
-      <h1 className="text-[31px] leading-none text-foreground">Agent runs</h1>
-      <p className="mt-3 max-w-3xl text-sm text-muted-foreground">
-        One inquiry, stored steps, and proposals that wait for a person. Nothing is written until an approval is executed.
-      </p>
-      <DataScopeControl value={scope} onChange={setScope} />
-    </header>
+    <div className="mx-auto flex w-full max-w-[1240px] min-w-0 flex-col gap-5">
+    <PageHeader title="Agent runs" eyebrow="Agent execution history" actions={
+      <Button type="button" onClick={() => onOpen(true)}>Start from inquiry</Button>
+    }>Inspect inquiry handling, retrieved evidence, approval decisions, and execution results.</PageHeader>
+    <DataScopeControl value={scope} onChange={setScope} advanced />
     <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
-      <section className="min-w-0 overflow-x-auto rounded-[10px] bg-muted">
+      <section className="min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <div className="flex flex-col gap-3 p-4 sm:flex-row">
           <Input
             value={inquiryQuery}
@@ -124,9 +123,6 @@ function AgentRunsBody({
             <option value="completed">Completed</option>
             <option value="failed">Failed</option>
           </select>
-          <Button type="button" onClick={() => onOpen(true)}>
-            Start from inquiry
-          </Button>
         </div>
         {runs.isPending ? <div className="px-4 pb-4"><Skeleton className="h-8 w-full" /></div> : null}
         {runs.isError ? <div className="px-4 pb-4"><RequestError error={runs.error} /></div> : null}
@@ -147,7 +143,7 @@ function AgentRunsBody({
               {visible.map((run) => (
                 <TableRow key={run.id} className={run.id === selectedId ? "bg-accent/40" : undefined}>
                   <TableCell>
-                    <button type="button" className="text-left font-medium" onClick={() => onSelect(run.id)}>
+                    <button type="button" className="text-left font-medium" aria-current={run.id === selectedId || undefined} onClick={() => onSelect(run.id)}>
                       {run.inquiry_subject}
                     </button>
                   </TableCell>
@@ -165,7 +161,8 @@ function AgentRunsBody({
           <Pager page={runs.data.page} pageSize={runs.data.page_size} total={runs.data.total} onPage={setPage} />
         ) : null}
       </section>
-      <section className="rounded-[10px] bg-muted p-4">
+      <section aria-label="Run details" className="min-w-0 rounded-lg border border-border bg-card p-5 shadow-sm">
+        {selectedId ? <Button className="mb-3" size="sm" variant="outline" onClick={() => onSelect(null)}>Close run details</Button> : null}
         {detail.isPending && selectedId ? <Skeleton className="h-32 w-full" /> : null}
         {detail.isError ? <RequestError error={detail.error} /> : null}
         {!selectedId ? <p className="text-sm text-muted-foreground">Select a run to inspect its steps.</p> : null}
@@ -422,7 +419,7 @@ function RunDetail({
               {executionSummary(approval.execution_result) ? (
                 <p className="mt-2 text-muted-foreground">{executionSummary(approval.execution_result)}</p>
               ) : null}
-              {approval.execution_error ? <p className="mt-2 text-red-300">{approval.execution_error}</p> : null}
+              {approval.execution_error ? <p className="mt-2 text-destructive">{approval.execution_error}</p> : null}
             </article>
           ))}
         </div>

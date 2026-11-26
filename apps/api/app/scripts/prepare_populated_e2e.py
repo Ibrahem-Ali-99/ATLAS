@@ -1,4 +1,4 @@
-"""Create and remove a disposable populated workspace for browser acceptance."""
+"""Manage a synthetic workspace in the disposable browser database."""
 
 from __future__ import annotations
 
@@ -7,124 +7,99 @@ import os
 import sys
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.engine import make_url
+from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
-from app.domains.identity.models import MembershipRole, Organization, User
-from app.domains.identity.service import upsert_membership, upsert_organization
 
 
 def _guard() -> None:
-    if os.environ.get("ATLAS_E2E_PRODUCTION") != "1":
-        raise AppError(
-            400, "e2e_only", "This helper is restricted to the disposable E2E environment."
-        )
+    from app.scripts.e2e_database import database_name
+
     database_url = os.environ.get("ATLAS_DATABASE_URL", "")
-    if "atlas_e2e" not in database_url:
-        raise AppError(400, "unsafe_database", "This helper requires the atlas_e2e database.")
+    if make_url(database_url).database != database_name():
+        raise AppError(400, "unsafe_database", "Use the generated browser database.")
+
+
+def sample_workspace(
+    db: Session, slug: str, *, verify: bool = False, cleanup: bool = False
+) -> dict[str, object]:
+    from app.domains.assistant.models import Conversation
+    from app.domains.crm.models import Company, Contact, Inquiry, Interaction, Lead
+    from app.domains.identity.models import MembershipRole, Organization, User
+    from app.domains.identity.service import upsert_membership, upsert_organization
+    from app.scripts.populate_workspace import populate, purge
+    from app.scripts.seed import SeedSettings
+
+    _guard()
+    if not slug.startswith("sample-"):
+        raise AppError(400, "unsafe_organization", "Use a sample workspace slug.")
+    organization = db.scalar(select(Organization).where(Organization.slug == slug))
+    if cleanup:
+        if organization is not None:
+            purge(db, organization)
+            db.execute(delete(Organization).where(Organization.id == organization.id))
+            db.commit()
+        return {"status": "removed"}
+    if verify:
+        if organization is None:
+            raise AppError(404, "organization_missing", "The sample organization is missing.")
+        expected = (
+            (Company, 3),
+            (Contact, 3),
+            (Lead, 5),
+            (Inquiry, 3),
+            (Interaction, 3),
+            (Conversation, 1),
+        )
+        for model, expected_count in expected:
+            count = db.scalar(
+                select(func.count())
+                .select_from(model)
+                .where(model.organization_id == organization.id)
+            )
+            if count != expected_count:
+                raise AppError(409, "unexpected_counts", "The sample workspace is incomplete.")
+        return {"status": "verified"}
+    if organization is None:
+        organization = upsert_organization(db, name="ATLAS Sample Workspace", slug=slug)
+    seed_settings = SeedSettings()
+    admin = db.scalar(select(User).where(User.email == str(seed_settings.seed_admin_email).lower()))
+    if admin is None:
+        raise AppError(422, "e2e_admin_missing", "The disposable administrator is missing.")
+    upsert_membership(db, user=admin, organization=organization, role=MembershipRole.admin)
+    populate(db, organization)
+    db.commit()
+    return {"status": "populated"}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--organization-slug", required=True)
-    parser.add_argument("--cleanup", action="store_true")
-    parser.add_argument("--verify", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--cleanup", action="store_true")
+    mode.add_argument("--verify", action="store_true")
     args = parser.parse_args()
-    from app.scripts.seed import SeedSettings
+
+    from app.scripts.e2e_database import database_name
     from tests.bootstrap import postgres_url
 
-    os.environ["ATLAS_DATABASE_URL"] = postgres_url("atlas_e2e")
+    os.environ["ATLAS_DATABASE_URL"] = postgres_url(database_name())
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
     from app.core.database import SessionLocal
-    from app.scripts.populate_workspace import populate, purge
 
-    db = SessionLocal()
     try:
-        _guard()
-        organization = db.scalar(
-            select(Organization).where(Organization.slug == args.organization_slug)
-        )
-        if args.cleanup:
-            if organization is not None:
-                purge(db, organization)
-                db.execute(delete(Organization).where(Organization.id == organization.id))
-        elif args.verify:
-            if organization is None:
-                raise AppError(404, "organization_missing", "The sample organization is missing.")
-            from app.domains.assistant.models import Conversation
-            from app.domains.crm.models import Company, Contact, Inquiry, Interaction, Lead
-
-            counts = {
-                "companies": db.scalar(
-                    select(func.count())
-                    .select_from(Company)
-                    .where(Company.organization_id == organization.id)
-                ),
-                "contacts": db.scalar(
-                    select(func.count())
-                    .select_from(Contact)
-                    .where(Contact.organization_id == organization.id)
-                ),
-                "leads": db.scalar(
-                    select(func.count())
-                    .select_from(Lead)
-                    .where(Lead.organization_id == organization.id)
-                ),
-                "inquiries": db.scalar(
-                    select(func.count())
-                    .select_from(Inquiry)
-                    .where(Inquiry.organization_id == organization.id)
-                ),
-                "interactions": db.scalar(
-                    select(func.count())
-                    .select_from(Interaction)
-                    .where(Interaction.organization_id == organization.id)
-                ),
-                "conversations": db.scalar(
-                    select(func.count())
-                    .select_from(Conversation)
-                    .where(Conversation.organization_id == organization.id)
-                ),
-            }
-            expected = {
-                "companies": 3,
-                "contacts": 3,
-                "leads": 5,
-                "inquiries": 3,
-                "interactions": 3,
-                "conversations": 1,
-            }
-            if counts != expected:
-                raise AppError(409, "unexpected_counts", f"Expected {expected}, found {counts}.")
-            print(f"e2e_population_verify_ok slug={args.organization_slug} counts={counts}")
-            return 0
-        else:
-            if organization is None:
-                organization = upsert_organization(
-                    db, name="ATLAS Sample Workspace", slug=args.organization_slug
-                )
-            seed_settings = SeedSettings()
-            admin = db.scalar(
-                select(User).where(User.email == str(seed_settings.seed_admin_email).lower())
+        with SessionLocal() as db:
+            result = sample_workspace(
+                db, args.organization_slug, verify=args.verify, cleanup=args.cleanup
             )
-            if admin is None:
-                raise AppError(
-                    422,
-                    "e2e_admin_missing",
-                    "The disposable admin fixture is missing for the configured seed identity.",
-                )
-            upsert_membership(db, user=admin, organization=organization, role=MembershipRole.admin)
-            populate(db, organization)
-            db.commit()
-            print(f"e2e_population_ok slug={args.organization_slug}")
-            return 0
-        db.commit()
-        print(f"e2e_population_cleanup_ok slug={args.organization_slug}")
+        print(f"e2e_population_{result['status']} slug={args.organization_slug}")
         return 0
     except Exception as exc:
-        db.rollback()
         print(f"e2e_population_failed {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
-    finally:
-        db.close()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bot, FileText, MessageSquare, PanelLeft, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -34,7 +35,7 @@ export function AssistantScreen() {
     return null;
   }
   return (
-    <AssistantWorkspace organizationId={organizationId} organizationName={organizationName ?? "this organization"} />
+    <AssistantWorkspace key={organizationId} organizationId={organizationId} organizationName={organizationName ?? "this organization"} />
   );
 }
 
@@ -108,10 +109,10 @@ function AssistantWorkspace({
       await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, reply.conversation_id] });
       await queryClient.invalidateQueries({ queryKey: ["conversations", organizationId] });
     },
-    onError: async () => {
+    onError: async (_error, { targetConversationId }) => {
       setStreaming("");
       setPhases([]);
-      await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, conversationId] });
+      await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, targetConversationId] });
     },
   });
 
@@ -138,10 +139,19 @@ function AssistantWorkspace({
   }
 
   function revealSources() {
-    setPanelOpen(true);
     if (window.matchMedia("(max-width: 1279px)").matches) {
       setSourcesDialog(true);
+    } else {
+      setPanelOpen(true);
     }
+  }
+
+  function clearThreadControls() {
+    setDraft("");
+    setNotice(null);
+    setFocusSource(null);
+    setPanelOpen(false);
+    send.reset();
   }
 
   const history = (
@@ -154,9 +164,12 @@ function AssistantWorkspace({
       onQuery={setQuery}
       conversationId={conversationId}
       creating={create.isPending}
-      onCreate={() => create.mutate()}
+      busy={send.isPending}
+      onCreate={() => { clearThreadControls(); create.mutate(); }}
       onOpen={(id) => {
         setHistoryOpen(false);
+        if (id === conversationId) return;
+        clearThreadControls();
         router.replace(`/assistant?conversation=${id}`);
       }}
     />
@@ -166,25 +179,25 @@ function AssistantWorkspace({
     <div className="flex h-full min-h-0 gap-2 bg-background p-2">
       <aside className="hidden w-[300px] shrink-0 flex-col rounded-[14px] border border-border bg-card lg:flex">{history}</aside>
       <section className="flex min-h-0 min-w-0 flex-1 flex-col px-2 sm:px-6">
-        <div className="flex items-start justify-between gap-4 py-4">
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border py-4">
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold leading-tight text-foreground">{current?.title ?? "Assistant"}</h1>
             <p className="mt-1 text-sm text-muted-foreground">Ask ATLAS about your workspace, then follow the evidence.</p>
           </div>
-          <div className="flex shrink-0 items-center gap-3">
-            <ProviderNotice organizationId={organizationId} compact />
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Button type="button" size="sm" variant="outline" className="lg:hidden" onClick={() => setHistoryOpen(true)}>
-              History
+              <PanelLeft size={15} /> History
             </Button>
             {sources.length > 0 ? (
-              <Button type="button" size="sm" variant="outline" className="xl:hidden" onClick={() => setSourcesDialog(true)}>
-                Sources
+              <Button type="button" size="sm" variant="outline" aria-expanded={panelOpen || sourcesDialog} onClick={revealSources}>
+                <FileText size={15} /> Sources
               </Button>
             ) : null}
           </div>
-        </div>
+          <div className="basis-full break-words"><ProviderNotice organizationId={organizationId} compact /></div>
+        </header>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="flex w-full max-w-3xl flex-col gap-5 py-2">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-4">
             {!conversationId ? <EmptyThread organizationName={organizationName} onPrompt={setDraft} /> : null}
             {conversationId && detail.data && detail.data.messages.length === 0 && !send.isPending ? (
               <EmptyThread organizationName={organizationName} onPrompt={setDraft} />
@@ -215,7 +228,7 @@ function AssistantWorkspace({
           </div>
         </div>
         <div className="py-4">
-          <div className="w-full max-w-3xl space-y-3">
+          <div className="mx-auto w-full max-w-3xl space-y-3">
             {notice ? <StatusNote>{notice}</StatusNote> : null}
             {send.isError ? <FailureNotice error={send.error} onRetry={() => submit()} canRetry={draft.trim().length > 0} /> : null}
             <form
@@ -226,6 +239,7 @@ function AssistantWorkspace({
               }}
             >
               <Textarea
+                aria-label="Message to ATLAS"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={(event) => {
@@ -251,7 +265,10 @@ function AssistantWorkspace({
         </div>
       </section>
       {panelOpen && focused ? (
-        <aside className="hidden w-80 shrink-0 flex-col border-l border-border bg-sidebar xl:flex">
+        <aside className="hidden w-80 shrink-0 flex-col overflow-y-auto rounded-xl border border-border bg-card xl:flex" aria-label="Supporting sources">
+          <div className="flex justify-end border-b border-border px-3 py-2">
+            <Button type="button" size="icon" variant="ghost" aria-label="Close sources" onClick={() => setPanelOpen(false)}><X size={16} /></Button>
+          </div>
           <SourcePanel source={focused} sources={sources} onSelect={(source) => setFocusSource(sourceKey(source))} />
         </aside>
       ) : null}
@@ -288,6 +305,7 @@ function ConversationHistory({
   onQuery,
   conversationId,
   creating,
+  busy,
   onCreate,
   onOpen,
 }: {
@@ -299,18 +317,17 @@ function ConversationHistory({
   onQuery: (value: string) => void;
   conversationId: string | null;
   creating: boolean;
+  busy: boolean;
   onCreate: () => void;
   onOpen: (id: string) => void;
 }) {
-  const [showEvaluation, setShowEvaluation] = useState(false);
   const filtered = (conversations ?? []).filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
   const customer = filtered.filter((item) => !isEvaluationConversation(item));
-  const evaluation = filtered.filter((item) => isEvaluationConversation(item));
   return (
     <div className="flex h-full min-h-0 flex-col p-4">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-lg text-foreground">Conversations</h2>
-        <Button type="button" size="sm" disabled={creating} onClick={onCreate}>
+        <Button type="button" size="sm" disabled={creating || busy} onClick={onCreate}>
           {creating ? "Starting…" : "New chat"}
         </Button>
       </div>
@@ -318,7 +335,7 @@ function ConversationHistory({
       <Input className="mt-4 h-10 rounded-[10px] border-0 bg-secondary" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search conversations…" aria-label="Search conversations" />
       {pending ? <Skeleton className="mt-4 h-16 w-full" /> : null}
       {error ? <div className="mt-4"><RequestError error={error} /></div> : null}
-      {conversations && customer.length === 0 && evaluation.length === 0 ? (
+      {conversations && customer.length === 0 ? (
         <p className="mt-4 text-sm text-muted-foreground">
           {query.trim() ? "No conversations match this search." : "No conversations yet."}
         </p>
@@ -329,37 +346,11 @@ function ConversationHistory({
             key={conversation.id}
             conversation={conversation}
             selected={conversation.id === conversationId}
+            disabled={creating || busy}
             onOpen={onOpen}
           />
         ))}
       </ul>
-      {evaluation.length > 0 ? (
-        <div className="mt-3 border-t border-border pt-3">
-          <button
-            type="button"
-            className="text-[10px] uppercase tracking-[0.14em] text-subtle"
-            onClick={() => setShowEvaluation((current) => !current)}
-          >
-            {showEvaluation ? "Hide evaluation history" : `Evaluation history / ${evaluation.length} hidden`}
-          </button>
-          {showEvaluation ? (
-            <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
-              {evaluation.map((conversation) => (
-                <ConversationButton
-                  key={conversation.id}
-                  conversation={conversation}
-                  selected={conversation.id === conversationId}
-                  onOpen={onOpen}
-                />
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              These rows were saved by retrieval checks and are kept. They are not customer conversations.
-            </p>
-          )}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -367,10 +358,12 @@ function ConversationHistory({
 function ConversationButton({
   conversation,
   selected,
+  disabled,
   onOpen,
 }: {
   conversation: Conversation;
   selected: boolean;
+  disabled: boolean;
   onOpen: (id: string) => void;
 }) {
   return (
@@ -378,9 +371,11 @@ function ConversationButton({
       <button
         type="button"
         className={`w-full rounded-[10px] px-3 py-2 text-left transition-colors ${selected ? "bg-accent text-foreground" : "hover:bg-accent/60"}`}
+        aria-current={selected ? "true" : undefined}
+        disabled={disabled}
         onClick={() => onOpen(conversation.id)}
       >
-        <span className="block truncate text-[13px] text-foreground">{conversation.title}</span>
+        <span className="flex items-center gap-2 text-[13px] text-foreground"><MessageSquare size={14} className="shrink-0 text-muted-foreground" /><span className="truncate">{conversation.title}</span></span>
         <span className="mt-1 block text-[10px] text-subtle">{new Date(conversation.updated_at).toLocaleString()}</span>
       </button>
     </li>
@@ -401,11 +396,10 @@ function EmptyThread({
     "What documents are available?",
   ];
   return (
-    <div className="rounded-xl border border-border bg-card px-4 py-4 shadow-sm sm:px-5 sm:py-5">
-      <p className="text-base font-semibold tracking-tight">Ask ATLAS about {organizationName}</p>
-      <p className="mt-1 max-w-xl text-sm leading-5 text-muted-foreground">
-        Ask what ATLAS can do, what this organization has stored, or a fact from a document or CRM record. A company fact is answered only when a retrieved row supports it. Selecting a prompt fills the composer and does not send it.
-      </p>
+    <div className="rounded-xl border border-border bg-card px-4 py-6 text-center sm:px-6 sm:py-8">
+      <span className="mx-auto grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><Sparkles size={19} /></span>
+      <h2 className="mt-3 text-lg font-semibold tracking-tight">How can I help?</h2>
+      <p className="mt-1 text-sm leading-5 text-muted-foreground">Ask about customer activity or documents in {organizationName}.</p>
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         {prompts.map((prompt) => (
           <button
@@ -442,7 +436,7 @@ function MessageView({
   }
   return (
     <article>
-      <p className="text-xs uppercase tracking-[0.12em] text-primary">Atlas assistant</p>
+      <p className="flex items-center gap-2 text-xs font-medium text-primary"><Bot size={16} /> ATLAS Assistant</p>
       {refused ? (
         <div className="mt-3 rounded-[10px] bg-muted px-4 py-3">
           <p className="text-[10px] uppercase tracking-[0.14em] text-subtle">No supporting evidence</p>
@@ -554,7 +548,7 @@ function FailureNotice({ error, onRetry, canRetry }: { error: unknown; onRetry: 
   return (
     <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm" role="alert">
       <p className="font-medium">{copy.heading}</p>
-      <p className="mt-1 leading-6 text-red-100">{copy.detail}</p>
+      <p className="mt-1 leading-6 text-foreground">{copy.detail}</p>
       {canRetry ? (
         <Button type="button" size="sm" variant="outline" className="mt-3" onClick={onRetry}>
           Retry

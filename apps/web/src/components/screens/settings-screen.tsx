@@ -1,9 +1,17 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { Bot, Building2, ChevronRight, Fingerprint, Mail, MessageCircle, Search, UserRound, Users, Workflow } from "lucide-react";
 
+import { ConfirmButton } from "@/components/confirm-button";
+import { CalendarConnectionCard } from "@/components/calendar/calendar-connection";
+import { WidgetSettingsDialog } from "@/components/inbox/inbox-screen";
+import { PageHeader } from "@/components/page-header";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ProviderNotice } from "@/components/provider-notice";
 import { MembershipTable } from "@/components/membership-table";
 import { RequestError } from "@/components/request-error";
@@ -14,11 +22,18 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { sessionQueryOptions } from "@/lib/api";
 import { getAutomations } from "@/lib/automations";
+import { getCalendarConnection } from "@/lib/calendar";
+import { cancelEmbeddingReindex, getEmbeddingReindex, startEmbeddingReindex } from "@/lib/embedding-reindex";
+import { getInboxWidget } from "@/lib/inbox";
 import { useWorkspace } from "@/lib/use-workspace";
 import { createInvitation, listInvitations, type InvitationStatus } from "@/lib/invitations";
 import { listTeam, removeMember, updateMemberRole, updateOrganization, type TeamMember } from "@/lib/organization";
 import {
   getIntegrations,
+  getWebhookKeyStatus,
+  issueWebhookKey,
+  disconnectWebhookKey,
+  integrationConnection,
   getEmailDomains,
   registerEmailDomain,
   checkEmailDomain,
@@ -29,59 +44,86 @@ import {
   type IntegrationMetadata,
   type IntegrationType,
 } from "@/lib/integrations";
-import { changeBilling, getBilling, getBillingPlans, openBillingPortal } from "@/lib/billing";
 
+const settingsSections = [
+  { id: "organization", label: "Organization", icon: Building2 },
+  { id: "account", label: "Account", icon: UserRound },
+  { id: "members", label: "Members", icon: Users },
+  { id: "sessions", label: "Sessions", icon: Fingerprint },
+  { id: "connections", label: "Integrations", icon: Workflow },
+];
 export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?: boolean }) {
   const session = useQuery(sessionQueryOptions);
   const queryClient = useQueryClient();
-  const { organizationId } = useWorkspace();
-  const { role } = useWorkspace();
+  const { organizationId, role } = useWorkspace();
   const isAdmin = role === "admin";
   const integrations = useQuery({
     queryKey: ["integrations", organizationId],
     queryFn: () => getIntegrations(organizationId ?? ""),
-    enabled: Boolean(organizationId),
+    enabled: Boolean(organizationId && isAdmin),
     retry: false,
   });
   const automations = useQuery({
     queryKey: ["automations", organizationId],
     queryFn: () => getAutomations(organizationId ?? ""),
-    enabled: Boolean(organizationId),
+    enabled: Boolean(organizationId && !integrationsOnly),
   });
   const [signOutOpen, setSignOutOpen] = useState(false);
   const user = session.data?.user;
   const team = useQuery({ queryKey: ["team", organizationId], queryFn: () => listTeam(organizationId ?? ""), enabled: Boolean(organizationId && !integrationsOnly) });
+  const integrationProps = {
+    organizationId: organizationId ?? "",
+    isAdmin,
+    integrations: isAdmin ? integrations.data ?? [] : [],
+    isLoading: isAdmin && integrations.isPending,
+    error: isAdmin ? integrations.error : null,
+    onChanged: () => {
+      void queryClient.invalidateQueries({ queryKey: ["integrations", organizationId] });
+      void queryClient.invalidateQueries({ queryKey: ["provider-status", organizationId] });
+    },
+  };
+
+  if (integrationsOnly) {
+    return (
+      <div className="min-w-0 space-y-6">
+        <PageHeader title="Integrations">Connect the services your organization uses for messaging, automation, and knowledge.</PageHeader>
+        {organizationId ? <IntegrationMarketplace key={organizationId} {...integrationProps} /> : null}
+      </div>
+    );
+  }
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
-      <div>
-        <h1 className="text-[31px] leading-none text-foreground">{integrationsOnly ? "Integrations" : "Settings"}</h1>
-        <p className="mt-3 max-w-3xl text-sm text-muted-foreground">
-          {integrationsOnly ? "Connect the services that power your workspace. Secrets are never shown after they are saved." : "Account, organization, and integration readiness. Secrets are never shown after they are saved."}
-        </p>
-      </div>
-      <div className="grid items-start gap-4 xl:grid-cols-2">
-      {organizationId ? (
-        <IntegrationSettings
-          organizationId={organizationId}
-          isAdmin={isAdmin}
-          integrations={integrations.data ?? []}
-          isLoading={integrations.isPending}
-          error={integrations.error}
-          onChanged={() => {
-            void queryClient.invalidateQueries({ queryKey: ["integrations", organizationId] });
-            void queryClient.invalidateQueries({ queryKey: ["provider-status", organizationId] });
-          }}
-        />
-      ) : null}
-      {!integrationsOnly ? <>
-      {organizationId ? <BillingCard organizationId={organizationId} isAdmin={isAdmin} /> : null}
+      <PageHeader title="Settings" eyebrow="Workspace administration">Manage your account, organization, and service configuration.</PageHeader>
+      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[11rem_minmax(0,1fr)]">
+      <nav aria-label="Settings sections" className="min-w-0 overflow-x-auto rounded-xl border border-border bg-card p-1.5 lg:sticky lg:top-[76px]">
+        <ul className="flex w-max gap-1 lg:w-full lg:flex-col">
+          {settingsSections.map(({ id, label, icon: Icon }) => (
+            <li key={id}>
+              <a href={`#settings-${id}`} className="flex h-9 items-center gap-2 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground">
+                <Icon className="size-4 shrink-0" aria-hidden="true" />{label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <div className="grid min-w-0 gap-4" key={organizationId}>
+      <div id="settings-organization" className="grid scroll-mt-20 gap-4">
       {organizationId && isAdmin ? <OrganizationCard organizationId={organizationId} initialName={session.data?.memberships.find((m) => m.organization_id === organizationId)?.organization_name ?? ""} onSaved={() => void queryClient.invalidateQueries({ queryKey: ["session"] })} /> : null}
-      {organizationId && isAdmin ? <InviteMemberCard organizationId={organizationId} /> : null}
-      {organizationId ? <TeamCard organizationId={organizationId} isAdmin={isAdmin} members={team.data ?? []} onChanged={() => void queryClient.invalidateQueries({ queryKey: ["team", organizationId] })} /> : null}
-      <section className="rounded-[10px] bg-muted p-4">
-        <h2 className="text-base text-foreground">Account</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Read-only fields returned by the session.</p>
+      <section className="rounded-xl border border-border bg-card p-4">
+        <h2 className="text-base font-semibold">Workspace access</h2>
+        <div className="mt-4">
+          {session.isPending || !session.data ? <Skeleton className="h-16 w-full" /> : <MembershipTable memberships={session.data.memberships} />}
+        </div>
+      </section>
+      {organizationId ? <section className="rounded-xl border border-border bg-card p-4">
+        <h2 className="font-semibold">Billing</h2>
+        <p className="mt-1 text-sm text-muted-foreground">View the subscription and workspace usage.</p>
+        <Button asChild variant="outline" className="mt-3"><Link href="/billing">Open billing</Link></Button>
+      </section> : null}
+      </div>
+      <section id="settings-account" className="scroll-mt-20 rounded-xl border border-border bg-card p-4">
+        <h2 className="text-base font-semibold">Account</h2>
         <div className="mt-4">
           {session.isPending || !user ? (
             <div className="space-y-2">
@@ -93,6 +135,7 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
               <label className="grid gap-2 text-sm">
                 <span className="font-medium">Name</span>
                 <input
+                  aria-label="Name"
                   readOnly
                   aria-readonly="true"
                   value={user.full_name}
@@ -103,6 +146,7 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
               <label className="grid gap-2 text-sm">
                 <span className="font-medium">Email</span>
                 <input
+                  aria-label="Email"
                   readOnly
                   aria-readonly="true"
                   value={user.email}
@@ -114,19 +158,20 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
           )}
         </div>
       </section>
-      {organizationId ? <ProviderNotice organizationId={organizationId} detail /> : null}
-      <section className="rounded-[10px] bg-muted p-4">
-        <h2 className="text-base text-foreground">Organization</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Roles are stored on the membership, not chosen in the browser.</p>
-        <div className="mt-4">
-          {session.isPending || !session.data ? (
-            <Skeleton className="h-16 w-full" />
-          ) : (
-            <MembershipTable memberships={session.data.memberships} />
-          )}
-        </div>
+      <div id="settings-members" className="grid scroll-mt-20 gap-4">
+        {organizationId && isAdmin ? <InviteMemberCard organizationId={organizationId} /> : null}
+        {organizationId ? <TeamCard organizationId={organizationId} isAdmin={isAdmin} members={team.data ?? []} onChanged={() => void queryClient.invalidateQueries({ queryKey: ["team", organizationId] })} /> : null}
+      </div>
+      <section id="settings-sessions" className="scroll-mt-20 rounded-xl border border-border bg-card p-4">
+        <h2 className="text-base font-semibold">Session</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Signing out revokes the server session for this browser.</p>
+        <Button className="mt-4" variant="outline" onClick={() => setSignOutOpen(true)}>
+          Sign out
+        </Button>
       </section>
-      <section className="rounded-[10px] bg-muted p-4">
+      <div id="settings-connections" className="grid scroll-mt-20 gap-4">
+      {organizationId ? <ProviderNotice organizationId={organizationId} detail /> : null}
+      <section className="rounded-xl border border-border bg-card p-4">
         <h2 className="text-base text-foreground">Delivery</h2>
         <p className="mt-1 text-sm text-muted-foreground">Read only. Webhook keys and model keys are not shown.</p>
         {automations.isPending ? <Skeleton className="mt-4 h-16 w-full" /> : null}
@@ -140,37 +185,25 @@ export function SettingsScreen({ integrationsOnly = false }: { integrationsOnly?
           </dl>
         ) : null}
       </section>
-      <section className="rounded-[10px] bg-muted p-4">
-        <h2 className="text-base text-foreground">Session</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Signing out revokes the server session for this browser.</p>
-        <Button className="mt-4" variant="outline" onClick={() => setSignOutOpen(true)}>
-          Sign out
-        </Button>
-      </section>
+      {organizationId && isAdmin ? (
+        <IntegrationSettings key={organizationId} {...integrationProps} />
+      ) : organizationId ? (
+        <section className="rounded-xl border border-border bg-card p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-semibold">Integrations</h2><Badge variant="secondary">Read only</Badge>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">Workspace administrators manage provider connections.</p>
+          <Button asChild variant="outline" className="mt-3"><Link href="/integrations">Browse integrations</Link></Button>
+        </section>
+      ) : null}
+      </div>
       <SignOutDialog open={signOutOpen} onOpenChange={setSignOutOpen} />
-      </> : null}
+      </div>
       </div>
     </div>
   );
 }
 
-function BillingCard({ organizationId, isAdmin }: { organizationId: string; isAdmin: boolean }) {
-  const queryClient = useQueryClient();
-  const billing = useQuery({ queryKey: ["billing", organizationId], queryFn: () => getBilling(organizationId) });
-  const plans = useQuery({ queryKey: ["billing-plans", organizationId], queryFn: () => getBillingPlans(organizationId) });
-  const [selected, setSelected] = useState("free");
-  const [interval, setInterval] = useState("monthly");
-  const [message, setMessage] = useState("");
-  const save = useMutation({ mutationFn: () => changeBilling(organizationId, selected, interval), onSuccess: () => { setMessage("Subscription updated in sandbox mode."); void queryClient.invalidateQueries({ queryKey: ["billing", organizationId] }); }, onError: (error) => setMessage(error instanceof Error ? error.message : "Billing update failed.") });
-  if (billing.isPending) return <section className="rounded-[10px] bg-muted p-4"><Skeleton className="h-20 w-full" /></section>;
-  const current = billing.data?.subscription;
-  return <section className="rounded-[10px] bg-muted p-4" aria-labelledby="billing-heading">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 id="billing-heading" className="text-base text-foreground">Billing</h2><p className="mt-1 text-sm text-muted-foreground">Sandbox billing is active. Card details are handled only by the payment provider.</p></div><Badge variant="secondary">{current?.status ?? "Unavailable"}</Badge></div>
-    <div className="mt-4 grid gap-3 sm:grid-cols-4 text-sm"><div><span className="text-muted-foreground">Plan</span><p className="font-medium">{current?.plan_code}</p></div><div><span className="text-muted-foreground">Seats</span><p className="font-medium">{billing.data?.usage.seats} / {billing.data?.plan.seats}</p></div><div><span className="text-muted-foreground">AI requests</span><p className="font-medium">{billing.data?.usage.ai_requests} / {billing.data?.plan.ai_requests}</p></div><div><span className="text-muted-foreground">Billing period</span><p className="font-medium">{current?.current_period_end ? new Date(current.current_period_end).toLocaleDateString() : "Not set"}</p></div></div>
-    {isAdmin ? <div className="mt-4 flex flex-wrap gap-2"><select aria-label="Billing plan" value={selected} onChange={(e) => setSelected(e.target.value)}>{(plans.data ?? []).map((plan) => <option key={plan.code} value={plan.code}>{plan.name}</option>)}</select><select aria-label="Billing interval" value={interval} onChange={(e) => setInterval(e.target.value)}><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select><Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>Choose plan</Button><Button size="sm" variant="outline" onClick={async () => { const result = await openBillingPortal(organizationId); window.location.href = result.portal_url; }}>Manage billing</Button></div> : null}
-    {message ? <p className="mt-3 text-xs text-muted-foreground" role="status">{message}</p> : null}
-  </section>;
-}
 
 function OrganizationCard({ organizationId, initialName, onSaved }: { organizationId: string; initialName: string; onSaved: () => void }) {
   const [name, setName] = useState(initialName);
@@ -214,7 +247,13 @@ function InviteMemberCard({ organizationId }: { organizationId: string }) {
       <Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create invitation"}</Button>
     </form>
     {error ? <div className="mt-3"><RequestError error={error} /></div> : null}
-    {token ? <div className="mt-3 rounded-md border border-warning/40 bg-background p-3 text-xs"><p className="font-medium text-warning">Copy this token now. It will not be shown again.</p><code className="mt-2 block break-all text-muted-foreground">{token}</code></div> : null}
+    {token ? (
+      <label className="mt-3 grid gap-2 rounded-md border border-warning/40 bg-background p-3 text-sm">
+        Invitation link
+        <Input readOnly value={new URL(`/invite/accept#token=${encodeURIComponent(token)}`, window.location.origin).href} onFocus={(event) => event.currentTarget.select()} />
+        <span className="text-xs text-muted-foreground">Copy and send this link to your teammate. It is shown once.</span>
+      </label>
+    ) : null}
     {invitations.data?.length ? <div className="mt-4 space-y-2 text-sm"><h3 className="font-medium">Invitation status</h3>{invitations.data.map((item: InvitationStatus) => <div key={item.id} className="flex justify-between gap-3 text-muted-foreground"><span>{item.email}</span><span>{item.accepted_at ? "Accepted" : new Date(item.expires_at) <= new Date() ? "Expired" : "Pending"}</span></div>)}</div> : null}
   </section>;
 }
@@ -266,7 +305,7 @@ function IntegrationSettings({
         <div className="mt-4 grid gap-4 lg:grid-cols-3">
           {matches("Language model Groq OpenAI", "ai") ? <ProviderCard key="chat" organizationId={organizationId} type="chat" title="Language model" record={byType.get("chat")} isAdmin={isAdmin} onChanged={onChanged} /> : null}
           {matches("Embeddings Ollama OpenAI", "ai") ? <ProviderCard key="embedding" organizationId={organizationId} type="embedding" title="Embeddings" record={byType.get("embedding")} isAdmin={isAdmin} onChanged={onChanged} /> : null}
-          {matches("n8n automation", "automation") ? <N8nCard record={byType.get("n8n")} /> : null}
+          {matches("n8n automation", "automation") ? <N8nCard organizationId={organizationId} isAdmin={isAdmin} record={byType.get("n8n")} /> : null}
           {matches("MCP retrieval", "infrastructure") ? <McpCard /> : null}
           {matches("Email SMTP Resend", "email") ? <EmailSettingsCard organizationId={organizationId} isAdmin={isAdmin} record={byType.get("email")} onChanged={onChanged} /> : null}
           {matches("WhatsApp Meta Cloud", "messaging") ? <WhatsAppSettingsCard organizationId={organizationId} isAdmin={isAdmin} record={byType.get("whatsapp")} onChanged={onChanged} /> : null}
@@ -277,50 +316,286 @@ function IntegrationSettings({
   );
 }
 
+const marketplace = [
+  { type: "email", name: "Email", providers: "SMTP · Resend", category: "Messaging", benefit: "Test SMTP, manage sending domains, and review sandbox delivery settings.", icon: Mail },
+  { type: "whatsapp", name: "WhatsApp Business", providers: "Meta Cloud API", category: "Messaging", benefit: "Receive customer messages in Inbox once your Meta webhook is verified.", icon: MessageCircle },
+  { type: "n8n", name: "n8n", providers: "n8n", category: "Automation", benefit: "Run workflows and track callbacks from ATLAS.", icon: Workflow },
+  { type: "chat", name: "Language model", providers: "OpenAI · Groq", category: "Knowledge", benefit: "Power grounded answers and draft follow-ups.", icon: Bot },
+  { type: "embedding", name: "Embeddings", providers: "OpenAI · Ollama", category: "Knowledge", benefit: "Find relevant passages across your organization's documents.", icon: Search },
+] satisfies { type: IntegrationType; name: string; providers: string; category: string; benefit: string; icon: typeof Mail }[];
+
+function IntegrationMarketplace({
+  organizationId, isAdmin, integrations, isLoading, error, onChanged,
+}: Parameters<typeof IntegrationSettings>[0]) {
+  const calendarCallback = useSearchParams().get("calendar");
+  const [view, setView] = useState<"Connected" | "Discover">("Discover");
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("All categories");
+  const calendar = useQuery({
+    queryKey: ["calendar-connection", organizationId],
+    queryFn: () => getCalendarConnection(organizationId),
+    enabled: Boolean(organizationId),
+  });
+  const showCalendar = (category === "All categories" || category === "Automation") &&
+    "google calendar scheduling appointment availability".includes(search.trim().toLowerCase()) &&
+    (view === "Discover" || Boolean(calendar.data?.connected));
+  const widget = useQuery({
+    queryKey: ["inbox-widget", organizationId],
+    queryFn: () => getInboxWidget(organizationId),
+    enabled: Boolean(organizationId && isAdmin),
+  });
+  const n8n = useQuery({
+    queryKey: ["webhook-key-status", organizationId],
+    queryFn: () => getWebhookKeyStatus(organizationId),
+    enabled: Boolean(organizationId && isAdmin),
+  });
+  const showWidget = (category === "All categories" || category === "Messaging") &&
+    "website chat embed inbox".includes(search.trim().toLowerCase()) &&
+    (view === "Discover" || Boolean(widget.data?.enabled && widget.data.allowed_domains.length));
+  const cards = marketplace.filter((item) => {
+    const record = integrations.find((entry) => entry.integration_type === item.type);
+    const connected = item.type === "n8n" ? Boolean(n8n.data?.last_accepted_at && !n8n.data.revoked_at)
+      : record?.status === "configured" && Boolean(
+          item.type === "whatsapp" || item.type === "email" ? record.last_inbound_at : record.verified_at
+        );
+    return (view === "Discover" || connected) &&
+      (category === "All categories" || category === item.category) &&
+      `${item.name} ${item.providers} ${item.benefit}`.toLowerCase().includes(search.trim().toLowerCase());
+  });
+
+  return (
+    <section className="space-y-5" aria-label="Integration marketplace">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div role="group" aria-label="Marketplace view" className="flex gap-1 rounded-lg border border-border bg-muted p-1">
+          {(["Connected", "Discover"] as const).map((name) => (
+            <Button key={name} size="sm" variant={view === name ? "outline" : "ghost"}
+              aria-pressed={view === name} onClick={() => setView(name)}>{name}</Button>
+          ))}
+        </div>
+        {!isAdmin ? <Badge variant="secondary">Read only</Badge> : null}
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <Input aria-label="Search integrations" placeholder="Search integrations" className="sm:max-w-xs"
+          value={search} onChange={(event) => setSearch(event.target.value)} />
+        <select aria-label="Filter integrations by category" className="h-10 max-w-full rounded-md border border-input bg-background px-3 text-sm"
+          value={category} onChange={(event) => setCategory(event.target.value)}>
+          {["All categories", "Messaging", "Automation", "Knowledge"].map((name) => <option key={name}>{name}</option>)}
+        </select>
+      </div>
+      {error ? <RequestError error={error} /> : isLoading ? (
+        <div role="status" aria-label="Loading integrations"><Skeleton className="h-40 w-full" /></div>
+      ) : cards.length || showWidget || showCalendar ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {showCalendar ? (
+            calendar.error ? <RequestError error={calendar.error} /> :
+              <CalendarConnectionCard organizationId={organizationId} isAdmin={isAdmin}
+                connection={calendar.data} callback={calendarCallback} />
+          ) : null}
+          {cards.map((item) => {
+            const record = integrations.find((entry) => entry.integration_type === item.type);
+            const status = !isAdmin ? "Admin managed" : item.type === "n8n"
+              ? (n8n.data?.revoked_at ? "Disconnected" : n8n.data?.last_accepted_at ? "Callback verified" : n8n.data ? "Awaiting callback" : "Managed by deployment")
+              : integrationConnection(record);
+            const props = { organizationId, isAdmin, record, onChanged };
+            return (
+              <Dialog key={item.type}>
+                <article className="flex min-w-0 flex-col rounded-xl border border-border bg-card p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <span className="rounded-lg bg-accent p-2.5 text-accent-foreground"><item.icon size={20} aria-hidden /></span>
+                    <Badge variant="secondary">{status}</Badge>
+                  </div>
+                  <h2 className="mt-4 font-semibold">{item.name}</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">{item.providers}</p>
+                  <p className="mb-5 mt-3 flex-1 text-sm leading-6 text-muted-foreground">{item.benefit}</p>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="self-start" aria-label={`${item.name} settings`}>
+                      {isAdmin && item.type !== "n8n" ? "Configure" : "View details"}
+                      <ChevronRight size={15} aria-hidden />
+                    </Button>
+                  </DialogTrigger>
+                </article>
+                <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] max-w-2xl overflow-y-auto">
+                  <DialogTitle>{item.name}</DialogTitle>
+                  <DialogDescription>{item.benefit} {isAdmin ? "Enter your provider settings below and test the connection where available." : "An organization administrator manages this connection."}</DialogDescription>
+                  {!isAdmin ? null : item.type === "email" ? <EmailSettingsCard {...props} /> :
+                    item.type === "whatsapp" ? <WhatsAppSettingsCard {...props} /> :
+                    item.type === "n8n" ? <N8nCard organizationId={organizationId} isAdmin={isAdmin} record={record} /> :
+                    <ProviderCard {...props} type={item.type} title={item.name} />}
+                  <div className="mt-4 flex justify-end">
+                    <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            );
+          })}
+          {showWidget ? <article className="flex min-w-0 flex-col rounded-xl border border-border bg-card p-5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="rounded-lg bg-accent p-2.5 text-accent-foreground"><MessageCircle size={20} aria-hidden /></span>
+              <Badge variant="secondary">{!isAdmin ? "Admin managed" : widget.isError ? "Unavailable" : widget.isPending ? "Checking" : widget.data?.enabled && widget.data.allowed_domains.length ? "Enabled" : widget.data ? "Paused" : "Not configured"}</Badge>
+            </div>
+            <h2 className="mt-4 font-semibold">Website chat</h2>
+            <p className="mt-1 text-xs text-muted-foreground">ATLAS embed</p>
+            <p className="mb-5 mt-3 flex-1 text-sm leading-6 text-muted-foreground">Open a chat from your website and handle customer messages in Inbox.</p>
+            {isAdmin ? <div className="self-start"><WidgetSettingsDialog organizationId={organizationId} /></div> : <Button asChild size="sm" variant="outline" className="self-start"><Link href="/inbox">Open Inbox</Link></Button>}
+          </article> : null}
+        </div>
+      ) : (
+        <p className="rounded-xl border border-dashed border-border p-8 text-sm text-muted-foreground">
+          {search || category !== "All categories" ? "No integrations match your filters." : "No organization connections yet. Open Discover to browse available integrations."}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function MessagingConnectionControls({ organizationId, record, type, onChanged, onVersion }: {
+  organizationId: string; record: IntegrationMetadata; type: "email" | "whatsapp";
+  onChanged: () => void; onVersion: (version: number) => void;
+}) {
+  const [notice, setNotice] = useState("");
+  const verify = useMutation({
+    mutationFn: () => verifyIntegration(organizationId, type),
+    onSuccess: (result) => { setNotice(result.detail); onChanged(); },
+  });
+  const change = useMutation({
+    mutationFn: (action: "enable" | "disable" | "revoke") => integrationAction(organizationId, type, action, record.credential_version),
+    onSuccess: (result) => {
+      onVersion(result.credential_version);
+      setNotice(result.status === "disabled" ? "Integration disconnected." : "Integration enabled. Test the connection to verify it.");
+      onChanged();
+    },
+  });
+  const busy = verify.isPending || change.isPending;
+  return (
+    <div className="mt-4 grid gap-2 border-t border-border pt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {record.status === "disabled" ? <Button size="sm" variant="outline" disabled={busy} onClick={() => change.mutate("enable")}>Enable connection</Button> : <>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => verify.mutate()}>{verify.isPending ? "Testing…" : type === "email" ? "Test SMTP connection" : "Test connection"}</Button>
+          <ConfirmButton size="sm" label="Disconnect" confirmLabel="Confirm disconnect" pendingLabel="Disconnecting…" pending={busy} onConfirm={() => change.mutate("disable")} />
+        </>}
+        {record.has_credentials ? <ConfirmButton size="sm" label="Remove credentials" confirmLabel="Confirm removal" pendingLabel="Removing…" pending={busy} onConfirm={() => change.mutate("revoke")} /> : null}
+      </div>
+      {record.verified_at ? <p className="text-xs text-muted-foreground">Last checked {new Date(record.verified_at).toLocaleString()}</p> : null}
+      {notice ? <p className="text-xs text-muted-foreground" role="status">{notice}</p> : null}
+      {verify.error || change.error ? <RequestError error={verify.error ?? change.error} /> : null}
+    </div>
+  );
+}
+
 function WhatsAppSettingsCard({ organizationId, isAdmin, record, onChanged }: { organizationId: string; isAdmin: boolean; record?: IntegrationMetadata; onChanged: () => void }) {
-  const [businessAccountId, setBusinessAccountId] = useState(String(record?.config.business_account_id ?? ""));
-  const [phoneNumberId, setPhoneNumberId] = useState(String(record?.config.phone_number_id ?? ""));
+  const [version, setVersion] = useState(record?.credential_version);
+  const [account, setAccount] = useState(String(record?.config.business_account_id ?? ""));
+  const [phone, setPhone] = useState(String(record?.config.phone_number_id ?? ""));
   const [token, setToken] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const save = useMutation({ mutationFn: () => saveIntegration(organizationId, "whatsapp", { provider: "meta", config: { business_account_id: businessAccountId, phone_number_id: phoneNumberId }, ...(token ? { credentials: JSON.stringify({ access_token: token }) } : {}), ...(record ? { expected_version: record.credential_version } : {}) }), onSuccess: () => { setToken(""); setMessage("Saved. WhatsApp outbound remains approval-gated."); onChanged(); }, onError: (err) => setMessage(err instanceof Error ? err.message : "Could not save WhatsApp settings.") });
-  const verify = useMutation({ mutationFn: () => verifyIntegration(organizationId, "whatsapp"), onSuccess: (result) => { setMessage(result.detail); onChanged(); }, onError: () => setMessage("WhatsApp connection test failed.") });
-  return <div className="rounded-[10px] border border-border bg-background p-4 lg:col-span-3"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-medium">WhatsApp Business Cloud</h3><p className="mt-1 text-xs text-muted-foreground">Meta Cloud API configuration. Access tokens remain encrypted and masked.</p></div><Badge variant="secondary">{record?.status ?? "Not configured"}</Badge></div><div className="mt-4 grid gap-3 md:grid-cols-2"><label className="grid gap-1 text-sm"><span>Business Account ID</span><Input disabled={!isAdmin} value={businessAccountId} onChange={(e) => setBusinessAccountId(e.target.value)} /></label><label className="grid gap-1 text-sm"><span>Phone number ID</span><Input disabled={!isAdmin} value={phoneNumberId} onChange={(e) => setPhoneNumberId(e.target.value)} /></label></div>{isAdmin ? <div className="mt-3 flex flex-wrap items-end gap-3"><label className="grid min-w-[280px] flex-1 gap-1 text-sm"><span>{record?.has_credentials ? "Replace access token" : "Access token"}</span><Input type="password" autoComplete="new-password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={record?.has_credentials ? "Leave blank to keep current token" : "Paste token"} /></label><Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>Save WhatsApp settings</Button>{record ? <Button size="sm" variant="outline" onClick={() => verify.mutate()} disabled={verify.isPending}>Test connection</Button> : null}</div> : null}{message ? <p role="status" className="mt-3 text-xs text-muted-foreground">{message}</p> : null}</div>;
+  const save = useMutation({
+    mutationFn: () => saveIntegration(organizationId, "whatsapp", {
+      provider: "meta", config: { business_account_id: account.trim(), phone_number_id: phone.trim() },
+      ...(token ? { credentials: JSON.stringify({ access_token: token.trim() }) } : {}), expected_version: version,
+    }),
+    onSuccess: (result) => { setVersion(result.credential_version); setToken(""); onChanged(); },
+  });
+  const callback = `/api/v1/organizations/${organizationId}/inbox/webhooks/whatsapp`;
+  return (
+    <section className="mt-4 rounded-xl border border-border bg-background p-4" aria-label="WhatsApp connection">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h3 className="font-medium">Meta Cloud API connection</h3>
+        <Badge variant="secondary">{integrationConnection(record)}</Badge>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">Verified inbound text messages appear in Inbox. Outbound delivery requires a separate live messaging deployment and approval.</p>
+      <form className="mt-4 grid gap-3" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="grid gap-1 text-sm">Business Account ID<Input required inputMode="numeric" pattern="[0-9]{1,32}" value={account} disabled={!isAdmin || save.isPending} onChange={(e) => setAccount(e.target.value)} /></label>
+          <label className="grid gap-1 text-sm">Phone number ID<Input required inputMode="numeric" pattern="[0-9]{1,32}" value={phone} disabled={!isAdmin || save.isPending} onChange={(e) => setPhone(e.target.value)} /></label>
+        </div>
+        {isAdmin ? <>
+          <label className="grid gap-1 text-sm">{record?.has_credentials ? "Replace access token" : "Access token"}
+            <Input type="password" autoComplete="new-password" required={!record?.has_credentials} disabled={save.isPending} value={token} onChange={(e) => setToken(e.target.value)} />
+          </label>
+          <Button size="sm" type="submit" className="justify-self-start" disabled={save.isPending}>Save WhatsApp settings</Button>
+        </> : null}
+      </form>
+      {save.error ? <div className="mt-3"><RequestError error={save.error} /></div> : null}
+      {record?.last_inbound_at ? <p className="mt-3 text-xs text-muted-foreground">Last customer message {new Date(record.last_inbound_at).toLocaleString()}</p> : null}
+      {record && isAdmin ? <MessagingConnectionControls organizationId={organizationId} type="whatsapp" record={record} onChanged={onChanged} onVersion={setVersion} /> : null}
+      <details className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">
+        <summary className="cursor-pointer font-medium text-foreground">Webhook setup</summary>
+        <p className="mt-2">Use the deployment’s public API origin and this callback path in Meta. Ask your deployment operator for the verification token.</p>
+        <code className="mt-2 block break-all rounded-md bg-muted p-2">{callback}</code>
+      </details>
+    </section>
+  );
 }
 
 function EmailSettingsCard({
   organizationId, isAdmin, record, onChanged,
 }: { organizationId: string; isAdmin: boolean; record?: IntegrationMetadata; onChanged: () => void }) {
   const queryClient = useQueryClient();
-  const domains = useQuery({ queryKey: ["email-domains", organizationId], queryFn: () => getEmailDomains(organizationId) });
+  const domains = useQuery({ queryKey: ["email-domains", organizationId], queryFn: () => getEmailDomains(organizationId), enabled: isAdmin });
+  const delivery = useQuery({ queryKey: ["automations", organizationId], queryFn: () => getAutomations(organizationId) });
+  const live = delivery.data?.email_mode === "live";
+  const [version, setVersion] = useState(record?.credential_version);
   const [host, setHost] = useState(String(record?.config.host ?? "127.0.0.1"));
   const [port, setPort] = useState(String(record?.config.port ?? "1025"));
   const [from, setFrom] = useState(String(record?.config.from_address ?? "atlas@localhost"));
+  const [security, setSecurity] = useState(record?.config.use_tls ? "tls" : record?.config.starttls ? "starttls" : "local");
+  const [allowLiveReplies, setAllowLiveReplies] = useState(record?.config.live_delivery_enabled === true);
+  const [smtpUser, setSmtpUser] = useState("");
+  const [smtpPassword, setSmtpPassword] = useState("");
   const [resendKey, setResendKey] = useState("");
   const [domain, setDomain] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const editingAuthentication = Boolean(smtpUser.trim() || smtpPassword);
+  const authenticationValid = !editingAuthentication || Boolean(smtpUser.trim() && smtpPassword && security !== "local");
+  const credentialUpdate = {
+    ...(resendKey.trim() ? { resend_api_key: resendKey.trim() } : {}),
+    ...(editingAuthentication ? { username: smtpUser.trim(), password: smtpPassword } : {}),
+  };
   const save = useMutation({
     mutationFn: () => saveIntegration(organizationId, "email", {
-      provider: "smtp", config: { host, port: Number(port), from_address: from },
-      ...(resendKey ? { credentials: JSON.stringify({ resend_api_key: resendKey }) } : {}),
-      ...(record ? { expected_version: record.credential_version } : {}),
+      provider: "smtp", config: { ...record?.config, host: host.trim(), port: Number(port), from_address: from.trim(), use_tls: security === "tls", starttls: security === "starttls", ...(live ? { live_delivery_enabled: allowLiveReplies } : {}) },
+      ...(Object.keys(credentialUpdate).length ? { credentials: JSON.stringify(credentialUpdate), merge_email_credentials: true } : {}),
+      expected_version: version,
     }),
-    onSuccess: () => { setResendKey(""); setMessage("Saved. Delivery remains Mailpit sandbox-only."); onChanged(); void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }); },
+    onSuccess: (saved) => { setVersion(saved.credential_version); setResendKey(""); setSmtpUser(""); setSmtpPassword(""); setMessage("Saved. Test the connection and check the sending domain."); onChanged(); void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }); },
     onError: (error) => setMessage(error instanceof Error ? error.message : "Could not save email settings."),
   });
   const register = useMutation({ mutationFn: () => registerEmailDomain(organizationId, domain), onSuccess: () => { setDomain(""); setMessage("Domain registered. Publish the DNS records shown below."); void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }); }, onError: (error) => setMessage(error instanceof Error ? error.message : "Could not register domain.") });
   const check = useMutation({ mutationFn: (id: string) => checkEmailDomain(organizationId, id), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }), onError: (error) => setMessage(error instanceof Error ? error.message : "Verification check failed.") });
   const revoke = useMutation({ mutationFn: (id: string) => revokeEmailDomain(organizationId, id), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }), onError: (error) => setMessage(error instanceof Error ? error.message : "Could not revoke domain.") });
   return <div className="rounded-[10px] border border-border bg-background p-4 lg:col-span-3">
-    <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-medium">Email delivery</h3><p className="mt-1 text-xs text-muted-foreground">Configured provider settings are separate from active delivery.</p></div><Badge variant="secondary">MAILPIT SANDBOX</Badge></div>
-    <p className="mt-3 rounded-md border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-sm leading-6 text-sky-100">All outbound email currently stays in the local Mailpit sandbox. Saving a provider or verifying a domain does not enable customer delivery.</p>
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-medium">Email delivery</h3><p className="mt-1 text-xs text-muted-foreground">SMTP for approved replies and Resend for campaign delivery.</p></div><Badge variant="secondary">{live ? "LIVE ENVIRONMENT" : delivery.data ? "MAILPIT SANDBOX" : "DELIVERY STATUS UNAVAILABLE"}</Badge></div>
+    <p className="mt-3 rounded-md border border-border bg-accent px-3 py-2 text-sm leading-6 text-foreground">{live ? "Live replies require a verified domain, a verified SMTP connection and workspace approval." : "Sandbox messages go to the local SMTP sink. The workspace can test provider setup without sending to customers."}</p>
     <div className="mt-4 grid gap-3 md:grid-cols-3">
       <label className="grid gap-1 text-sm"><span>SMTP host</span><Input disabled={!isAdmin} value={host} onChange={(e) => setHost(e.target.value)} /></label>
       <label className="grid gap-1 text-sm"><span>SMTP port</span><Input disabled={!isAdmin} value={port} onChange={(e) => setPort(e.target.value)} /></label>
       <label className="grid gap-1 text-sm"><span>Sender address</span><Input disabled={!isAdmin} value={from} onChange={(e) => setFrom(e.target.value)} /></label>
     </div>
-    {isAdmin ? <div className="mt-3 flex flex-wrap items-end gap-3"><label className="grid min-w-[260px] flex-1 gap-1 text-sm"><span>Resend verification token</span><Input type="password" autoComplete="new-password" value={resendKey} onChange={(e) => setResendKey(e.target.value)} placeholder={record?.has_credentials ? "Leave blank to keep current token" : "Enter token"} /></label><Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save email settings"}</Button>{record ? <Button size="sm" variant="outline" onClick={() => verifyIntegration(organizationId, "email").then((result) => setMessage(result.detail)).catch(() => setMessage("Connection test failed."))}>Test SMTP connection</Button> : null}</div> : null}
+    {isAdmin ? <div className="mt-3 grid gap-3">
+      <label className="grid gap-1 text-sm">SMTP security
+        <select className="h-10 rounded-md border border-input bg-background px-2 text-sm" value={security} onChange={(e) => setSecurity(e.target.value)}>
+          <option value="local">Local SMTP without authentication</option><option value="starttls">STARTTLS</option><option value="tls">TLS</option>
+        </select>
+      </label>
+      {security !== "local" ? <div className="grid gap-3 sm:grid-cols-2">
+        <label className="grid gap-1 text-sm">SMTP username<Input value={smtpUser} onChange={(e) => setSmtpUser(e.target.value)} autoComplete="off" /></label>
+        <label className="grid gap-1 text-sm">SMTP password<Input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} autoComplete="new-password" /></label>
+      </div> : null}
+      <label className="grid min-w-0 gap-1 text-sm">Resend API key
+        <Input type="password" autoComplete="new-password" value={resendKey} onChange={(e) => setResendKey(e.target.value)} placeholder="Leave blank to keep current token" />
+      </label>
+      {live ? <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={allowLiveReplies} onChange={(event) => setAllowLiveReplies(event.target.checked)} /> Enable approved live replies for this workspace</label> : null}
+      {!authenticationValid ? <p className="text-xs text-warning">Enter the SMTP username and password together and select TLS or STARTTLS.</p> : null}
+      <Button size="sm" className="justify-self-start" onClick={() => save.mutate()} disabled={!authenticationValid || save.isPending}>{save.isPending ? "Saving…" : "Save email settings"}</Button>
+    </div> : null}
+    {record && isAdmin ? <MessagingConnectionControls organizationId={organizationId} type="email" record={record} onChanged={onChanged} onVersion={setVersion} /> : null}
+    <details className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">
+      <summary className="cursor-pointer font-medium text-foreground">Inbound email gateway</summary>
+      <p className="mt-2">Ask your deployment operator to forward signed email events to this workspace callback.</p>
+      <code className="mt-2 block break-all rounded-md bg-muted p-2">{`/api/v1/organizations/${organizationId}/inbox/webhooks/inbound`}</code>
+      {record?.last_inbound_at ? <p className="mt-2">Last inbound email {new Date(record.last_inbound_at).toLocaleString()}</p> : null}
+    </details>
     <div className="mt-5 border-t border-border pt-4"><h4 className="text-sm font-medium">Sending domains</h4><p className="mt-1 text-xs text-muted-foreground">Register a domain, publish the provider DNS records, then refresh verification.</p>{isAdmin ? <div className="mt-3 flex gap-2"><Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="mail.example.com" /><Button size="sm" onClick={() => register.mutate()} disabled={!domain || register.isPending}>Register domain</Button></div> : null}
-      <div className="mt-3 space-y-3">{domains.isPending ? <Skeleton className="h-12 w-full" /> : domains.data?.length ? domains.data.map((item) => <div key={item.id} className="rounded-md border border-border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{item.domain}</span><Badge variant="secondary">{item.status}</Badge></div>{item.dns_records.length ? <div className="mt-2 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr className="text-muted-foreground"><th className="pr-3">Type</th><th className="pr-3">Host</th><th>Value</th></tr></thead><tbody>{item.dns_records.map((dns) => <tr key={`${dns.record_type}-${dns.name}`}><td className="pr-3">{dns.record_type}</td><td className="max-w-[220px] truncate pr-3">{dns.name}</td><td className="max-w-[320px] truncate">{dns.value}</td></tr>)}</tbody></table></div> : null}{isAdmin ? <div className="mt-3 flex gap-2"><Button size="sm" variant="outline" onClick={() => check.mutate(item.id)}>Refresh status</Button><Button size="sm" variant="ghost" onClick={() => { if (window.confirm(`Revoke ${item.domain}?`)) revoke.mutate(item.id); }}>Revoke</Button></div> : null}</div>) : <p className="text-sm text-muted-foreground">No sending domains registered.</p>}</div>
+      <div className="mt-3 space-y-3">{!isAdmin ? <p className="text-sm text-muted-foreground">Workspace administrators manage sending domains.</p> : domains.isPending ? <Skeleton className="h-12 w-full" /> : domains.error ? <RequestError error={domains.error} /> : domains.data?.length ? domains.data.map((item) => <div key={item.id} className="rounded-md border border-border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{item.domain}</span><Badge variant="secondary">{item.status === "verified" && item.credential_version !== version ? "Recheck required" : item.status}</Badge></div>{item.dns_records.length ? <div className="mt-2 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr className="text-muted-foreground"><th className="pr-3">Type</th><th className="pr-3">Host</th><th>Value</th></tr></thead><tbody>{item.dns_records.map((dns) => <tr key={`${dns.record_type}-${dns.name}`}><td className="pr-3">{dns.record_type}</td><td className="max-w-[220px] truncate pr-3">{dns.name}</td><td className="max-w-[320px] truncate">{dns.value}</td></tr>)}</tbody></table></div> : null}{isAdmin && item.status !== "revoked" ? <div className="mt-3 flex gap-2"><Button size="sm" variant="outline" disabled={check.isPending || revoke.isPending} onClick={() => check.mutate(item.id)}>Verify domain</Button><Button size="sm" variant="ghost" onClick={() => { if (window.confirm(`Revoke ${item.domain}?`)) revoke.mutate(item.id); }}>Revoke</Button></div> : null}</div>) : <p className="text-sm text-muted-foreground">No sending domains registered.</p>}</div>
     </div>{message ? <p className="mt-3 text-xs text-muted-foreground" role="status">{message}</p> : null}
   </div>;
 }
@@ -328,18 +603,49 @@ function EmailSettingsCard({
 function ProviderCard({
   organizationId, type, title, record, isAdmin, onChanged,
 }: { organizationId: string; type: Exclude<IntegrationType, "n8n">; title: string; record?: IntegrationMetadata; isAdmin: boolean; onChanged: () => void }) {
+  const cache = useQueryClient();
+  const [version, setVersion] = useState(record?.credential_version);
   const [provider, setProvider] = useState(record?.provider ?? (type === "chat" ? "groq" : "ollama"));
   const [model, setModel] = useState(String(record?.config.model ?? (type === "chat" ? "openai/gpt-oss-20b" : "nomic-embed-text:v1.5")));
   const [baseUrl, setBaseUrl] = useState(String(record?.config.base_url ?? (type === "chat" ? "https://api.groq.com/openai/v1" : "http://ollama:11434/v1")));
   const [dimensions, setDimensions] = useState(String(record?.config.dimensions ?? (type === "embedding" ? "768" : "")));
   const [secret, setSecret] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-  const save = useMutation({ mutationFn: () => saveIntegration(organizationId, type, { provider, config: { base_url: baseUrl, model, ...(type === "embedding" ? { dimensions: Number(dimensions) } : {}) }, ...(secret ? { credentials: secret } : {}), ...(record ? { expected_version: record.credential_version } : {}) }), onSuccess: () => { setSecret(""); setMessage("Configuration saved. Run a connection test before relying on it."); onChanged(); }, onError: (err) => setMessage(err instanceof Error ? err.message : "Could not save configuration.") });
+  const reindexKey = ["embedding-reindex", organizationId];
+  const reindex = useQuery({
+    queryKey: reindexKey,
+    queryFn: () => getEmbeddingReindex(organizationId),
+    enabled: type === "embedding" && isAdmin,
+    refetchInterval: (query) => query.state.data?.status === "building" ? 1_500 : false,
+  });
+  const reindexStatus = reindex.data?.status;
+  useEffect(() => {
+    if (reindexStatus === "completed") {
+      void cache.invalidateQueries({ queryKey: ["integrations", organizationId] });
+      void cache.invalidateQueries({ queryKey: ["provider-status", organizationId] });
+    }
+  }, [cache, organizationId, reindexStatus]);
+  const rebuild = useMutation({
+    mutationFn: () => startEmbeddingReindex(organizationId, {
+      provider, base_url: baseUrl.trim(), model: model.trim(), dimensions: Number(dimensions),
+      credentials: secret || undefined, expected_version: record?.credential_version ?? version,
+    }),
+    onSuccess: (job) => {
+      cache.setQueryData(reindexKey, job);
+      setSecret("");
+      setMessage(null);
+    },
+  });
+  const cancelBuild = useMutation({
+    mutationFn: () => cancelEmbeddingReindex(organizationId),
+    onSuccess: () => void cache.invalidateQueries({ queryKey: reindexKey }),
+  });
+  const save = useMutation({ mutationFn: () => saveIntegration(organizationId, type, { provider, config: { base_url: baseUrl, model, ...(type === "embedding" ? { dimensions: Number(dimensions) } : {}) }, ...(secret ? { credentials: secret } : {}), expected_version: record?.credential_version ?? version }), onSuccess: (saved) => { setVersion(saved.credential_version); setSecret(""); setMessage("Configuration saved. Run a connection test before relying on it."); onChanged(); }, onError: (err) => setMessage(err instanceof Error ? err.message : "Could not save configuration.") });
   const verify = useMutation({ mutationFn: () => verifyIntegration(organizationId, type), onSuccess: (result) => { setMessage(result.verified ? result.detail : `Verification failed: ${result.detail}`); onChanged(); }, onError: (err) => setMessage(err instanceof Error ? err.message : "Verification failed.") });
-  const action = useMutation({ mutationFn: (kind: "enable" | "disable" | "revoke") => integrationAction(organizationId, type, kind, record?.credential_version ?? 0), onSuccess: (_, kind) => { setMessage(kind === "revoke" ? "Credential revoked. The integration is disabled." : `Integration ${kind}d.`); onChanged(); }, onError: (err) => setMessage(err instanceof Error ? err.message : "Could not update integration.") });
+  const action = useMutation({ mutationFn: (kind: "enable" | "disable" | "revoke") => integrationAction(organizationId, type, kind, version ?? 0), onSuccess: (saved, kind) => { setVersion(saved.credential_version); setMessage(kind === "revoke" ? "Credential revoked. The integration is disabled." : `Integration ${kind}d.`); onChanged(); }, onError: (err) => setMessage(err instanceof Error ? err.message : "Could not update integration.") });
   const fallback = !record;
   return (
-    <div className="rounded-[10px] border border-border bg-background p-4">
+    <section aria-label={title} className="min-w-0 rounded-[10px] border border-border bg-background p-4">
       <div className="flex items-start justify-between gap-2"><div><h3 className="font-medium">{title}</h3><p className="mt-1 text-xs text-muted-foreground">{fallback ? "Using environment default" : `${record.status.replace("_", " ")} · version ${record.credential_version}`}</p></div><Badge variant="secondary">{fallback ? "Fallback" : record.has_credentials ? "Key installed" : "No key"}</Badge></div>
       <div className="mt-4 grid gap-3">
         <label className="grid gap-1 text-sm"><span>Provider</span><select disabled={!isAdmin} value={provider} onChange={(event) => setProvider(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3"><option value={type === "chat" ? "groq" : "ollama"}>{type === "chat" ? "Groq" : "Ollama"}</option><option value="openai">OpenAI</option></select></label>
@@ -348,15 +654,94 @@ function ProviderCard({
         {type === "embedding" ? <label className="grid gap-1 text-sm"><span>Vector dimensions</span><select disabled={!isAdmin} value={dimensions} onChange={(event) => setDimensions(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3"><option value="768">768 · Ollama</option><option value="1536">1536 · OpenAI-compatible</option></select></label> : null}
         {isAdmin ? <label className="grid gap-1 text-sm"><span>{record?.has_credentials ? "Replace API key" : "API key"}</span><Input type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={record?.has_credentials ? "Leave blank to keep current key" : "Enter key"} /></label> : null}
       </div>
-      {type === "embedding" && record && Number(record.config.dimensions ?? dimensions) !== Number(dimensions) ? <p className="mt-3 rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">Changing model or dimensions can require a full reindex. Existing indexed knowledge will not be silently mixed.</p> : null}
+      {type === "embedding" && isAdmin ? <section aria-label="Embedding index migration" className="mt-4 space-y-2 rounded-lg border border-border p-3">
+        <h4 className="text-sm font-semibold">Replace the knowledge index</h4>
+        <p className="text-xs leading-5 text-muted-foreground">Build a replacement with the target settings above. Search keeps using the active index until the full build succeeds. Source files and citations are preserved.</p>
+        {reindex.data ? <p role="status" className="text-sm">
+          {reindexStatus === "building" ? `Building ${reindex.data.model} · ${reindex.data.staged_chunks} of ${reindex.data.total_chunks} passages` :
+            reindexStatus === "completed" ? `${reindex.data.model} is active.` :
+            reindexStatus === "failed" ? "Build failed. The previous index is still active." : "Build cancelled. The previous index is still active."}
+        </p> : null}
+        {reindex.data?.error_code ? <p className="text-xs text-muted-foreground">{reindex.data.error_code === "embedding_configuration_changed" ? "Provider settings changed during the build. Reload and try again." : "Check the target credentials, endpoint, and vector dimensions before retrying."}</p> : null}
+        {reindex.error || rebuild.error || cancelBuild.error ? <RequestError error={reindex.error ?? rebuild.error ?? cancelBuild.error} /> : null}
+        {reindexStatus === "building" ?
+          <Button size="sm" variant="outline" disabled={cancelBuild.isPending} onClick={() => cancelBuild.mutate()}>Cancel build</Button> :
+          <Button size="sm" variant="outline" disabled={reindex.isPending || rebuild.isPending || !model.trim() || !baseUrl.trim()} onClick={() => rebuild.mutate()}>Build replacement index</Button>}
+      </section> : null}
       {message ? <p className="mt-3 text-xs leading-5 text-muted-foreground" role="status">{message}</p> : null}
   {isAdmin ? <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>{record ? <Button size="sm" variant="outline" onClick={() => verify.mutate()} disabled={verify.isPending || record.status === "disabled"}>{verify.isPending ? "Testing…" : "Test connection"}</Button> : null}{record ? <Button size="sm" variant="ghost" onClick={() => { const kind = record.status === "disabled" ? "enable" : "disable"; if (kind === "enable" || window.confirm("Change this integration state?")) action.mutate(kind); }} disabled={action.isPending}>{record.status === "disabled" ? "Enable" : "Disable"}</Button> : null}{record?.has_credentials ? <Button size="sm" variant="ghost" onClick={() => { if (window.confirm("Revoke this integration credential?")) action.mutate("revoke"); }} disabled={action.isPending}>Revoke key</Button> : null}</div> : null}
-    </div>
+    </section>
   );
 }
 
-function N8nCard({ record }: { record?: IntegrationMetadata }) {
-  return <div className="rounded-[10px] border border-border bg-background p-4"><div className="flex items-start justify-between gap-2"><div><h3 className="font-medium">n8n automation</h3><p className="mt-1 text-xs text-muted-foreground">Read-only integration status</p></div><Badge variant="secondary">{record?.status ?? "Environment"}</Badge></div><p className="mt-4 text-sm leading-6 text-muted-foreground">Workflow availability and callback verification remain managed by the existing provisioning and webhook safeguards. No unsupported activation or secret controls are exposed here.</p></div>;
+function N8nCard({ organizationId, isAdmin, record }: {
+  organizationId: string;
+  isAdmin: boolean;
+  record?: IntegrationMetadata;
+}) {
+  const client = useQueryClient();
+  const [issued, setIssued] = useState<{ id: string; secret: string } | null>(null);
+  const [pending, setPending] = useState(false);
+  const [operationError, setOperationError] = useState<unknown>(null);
+  const key = useQuery({
+    queryKey: ["webhook-key-status", organizationId],
+    queryFn: () => getWebhookKeyStatus(organizationId),
+    enabled: Boolean(organizationId && isAdmin),
+  });
+  const acceptedAt = key.data?.last_accepted_at;
+  const state = !isAdmin ? "Operator managed" : key.isPending ? "Checking" : key.error ? "Unavailable" :
+    key.data?.revoked_at ? "Disconnected" : acceptedAt ? "Callback verified" : key.data ? "Awaiting callback" : "Key required";
+  async function change(action: "issue" | "rotate" | "disconnect") {
+    if (pending) return;
+    setPending(true);
+    setOperationError(null);
+    try {
+      if (action === "disconnect") {
+        await disconnectWebhookKey(organizationId);
+        setIssued(null);
+      } else {
+        setIssued(await issueWebhookKey(organizationId, action === "rotate"));
+      }
+      await client.invalidateQueries({ queryKey: ["webhook-key-status", organizationId] });
+      void client.invalidateQueries({ queryKey: ["automations", organizationId] });
+    } catch (error) {
+      setOperationError(error);
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <div className="rounded-xl border border-border bg-background p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="font-medium">n8n automation</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Signed workflow callbacks</p>
+        </div>
+        <Badge variant="secondary">{record?.status === "disabled" ? "Disabled" : state}</Badge>
+      </div>
+      {key.error ? <div className="mt-3"><RequestError error={key.error} /></div> : null}
+      {acceptedAt && !key.data?.revoked_at ? <p className="mt-3 text-sm text-muted-foreground">
+        Last accepted <time dateTime={acceptedAt}>{new Date(acceptedAt).toLocaleString()}</time>
+      </p> : null}
+      <p className="mt-3 text-sm text-muted-foreground">Configure the signing key in your n8n deployment, then check this page after the first signed callback.</p>
+      {key.data ? <p className="mt-2 break-all text-xs text-muted-foreground">Key ID {key.data.id}</p> : null}
+      {isAdmin && key.isSuccess ? <div className="mt-4 flex flex-wrap gap-2">
+        {key.data ? <>
+          <ConfirmButton size="sm" label={key.data.revoked_at ? "Reconnect with a new key" : "Rotate key"} confirmLabel="Issue new key" pendingLabel="Issuing…" pending={pending} onConfirm={() => void change("rotate")} />
+          {!key.data.revoked_at ? <ConfirmButton size="sm" label="Disconnect n8n" confirmLabel="Confirm disconnect" pendingLabel="Disconnecting…" pending={pending} onConfirm={() => void change("disconnect")} /> : null}
+        </> : <Button size="sm" disabled={pending} onClick={() => void change("issue")}>Create signing key</Button>}
+        <Button size="sm" variant="ghost" disabled={pending || key.isFetching} onClick={() => void key.refetch()}>Refresh callback status</Button>
+      </div> : null}
+      {operationError ? <div className="mt-3"><RequestError error={operationError} /></div> : null}
+      {issued ? <div className="mt-3 grid gap-2 rounded-lg border border-border bg-card p-3">
+        <p className="text-xs text-muted-foreground">Copy this secret into your n8n credential store. This is the only time it is shown.</p>
+        <label className="grid gap-1 text-sm">Signing secret
+          <Input readOnly value={issued.secret} className="font-mono text-xs" onFocus={(event) => event.currentTarget.select()} />
+        </label>
+        <Button size="sm" variant="outline" className="justify-self-start" onClick={() => setIssued(null)}>Hide secret</Button>
+      </div> : null}
+    </div>
+  );
 }
 
 function McpCard() {

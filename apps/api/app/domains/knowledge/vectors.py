@@ -6,19 +6,44 @@ A query uses one column and the stored model name. A 1536 row with a null
 model is the legacy index and is not compared with a 768 query.
 """
 
+import hashlib
 import uuid
 from typing import Any
 
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import exists, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.domains.knowledge.models import Chunk, Document, DocumentStatus
+from app.integrations.resolver import resolve_settings
 
 OPENAI_WIDTH = 1536
 NOMIC_WIDTH = 768
 SUPPORTED_WIDTHS = frozenset({OPENAI_WIDTH, NOMIC_WIDTH})
+
+
+def lock_embedding_index(db: Session, organization_id: uuid.UUID, *, shared: bool = False) -> None:
+    key = int.from_bytes(
+        hashlib.sha256(b"embedding-index:" + organization_id.bytes).digest()[:8],
+        "big",
+        signed=True,
+    )
+    statement = (
+        text("SELECT pg_advisory_xact_lock_shared(:key)")
+        if shared
+        else text("SELECT pg_advisory_xact_lock(:key)")
+    )
+    db.execute(statement, {"key": key})
+
+
+def index_identity(settings: Settings) -> tuple[str, str, str, int]:
+    return (
+        settings.embedding_provider,
+        settings.embedding_base_url.rstrip("/"),
+        settings.embedding_model,
+        settings.embedding_dimensions,
+    )
 
 
 def vector_column(width: int) -> Any:
@@ -59,7 +84,10 @@ def store_chunk_embedding(chunk: Chunk, vector: list[float], settings: Settings)
 
 
 def incompatible_document_count(db: Session, organization_id: uuid.UUID) -> int:
-    settings = get_settings()
+    try:
+        settings = resolve_settings(db, organization_id, "embedding", for_verification=True)
+    except AppError:
+        settings = get_settings()
     if settings.embedding_provider == "double":
         return 0
     column = vector_column(settings.embedding_dimensions)

@@ -2,6 +2,20 @@
 
 Audit date: 2026-11-23. Repository `main` was `d336d1a` when this audit was written. Phase 1, below, is the first implementation cut. Nothing has been deployed to a VPS.
 
+## Release candidate preparation
+
+Run the configuration preflight before building a disposable staging project. It reads settings and reports missing configuration by name. It does not start services, rotate keys, or use provider credentials.
+
+```powershell
+py -3 infrastructure/staging/preflight.py --env-file infrastructure/staging/.env
+```
+
+- Generate an independent credential encryption keyring. Maintain the prior key entries while older provider credentials are still sealed with them. Preserve the original session secret when migrating records encrypted with the development fallback. Store both sets of secrets securely outside data backups.
+- Keep billing in sandbox mode for the baseline proof. To qualify Stripe separately, supply test API credentials, test Price IDs, a webhook signing secret, and the staging HTTPS origin. Verify Checkout and the billing portal return to `/billing`, and confirm signed webhook reconciliation before accepting the billing proof.
+- For the next n8n proof, use a fresh project with the pinned 2.49.6 image and import the two workflow definitions inactive. This replaces an image from the affected range of advisory [GHSA-9p7v-45m2-wxgj](https://github.com/n8n-io/n8n/security/advisories/GHSA-9p7v-45m2-wxgj). Upgrading an existing n8n volume or replacing installed workflow definitions requires rehearsal from a backup and operator approval.
+- An authenticated administrator can create the organization signing key with `POST /api/v1/organizations/{id}/integrations/webhook-keys`. The rotate endpoint uses `POST .../webhook-keys/rotate`. Transfer the one-time secret to the deployment secret store. Configure n8n with the matching key ID and secret, then publish the workflow. The Integrations screen reports whether ATLAS accepted a callback since the last key rotation.
+- Complete the connected dependency-audit job and image advisory review. Verify real TLS, readiness, signed callbacks, model access, and an off-host restore against the same staging candidate.
+
 ## Phase 1 — single HTTPS origin
 
 Caddy is the only published service in `infrastructure/compose.staging.yaml`. It forwards `/api/` and `/api` to FastAPI without stripping the prefix, because the application routes are already `/api/v1/...`. Every other path goes to Next.js. Postgres, n8n, Mailpit, and Ollama are on the `private` network and have no host ports.

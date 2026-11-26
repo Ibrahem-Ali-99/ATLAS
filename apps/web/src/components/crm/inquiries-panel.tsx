@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { createInquiry, deleteInquiry, listCompanies, listInquiries, listLeads, restoreInquiry, updateInquiry } from "@/lib/records-api";
+import { createInquiry, getInquiry, deleteInquiry, listCompanies, listInquiries, listLeads, restoreInquiry, updateInquiry } from "@/lib/records-api";
 import { blankToNull, type Inquiry } from "@/lib/records";
 
 const schema = z.object({
@@ -37,16 +37,16 @@ function payload(values: FormValues) {
   };
 }
 
-type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string }) => void;
+type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string | null }) => void;
 
 export function InquiriesPanel({ organizationId, selectedId: requestedId, onNavigate }: { organizationId: string; selectedId?: string | null; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [includeArchived, setIncludeArchived] = useState(Boolean(requestedId));
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
+  const selectedId = requestedId ?? null;
   const inquiries = useQuery({
     queryKey: ["inquiries", organizationId, query, page, includeArchived],
     queryFn: () => listInquiries(organizationId, { q: query, page, includeArchived }),
@@ -68,7 +68,13 @@ export function InquiriesPanel({ organizationId, selectedId: requestedId, onNavi
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  const selected = inquiries.data?.items.find((item) => item.id === selectedId) ?? null;
+  const selectedInList = inquiries.data?.items.find((item) => item.id === selectedId);
+  const record = useQuery({
+    queryKey: ["inquiries", organizationId, "record", selectedId],
+    queryFn: () => getInquiry(organizationId, selectedId ?? ""),
+    enabled: Boolean(selectedId && !selectedInList),
+  });
+  const selected = selectedInList ?? record.data ?? null;
 
   return (
     <div className={selected ? "grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.8fr)]" : "min-w-0"}>
@@ -115,11 +121,11 @@ export function InquiriesPanel({ organizationId, selectedId: requestedId, onNavi
           onNavigate={onNavigate}
           onSaved={() => void queryClient.invalidateQueries({ queryKey: ["inquiries", organizationId] })}
           onDeleted={() => {
-            setSelectedId(null);
+            onNavigate({ tab: "inquiries", id: null });
             void queryClient.invalidateQueries({ queryKey: ["inquiries", organizationId] });
           }}
         />
-      ) : (
+      ) : record.isError ? <RequestError error={record.error} /> : (
         <aside className="rounded-[10px] bg-muted p-6 text-sm text-muted-foreground">
           Select an inquiry to read and update it.
         </aside>
@@ -131,7 +137,7 @@ export function InquiriesPanel({ organizationId, selectedId: requestedId, onNavi
         open={open}
         onOpenChange={setOpen}
         onCreated={(inquiry) => {
-          setSelectedId(inquiry.id);
+          onNavigate({ tab: "inquiries", id: inquiry.id });
           void queryClient.invalidateQueries({ queryKey: ["inquiries", organizationId] });
         }}
       />
@@ -250,12 +256,12 @@ function InquiryFields({
       <div className="grid gap-1.5">
         <Label htmlFor={`${formId}-subject`}>Subject</Label>
         <Input id={`${formId}-subject`} {...form.register("subject")} />
-        {form.formState.errors.subject ? <p className="text-sm text-red-300">{form.formState.errors.subject.message}</p> : null}
+        {form.formState.errors.subject ? <p className="text-sm text-destructive">{form.formState.errors.subject.message}</p> : null}
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor={`${formId}-body`}>Body</Label>
         <Textarea id={`${formId}-body`} {...form.register("body")} />
-        {form.formState.errors.body ? <p className="text-sm text-red-300">{form.formState.errors.body.message}</p> : null}
+        {form.formState.errors.body ? <p className="text-sm text-destructive">{form.formState.errors.body.message}</p> : null}
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor={`${formId}-company`}>Company</Label>

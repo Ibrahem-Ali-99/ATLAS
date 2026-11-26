@@ -5,13 +5,15 @@ import json
 import re
 import secrets
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field
-from sqlalchemy import select
+from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.core.errors import AppError
@@ -19,11 +21,13 @@ from app.domains.agents.models import AgentRun, RunStatus
 from app.domains.approvals.models import ActionType
 from app.domains.approvals.service import create_approval
 from app.domains.assistant.service import _configured_system
+from app.domains.audit.service import record_event
+from app.domains.automation.workflows import stage_lead_created
 from app.domains.crm import service as crm
-from app.domains.crm.models import Contact, Inquiry, Lead
+from app.domains.crm.models import Contact, Inquiry, Lead, LeadStatus
 from app.domains.crm.schemas import ContactCreate
 from app.domains.identity.dependencies import CsrfAdmin, CsrfMember, DbSession, Member
-from app.domains.identity.models import Membership, User
+from app.domains.identity.models import Membership, Organization, User
 from app.domains.identity.service import list_team
 from app.domains.inbox.models import (
     InboxConversation,
@@ -32,9 +36,10 @@ from app.domains.inbox.models import (
     WidgetConfig,
     WidgetSession,
 )
-from app.domains.integrations.models import IntegrationConfig, IntegrationType
+from app.domains.integrations.models import IntegrationConfig, IntegrationStatus, IntegrationType
 from app.domains.knowledge.retrieval import search_chunks
 from app.integrations.language import get_chat_client, get_embedding_client
+from app.integrations.whatsapp import normalize_phone
 
 router = APIRouter(prefix="/organizations/{organization_id}/inbox", tags=["inbox"])
 public_widget_router = APIRouter(prefix="/widget", tags=["website-chat"])
@@ -50,11 +55,11 @@ class MessageBody(BaseModel):
 
 class InboundBody(BaseModel):
     message_id: str = Field(min_length=1, max_length=200)
-    sender: str = Field(min_length=3, max_length=320)
-    recipient: str = Field(min_length=3, max_length=320)
+    sender: EmailStr
+    recipient: EmailStr
     subject: str = Field(min_length=1, max_length=200)
     body: str = Field(min_length=1, max_length=10000)
-    channel: str = Field(default="email", pattern="^(email|whatsapp)$")
+    channel: Literal["email"] = "email"
 
 
 class AiReplyBody(BaseModel):
@@ -83,12 +88,16 @@ def evaluate_inbox_draft(
     crm_context: list[str] = []
     if row.contact_id:
         contact = db.scalar(
-            select(Contact).where(Contact.id == row.contact_id, Contact.organization_id == organization_id)
+            select(Contact).where(
+                Contact.id == row.contact_id, Contact.organization_id == organization_id
+            )
         )
         if contact:
             crm_context.append(f"Contact: {contact.full_name}; title: {contact.title or 'none'}")
     if row.lead_id:
-        lead = db.scalar(select(Lead).where(Lead.id == row.lead_id, Lead.organization_id == organization_id))
+        lead = db.scalar(
+            select(Lead).where(Lead.id == row.lead_id, Lead.organization_id == organization_id)
+        )
         if lead:
             crm_context.append(f"Lead: {lead.title}; stage: {lead.status.value}")
     hits = search_chunks(
@@ -125,12 +134,24 @@ def _human_request_reason(text: str) -> str | None:
     return None
 
 
-def _conversation(db: DbSession, org: uuid.UUID, conversation_id: uuid.UUID) -> InboxConversation:
-    row = db.scalar(
-        select(InboxConversation).where(
-            InboxConversation.id == conversation_id, InboxConversation.organization_id == org
-        )
+def _register_inbound(conversation: InboxConversation, body: str) -> None:
+    conversation.unread_count += 1
+    conversation.updated_at = datetime.now(UTC)
+    reason = _human_request_reason(body)
+    if reason:
+        conversation.handoff_requested = True
+        conversation.handoff_reason = reason
+        conversation.ai_resumed = False
+        conversation.status = InboxStatus.pending
+
+
+def _conversation(
+    db: DbSession, org: uuid.UUID, conversation_id: uuid.UUID, *, lock: bool = False
+) -> InboxConversation:
+    query = select(InboxConversation).where(
+        InboxConversation.id == conversation_id, InboxConversation.organization_id == org
     )
+    row = db.scalar(query.with_for_update() if lock else query)
     if row is None:
         raise AppError(404, "conversation_not_found", "Conversation not found")
     return row
@@ -138,22 +159,28 @@ def _conversation(db: DbSession, org: uuid.UUID, conversation_id: uuid.UUID) -> 
 
 @router.get("")
 def list_inbox(
-    member: Member, db: DbSession, q: str | None = None, assigned: str = "all", channel: str = "all"
+    member: Member,
+    db: DbSession,
+    q: str | None = None,
+    assigned: Literal["all", "assigned", "unassigned"] = "all",
+    channel: Literal["all", "email", "whatsapp", "webchat"] = "all",
+    status: InboxStatus | None = None,
 ) -> list[dict[str, object]]:
     query = (
         select(InboxConversation)
         .where(InboxConversation.organization_id == member.organization.id)
-        .order_by(InboxConversation.updated_at.desc())
+        .order_by(InboxConversation.updated_at.desc(), InboxConversation.id.desc())
     )
-    rows = list(db.scalars(query))
     if assigned == "assigned":
-        rows = [row for row in rows if row.assigned_to is not None]
+        query = query.where(InboxConversation.assigned_to.is_not(None))
     elif assigned == "unassigned":
-        rows = [row for row in rows if row.assigned_to is None]
+        query = query.where(InboxConversation.assigned_to.is_(None))
     if channel != "all":
-        rows = [row for row in rows if row.channel == channel]
-    if q:
-        rows = [row for row in rows if q.lower() in row.subject.lower()]
+        query = query.where(InboxConversation.channel == channel)
+    if status is not None:
+        query = query.where(InboxConversation.status == status)
+    if q and q.strip():
+        query = query.where(InboxConversation.subject.icontains(q.strip(), autoescape=True))
     return [
         {
             "id": row.id,
@@ -168,37 +195,55 @@ def list_inbox(
             "handoff_reason": row.handoff_reason,
             "updated_at": row.updated_at,
         }
-        for row in rows
+        for row in db.scalars(query)
     ]
 
 
-@router.get("/{conversation_id}")
+@router.get("/{conversation_id:uuid}")
 def get_inbox(conversation_id: uuid.UUID, member: Member, db: DbSession) -> dict[str, object]:
     row = _conversation(db, member.organization.id, conversation_id)
     messages = db.scalars(
         select(InboxMessage)
-        .where(InboxMessage.conversation_id == row.id)
-        .order_by(InboxMessage.created_at)
+        .where(
+            InboxMessage.conversation_id == row.id,
+            InboxMessage.organization_id == row.organization_id,
+        )
+        .order_by(InboxMessage.created_at, InboxMessage.id)
     ).all()
-    row.unread_count = 0
-    latest_inbound = next((message for message in reversed(messages) if message.direction == "inbound"), None)
-    handoff_reason = _human_request_reason(latest_inbound.body) if latest_inbound else None
-    if handoff_reason:
-        row.handoff_requested = True
-        row.handoff_reason = handoff_reason
-        row.status = InboxStatus.pending
-    db.commit()
+    contact = (
+        db.scalar(
+            select(Contact).where(
+                Contact.id == row.contact_id, Contact.organization_id == row.organization_id
+            )
+        )
+        if row.contact_id
+        else None
+    )
     return {
         "id": row.id,
         "subject": row.subject,
         "channel": row.channel,
         "status": row.status.value,
         "unread_count": row.unread_count,
+        "updated_at": row.updated_at,
         "contact_id": row.contact_id,
         "lead_id": row.lead_id,
         "assigned_to": row.assigned_to,
         "handoff_requested": row.handoff_requested,
         "handoff_reason": row.handoff_reason,
+        "handoff_accepted_at": row.handoff_accepted_at,
+        "handoff_resolved_at": row.handoff_resolved_at,
+        "ai_resumed": row.ai_resumed,
+        "reply_unavailable": _whatsapp_reply_unavailable(db, row),
+        "reply_recipient": (
+            contact.email
+            if row.channel == "email"
+            else contact.phone
+            if row.channel == "whatsapp"
+            else None
+        )
+        if contact
+        else None,
         "messages": [
             {
                 "id": msg.id,
@@ -213,6 +258,30 @@ def get_inbox(conversation_id: uuid.UUID, member: Member, db: DbSession) -> dict
             for msg in messages
         ],
     }
+
+
+class SeenConversation(BaseModel):
+    updated_at: AwareDatetime
+
+
+@router.patch("/{conversation_id}/read")
+def mark_inbox_read(
+    conversation_id: uuid.UUID, body: SeenConversation, member: CsrfMember, db: DbSession
+) -> dict[str, bool]:
+    conversation = _conversation(db, member.organization.id, conversation_id)
+    marked = db.scalar(
+        update(InboxConversation)
+        .where(
+            InboxConversation.id == conversation.id,
+            InboxConversation.organization_id == member.organization.id,
+            InboxConversation.updated_at == body.updated_at,
+            InboxConversation.unread_count > 0,
+        )
+        .values(unread_count=0, updated_at=InboxConversation.updated_at)
+        .returning(InboxConversation.id)
+    )
+    db.commit()
+    return {"marked": marked is not None}
 
 
 @router.post("/{conversation_id}/draft")
@@ -234,7 +303,7 @@ def save_draft(
         provider_message_id=f"draft-{uuid.uuid4()}",
     )
     db.add(msg)
-    row.updated_at = datetime.utcnow()
+    row.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(msg)
     return {"id": msg.id, "delivery_status": msg.delivery_status}
@@ -250,8 +319,15 @@ def draft_with_ai(
         .where(InboxMessage.conversation_id == row.id)
         .order_by(InboxMessage.created_at)
     ).all()
-    latest_inbound = next((message for message in reversed(messages) if message.direction == "inbound"), None)
-    handoff_reason = _human_request_reason(latest_inbound.body) if latest_inbound else None
+    latest_inbound = next(
+        (message for message in reversed(messages) if message.direction == "inbound"), None
+    )
+    handoff_reason = (
+        _human_request_reason(latest_inbound.body)
+        if latest_inbound
+        and (row.handoff_resolved_at is None or latest_inbound.created_at > row.handoff_resolved_at)
+        else None
+    )
     if handoff_reason:
         row.handoff_requested = True
         row.handoff_reason = handoff_reason
@@ -325,6 +401,8 @@ def submit_for_approval(
     conversation_id: uuid.UUID, body: MessageBody, member: CsrfMember, db: DbSession
 ) -> dict[str, object]:
     row = _conversation(db, member.organization.id, conversation_id)
+    if reason := _whatsapp_reply_unavailable(db, row):
+        raise AppError(409, "whatsapp_reply_unavailable", reason)
     if row.lead_id is None:
         raise AppError(
             422,
@@ -444,7 +522,7 @@ def take_over_inbox(
     row = _conversation(db, member.organization.id, conversation_id)
     row.assigned_to = member.user.id
     row.handoff_requested = True
-    row.handoff_accepted_at = datetime.utcnow()
+    row.handoff_accepted_at = datetime.now(UTC)
     row.ai_resumed = False
     row.status = InboxStatus.pending
     db.commit()
@@ -456,9 +534,16 @@ def resolve_inbox_handoff(
     conversation_id: uuid.UUID, member: CsrfMember, db: DbSession
 ) -> dict[str, object]:
     row = _conversation(db, member.organization.id, conversation_id)
-    if row.assigned_to != member.user.id and str(member.membership.role) not in {"admin", "MembershipRole.admin"}:
-        raise AppError(403, "handoff_not_assigned", "Only the assigned staff member or an admin can resolve this handoff")
-    row.handoff_resolved_at = datetime.utcnow()
+    if row.assigned_to != member.user.id and str(member.membership.role) not in {
+        "admin",
+        "MembershipRole.admin",
+    }:
+        raise AppError(
+            403,
+            "handoff_not_assigned",
+            "Only the assigned staff member or an admin can resolve this handoff",
+        )
+    row.handoff_resolved_at = datetime.now(UTC)
     row.handoff_requested = False
     row.status = InboxStatus.resolved
     row.ai_resumed = False
@@ -472,13 +557,17 @@ def resume_inbox_ai(
 ) -> dict[str, object]:
     row = _conversation(db, member.organization.id, conversation_id)
     widget = db.scalar(
-        select(WidgetConfig).join(WidgetSession, WidgetSession.widget_id == WidgetConfig.id).where(
+        select(WidgetConfig)
+        .join(WidgetSession, WidgetSession.widget_id == WidgetConfig.id)
+        .where(
             WidgetSession.conversation_id == row.id,
             WidgetConfig.organization_id == member.organization.id,
         )
     )
     if widget is None or widget.operating_mode != "ai_auto_reply":
-        raise AppError(409, "ai_not_enabled", "Automatic replies are not enabled for this website chat")
+        raise AppError(
+            409, "ai_not_enabled", "Automatic replies are not enabled for this website chat"
+        )
     row.handoff_requested = False
     row.handoff_reason = None
     row.ai_resumed = True
@@ -501,11 +590,27 @@ def send_staff_message(
 ) -> dict[str, object]:
     row = _conversation(db, member.organization.id, conversation_id)
     if row.channel != "webchat":
-        raise AppError(422, "invalid_channel", "Staff chat messages are only available for website conversations")
-    if row.assigned_to not in {None, member.user.id} and str(member.membership.role) not in {"admin", "MembershipRole.admin"}:
-        raise AppError(403, "conversation_not_assigned", "This conversation is assigned to another staff member")
+        raise AppError(
+            422,
+            "invalid_channel",
+            "Staff chat messages are only available for website conversations",
+        )
+    if row.assigned_to not in {None, member.user.id} and str(member.membership.role) not in {
+        "admin",
+        "MembershipRole.admin",
+    }:
+        raise AppError(
+            403,
+            "conversation_not_assigned",
+            "This conversation is assigned to another staff member",
+        )
     provider_id = f"staff-webchat-{body.client_message_id or uuid.uuid4()}"
-    existing = db.scalar(select(InboxMessage).where(InboxMessage.organization_id == member.organization.id, InboxMessage.provider_message_id == provider_id))
+    existing = db.scalar(
+        select(InboxMessage).where(
+            InboxMessage.organization_id == member.organization.id,
+            InboxMessage.provider_message_id == provider_id,
+        )
+    )
     if existing is not None:
         return {"id": existing.id, "status": "duplicate"}
     message = InboxMessage(
@@ -520,7 +625,7 @@ def send_staff_message(
         provider_message_id=provider_id,
     )
     db.add(message)
-    row.updated_at = datetime.utcnow()
+    row.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(message)
     return {"id": message.id, "status": message.delivery_status}
@@ -543,13 +648,38 @@ def link_inbox_contact(
     if contact is None:
         raise AppError(404, "contact_not_found", "Contact not found")
     row.contact_id = contact.id
+    if row.lead_id is not None:
+        lead = crm.get_lead(db, member.organization.id, row.lead_id)
+        if lead.contact_id != contact.id:
+            row.lead_id = None
     db.commit()
     return {"contact_id": row.contact_id}
 
 
 class ContactCreateBody(BaseModel):
     full_name: str = Field(min_length=1, max_length=200)
-    email: str = Field(min_length=3, max_length=320)
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, max_length=40)
+
+
+class LeadLinkBody(BaseModel):
+    lead_id: uuid.UUID
+
+
+@router.patch("/{conversation_id}/lead")
+def link_inbox_lead(
+    conversation_id: uuid.UUID, body: LeadLinkBody, member: CsrfMember, db: DbSession
+) -> dict[str, object]:
+    row = _conversation(db, member.organization.id, conversation_id)
+    lead = crm.get_lead(db, member.organization.id, body.lead_id)
+    if lead.archived_at is not None or lead.contact_id is None:
+        raise AppError(422, "inbox_lead_requires_contact", "Choose an active lead with a contact")
+    if row.contact_id is not None and row.contact_id != lead.contact_id:
+        raise AppError(409, "inbox_contact_mismatch", "The lead belongs to a different contact")
+    row.lead_id = lead.id
+    row.contact_id = lead.contact_id
+    db.commit()
+    return {"lead_id": row.lead_id, "contact_id": row.contact_id}
 
 
 @router.post("/{conversation_id}/contact", status_code=201)
@@ -557,14 +687,119 @@ def create_inbox_contact(
     conversation_id: uuid.UUID, body: ContactCreateBody, member: CsrfMember, db: DbSession
 ) -> dict[str, object]:
     row = _conversation(db, member.organization.id, conversation_id)
+    phone = normalize_phone(body.phone) if body.phone else None
+    if (row.channel == "whatsapp" and not phone) or (row.channel != "whatsapp" and not body.email):
+        raise AppError(
+            422, "contact_address_required", "Enter an address for the conversation channel"
+        )
     contact = crm.create_contact(
         db,
         member.organization.id,
-        ContactCreate(full_name=body.full_name, email=body.email).model_dump(),
+        ContactCreate(full_name=body.full_name, email=body.email, phone=phone).model_dump(),
     )
     row.contact_id = contact.id
     db.commit()
     return {"contact_id": contact.id}
+
+
+class IntakeBody(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/{conversation_id}/crm-intake")
+def record_crm_intake(
+    conversation_id: uuid.UUID, body: IntakeBody, member: CsrfMember, db: DbSession
+) -> dict[str, uuid.UUID]:
+    org = member.organization.id
+    row = _conversation(db, org, conversation_id, lock=True)
+    title = body.title.strip()
+    if not title:
+        raise AppError(422, "intake_title_required", "Enter a lead title")
+    if row.contact_id is None:
+        raise AppError(409, "contact_required", "Link a contact before recording this inquiry")
+    contact = crm.get_contact(db, org, row.contact_id)
+    if contact.archived_at is not None:
+        raise AppError(409, "contact_archived", "Choose an active contact")
+    lead = crm.get_lead(db, org, row.lead_id) if row.lead_id else None
+    if lead and (lead.archived_at is not None or lead.contact_id != contact.id):
+        raise AppError(409, "invalid_inbox_lead", "Link an active lead for this contact")
+    message = db.scalar(
+        select(InboxMessage)
+        .where(
+            InboxMessage.organization_id == org,
+            InboxMessage.conversation_id == row.id,
+            InboxMessage.direction == "inbound",
+        )
+        .order_by(InboxMessage.created_at, InboxMessage.id)
+        .limit(1)
+    )
+    if message is None:
+        raise AppError(
+            409,
+            "customer_message_missing",
+            "Wait for a customer message before recording an inquiry",
+        )
+    if lead is None:
+        lead = crm.create_lead(
+            db,
+            org,
+            member.user.id,
+            {
+                "title": title,
+                "status": LeadStatus.new,
+                "source": row.channel,
+                "company_id": contact.company_id,
+                "contact_id": contact.id,
+            },
+            commit=False,
+        )
+        row.lead_id = lead.id
+        stage_lead_created(db, org, lead.id, None)
+    inquiry = db.scalar(
+        select(Inquiry)
+        .where(
+            Inquiry.organization_id == org,
+            Inquiry.lead_id == lead.id,
+            Inquiry.archived_at.is_(None),
+        )
+        .order_by(Inquiry.created_at.desc(), Inquiry.id)
+        .limit(1)
+    )
+    if inquiry is None:
+        inquiry = crm.create_inquiry(
+            db,
+            org,
+            {
+                "lead_id": lead.id,
+                "company_id": contact.company_id,
+                "subject": row.subject,
+                "body": message.body[:8000],
+            },
+            commit=False,
+        )
+    db.commit()
+    return {"lead_id": lead.id, "inquiry_id": inquiry.id}
+
+
+def _whatsapp_reply_unavailable(db: Session, row: InboxConversation) -> str | None:
+    if row.channel != "whatsapp":
+        return None
+    settings = get_settings()
+    if settings.email_mode != "live" or not settings.whatsapp_live_enabled:
+        return "WhatsApp replies are disabled for this environment. Incoming messages remain available."
+    verified = db.scalar(
+        select(IntegrationConfig.id).where(
+            IntegrationConfig.organization_id == row.organization_id,
+            IntegrationConfig.integration_type == IntegrationType.whatsapp,
+            IntegrationConfig.status == IntegrationStatus.configured,
+            IntegrationConfig.verified_at.is_not(None),
+        )
+    )
+    if verified is None:
+        return (
+            "Workspace administrators must verify the WhatsApp connection before sending replies."
+        )
+    return None
 
 
 @router.patch("/{conversation_id}/status")
@@ -581,15 +816,50 @@ def update_status(
 
 @router.post("/webhooks/inbound")
 async def inbound(request: Request, db: DbSession) -> dict[str, object]:
-    org_id = uuid.UUID(str(request.path_params["organization_id"]))
-    body = await request.body()
-    secret = get_settings().inbox_webhook_secret
+    try:
+        org_id = uuid.UUID(str(request.path_params["organization_id"]))
+    except ValueError:
+        raise AppError(404, "workspace_not_found", "Workspace not found") from None
+    settings = get_settings()
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > settings.webhook_max_bytes:
+            raise AppError(413, "inbound_message_too_large", "Inbound message is too large")
+        body.extend(chunk)
+    secret = settings.inbox_webhook_secret
+    timestamp = request.headers.get("x-atlas-inbox-timestamp", "")
     signature = request.headers.get("x-atlas-inbox-signature", "")
-    if not secret or not hmac.compare_digest(
-        signature, hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if (
+        not secret
+        or not re.fullmatch(r"[0-9]{1,12}", timestamp)
+        or len(signature) != 64
+        or not signature.isascii()
+        or abs(datetime.now(UTC).timestamp() - int(timestamp)) > settings.webhook_skew_seconds
     ):
         raise AppError(400, "invalid_webhook_signature", "Inbound signature is invalid")
-    event = InboundBody.model_validate_json(body)
+    expected = hmac.new(
+        secret.encode(), f"v1.{org_id}.{timestamp}.".encode() + body, hashlib.sha256
+    )
+    if not hmac.compare_digest(signature, expected.hexdigest()):
+        raise AppError(400, "invalid_webhook_signature", "Inbound signature is invalid")
+    try:
+        event = InboundBody.model_validate_json(body)
+    except ValidationError:
+        raise AppError(
+            422, "invalid_inbound_message", "Inbound message fields are invalid"
+        ) from None
+    return await run_in_threadpool(_record_inbound_email, db, org_id, event)
+
+
+def _record_inbound_email(
+    db: DbSession, org_id: uuid.UUID, event: InboundBody
+) -> dict[str, object]:
+    # Serialize delivery and threading for this tenant, including simultaneous retries.
+    if (
+        db.scalar(select(Organization.id).where(Organization.id == org_id).with_for_update())
+        is None
+    ):
+        raise AppError(404, "workspace_not_found", "Workspace not found")
     if (
         db.scalar(
             select(InboxMessage).where(
@@ -600,25 +870,50 @@ async def inbound(request: Request, db: DbSession) -> dict[str, object]:
         is not None
     ):
         return {"status": "duplicate"}
-    contact = db.scalar(
-        select(Contact).where(
-            Contact.organization_id == org_id, Contact.email == event.sender.lower()
+    sender, recipient = event.sender.casefold(), event.recipient.casefold()
+    matches = db.scalars(
+        select(Contact)
+        .where(
+            Contact.organization_id == org_id,
+            func.lower(Contact.email) == sender,
+            Contact.archived_at.is_(None),
         )
+        .limit(2)
+    ).all()
+    contact = matches[0] if len(matches) == 1 else None
+    subject = (
+        re.sub(r"^(?:re:\s*)+", "", event.subject.strip(), flags=re.IGNORECASE) or event.subject
     )
-    conversation = None
-    if contact is not None:
-        conversation = db.scalar(
-            select(InboxConversation).where(
-                InboxConversation.organization_id == org_id,
-                InboxConversation.contact_id == contact.id,
-                InboxConversation.status != InboxStatus.resolved,
-            )
+    matching_mailbox = (
+        select(InboxMessage.id)
+        .where(
+            InboxMessage.conversation_id == InboxConversation.id,
+            InboxMessage.organization_id == org_id,
+            InboxMessage.channel == "email",
+            InboxMessage.direction == "inbound",
+            InboxMessage.sender == sender,
+            InboxMessage.recipient == recipient,
         )
+        .exists()
+    )
+    conversation = db.scalar(
+        select(InboxConversation)
+        .where(
+            InboxConversation.organization_id == org_id,
+            InboxConversation.channel == "email",
+            InboxConversation.status != InboxStatus.resolved,
+            func.lower(InboxConversation.subject) == subject.casefold(),
+            matching_mailbox,
+        )
+        .order_by(InboxConversation.updated_at.desc(), InboxConversation.id)
+        .limit(1)
+        .with_for_update()
+    )
     if conversation is None:
         conversation = InboxConversation(
             organization_id=org_id,
             contact_id=contact.id if contact else None,
-            subject=event.subject,
+            subject=subject,
             status=InboxStatus.open,
             unread_count=0,
             channel=event.channel,
@@ -629,8 +924,8 @@ async def inbound(request: Request, db: DbSession) -> dict[str, object]:
         InboxMessage(
             organization_id=org_id,
             conversation_id=conversation.id,
-            sender=event.sender.lower(),
-            recipient=event.recipient,
+            sender=sender,
+            recipient=recipient,
             body=event.body,
             direction="inbound",
             channel=event.channel,
@@ -638,7 +933,7 @@ async def inbound(request: Request, db: DbSession) -> dict[str, object]:
             provider_message_id=event.message_id,
         )
     )
-    conversation.unread_count += 1
+    _register_inbound(conversation, event.body)
     db.commit()
     return {
         "status": "accepted",
@@ -652,97 +947,190 @@ def verify_whatsapp_webhook(request: Request) -> PlainTextResponse:
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
+    settings = get_settings()
+    verify_token = settings.whatsapp_webhook_verify_token or settings.inbox_webhook_secret
     if (
         mode != "subscribe"
         or not token
         or not challenge
-        or not hmac.compare_digest(token, get_settings().inbox_webhook_secret)
+        or not hmac.compare_digest(token.encode(), verify_token.encode())
     ):
         raise AppError(403, "invalid_webhook_verification", "Webhook verification failed")
     return PlainTextResponse(challenge)
 
 
+def _webhook_objects(value: object) -> list[dict[str, object]]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
 @router.post("/webhooks/whatsapp")
-async def whatsapp_webhook(request: Request, db: DbSession) -> dict[str, object]:
-    raw = await request.body()
+async def whatsapp_webhook(
+    organization_id: uuid.UUID, request: Request, db: DbSession
+) -> dict[str, object]:
+    settings = get_settings()
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > settings.webhook_max_bytes:
+            raise AppError(413, "payload_too_large", "Webhook payload is too large")
+        raw.extend(chunk)
     signature = request.headers.get("x-hub-signature-256", "")
-    secret = get_settings().inbox_webhook_secret
+    secret = settings.whatsapp_webhook_app_secret or settings.inbox_webhook_secret
     expected = "sha256=" + hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
-    if not secret or not hmac.compare_digest(signature, expected):
+    if not secret or not hmac.compare_digest(signature.encode(), expected.encode()):
         raise AppError(400, "invalid_webhook_signature", "WhatsApp signature is invalid")
-    document = json.loads(raw)
-    accepted = 0
-    duplicates = 0
-    for entry in document.get("entry", []):
-        for change in entry.get("changes", []):
-            value = change.get("value", {})
-            phone_id = value.get("metadata", {}).get("phone_number_id")
-            integration = db.scalar(
-                select(IntegrationConfig).where(
-                    IntegrationConfig.integration_type == IntegrationType.whatsapp,
-                    IntegrationConfig.config["phone_number_id"].as_string() == phone_id,
-                )
-            )
-            if integration is None:
+    try:
+        document = json.loads(raw)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise AppError(422, "invalid_whatsapp_payload", "WhatsApp payload must be JSON") from exc
+    if not isinstance(document, dict):
+        raise AppError(422, "invalid_whatsapp_payload", "WhatsApp payload must be a JSON object")
+
+    # Serialize deliveries and disconnects for this workspace's single Meta account.
+    integration = db.scalar(
+        select(IntegrationConfig)
+        .where(
+            IntegrationConfig.organization_id == organization_id,
+            IntegrationConfig.integration_type == IntegrationType.whatsapp,
+            IntegrationConfig.status == IntegrationStatus.configured,
+            IntegrationConfig.verified_at.is_not(None),
+        )
+        .with_for_update()
+    )
+    accepted = duplicates = 0
+    if integration is None:
+        return {"status": "accepted", "accepted": accepted, "duplicates": duplicates}
+    phone_id = str(integration.config.get("phone_number_id", ""))
+    account_id = integration.config.get("business_account_id")
+    ambiguous_route = db.scalar(
+        select(IntegrationConfig.id)
+        .where(
+            IntegrationConfig.organization_id != organization_id,
+            IntegrationConfig.integration_type == IntegrationType.whatsapp,
+            IntegrationConfig.status == IntegrationStatus.configured,
+            IntegrationConfig.verified_at.is_not(None),
+            IntegrationConfig.config["phone_number_id"].as_string() == phone_id,
+        )
+        .limit(1)
+    )
+    if ambiguous_route is not None:
+        raise AppError(
+            409,
+            "whatsapp_number_conflict",
+            "The WhatsApp number has multiple workspace connections",
+        )
+    for entry in _webhook_objects(document.get("entry")):
+        if not account_id or str(entry.get("id", "")) != account_id:
+            continue
+        for change in _webhook_objects(entry.get("changes")):
+            value = change.get("value")
+            if not isinstance(value, dict):
                 continue
-            for item in value.get("messages", []):
-                if item.get("type") != "text" or not item.get("id"):
+            metadata = value.get("metadata")
+            if not isinstance(metadata, dict) or str(metadata.get("phone_number_id")) != phone_id:
+                continue
+            for item in _webhook_objects(value.get("messages")):
+                if item.get("type") != "text":
                     continue
-                message_id = str(item["id"])
-                if db.scalar(
+                message_id, sender, text_data = item.get("id"), item.get("from"), item.get("text")
+                body = text_data.get("body") if isinstance(text_data, dict) else None
+                if (
+                    not isinstance(message_id, str)
+                    or not 1 <= len(message_id) <= 200
+                    or not isinstance(sender, str)
+                    or not re.fullmatch(r"[0-9]{5,32}", sender)
+                    or not isinstance(body, str)
+                    or not 1 <= len(body.strip()) <= 10000
+                ):
+                    continue
+                exists = db.scalar(
                     select(InboxMessage.id).where(
-                        InboxMessage.organization_id == integration.organization_id,
+                        InboxMessage.organization_id == organization_id,
                         InboxMessage.provider_message_id == message_id,
                     )
-                ):
+                )
+                if exists:
                     duplicates += 1
                     continue
-                sender = str(item.get("from", "")).strip()
-                text = str(item.get("text", {}).get("body", "")).strip()
-                if not sender or not text:
-                    continue
-                contact = db.scalar(
-                    select(Contact).where(
-                        Contact.organization_id == integration.organization_id,
-                        Contact.phone == sender,
+                conversation = db.scalar(
+                    select(InboxConversation)
+                    .where(
+                        InboxConversation.organization_id == organization_id,
+                        InboxConversation.channel == "whatsapp",
+                        select(InboxMessage.id)
+                        .where(
+                            InboxMessage.conversation_id == InboxConversation.id,
+                            InboxMessage.organization_id == organization_id,
+                            InboxMessage.direction == "inbound",
+                            InboxMessage.channel == "whatsapp",
+                            InboxMessage.sender == sender,
+                            InboxMessage.recipient == phone_id,
+                        )
+                        .exists(),
                     )
+                    .order_by(InboxConversation.updated_at.desc(), InboxConversation.id)
+                    .limit(1)
+                    .with_for_update()
                 )
-                conversation = InboxConversation(
-                    organization_id=integration.organization_id,
-                    contact_id=contact.id if contact else None,
-                    subject="WhatsApp conversation",
-                    status=InboxStatus.open,
-                    unread_count=1,
-                    channel="whatsapp",
-                )
-                db.add(conversation)
-                db.flush()
+                if conversation is None:
+                    contact_id = db.scalar(
+                        select(Contact.id)
+                        .where(
+                            Contact.organization_id == organization_id,
+                            Contact.archived_at.is_(None),
+                            Contact.phone.in_([sender, "+" + sender]),
+                        )
+                        .order_by(Contact.id)
+                        .limit(1)
+                    )
+                    conversation = InboxConversation(
+                        organization_id=organization_id,
+                        contact_id=contact_id,
+                        subject="WhatsApp conversation",
+                        status=InboxStatus.open,
+                        unread_count=0,
+                        channel="whatsapp",
+                    )
+                    db.add(conversation)
+                    db.flush()
+                if conversation.status == InboxStatus.resolved:
+                    conversation.status = InboxStatus.open
+                _register_inbound(conversation, body.strip())
                 db.add(
                     InboxMessage(
-                        organization_id=integration.organization_id,
+                        organization_id=organization_id,
                         conversation_id=conversation.id,
                         sender=sender,
-                        recipient=str(phone_id),
-                        body=text,
+                        recipient=phone_id,
+                        body=body.strip(),
                         direction="inbound",
                         channel="whatsapp",
                         delivery_status="received",
                         provider_message_id=message_id,
                     )
                 )
+                db.flush()
                 accepted += 1
-            for status in value.get("statuses", []):
-                provider_id = str(status.get("id", ""))
-                if not provider_id:
+            for status in _webhook_objects(value.get("statuses")):
+                provider_id, state = status.get("id"), status.get("status")
+                if not isinstance(provider_id, str) or state not in (
+                    "sent",
+                    "delivered",
+                    "read",
+                    "failed",
+                ):
                     continue
                 message = db.scalar(
                     select(InboxMessage).where(
                         InboxMessage.provider_message_id == provider_id,
-                        InboxMessage.organization_id == integration.organization_id,
+                        InboxMessage.organization_id == organization_id,
+                        InboxMessage.channel == "whatsapp",
+                        InboxMessage.direction == "outbound",
                     )
                 )
                 if message is not None:
-                    message.delivery_status = str(status.get("status", "unknown"))[:24]
+                    priority = {"sent": 1, "failed": 2, "delivered": 3, "read": 4}
+                    if priority[str(state)] > priority.get(message.delivery_status, 0):
+                        message.delivery_status = str(state)
     db.commit()
     return {"status": "accepted", "accepted": accepted, "duplicates": duplicates}
 
@@ -753,6 +1141,7 @@ class WidgetConfigBody(BaseModel):
     operating_mode: str = Field(
         default="human_review", pattern="^(human_review|ai_assist|ai_auto_reply)$"
     )
+    enabled: bool | None = None
 
 
 @router.put("/widget")
@@ -760,7 +1149,9 @@ def save_widget_config(
     body: WidgetConfigBody, admin: CsrfAdmin, db: DbSession
 ) -> dict[str, object]:
     row = db.scalar(
-        select(WidgetConfig).where(WidgetConfig.organization_id == admin.organization.id)
+        select(WidgetConfig)
+        .where(WidgetConfig.organization_id == admin.organization.id)
+        .with_for_update()
     )
     if row is None:
         row = WidgetConfig(
@@ -775,6 +1166,15 @@ def save_widget_config(
         row.allowed_domains = body.allowed_domains
         row.welcome_message = body.welcome_message
         row.operating_mode = body.operating_mode
+    if body.enabled is not None and row.enabled != body.enabled:
+        row.enabled = body.enabled
+        record_event(
+            db,
+            admin.organization.id,
+            "website_chat_enabled" if body.enabled else "website_chat_disabled",
+            {},
+            actor_id=admin.user.id,
+        )
     db.commit()
     return {
         "public_id": row.public_id,
@@ -812,14 +1212,32 @@ def _widget(db: DbSession, public_id: str) -> WidgetConfig:
     return row
 
 
-@public_widget_router.post("/{public_id}/sessions")
-def create_widget_session(public_id: str, request: Request, db: DbSession) -> dict[str, object]:
-    widget = _widget(db, public_id)
-    origin = request.headers.get("origin", "")
+def _widget_origin(widget: WidgetConfig, request: Request) -> str:
+    origin = request.headers.get("origin") or f"{request.url.scheme}://{request.url.netloc}"
     if widget.allowed_domains and origin not in widget.allowed_domains:
         raise AppError(
             403, "widget_origin_denied", "This website is not allowed to use the chat widget"
         )
+    return origin
+
+
+def _widget_session(
+    db: DbSession, widget: WidgetConfig, token: str, origin: str, *, lock: bool = False
+) -> WidgetSession:
+    query = select(WidgetSession).where(
+        WidgetSession.widget_id == widget.id,
+        WidgetSession.visitor_token_hash == hashlib.sha256(token.encode()).hexdigest(),
+    )
+    session = db.scalar(query.with_for_update() if lock else query)
+    if session is None or (session.origin and session.origin != origin):
+        raise AppError(401, "invalid_widget_session", "Chat session is invalid")
+    return session
+
+
+@public_widget_router.post("/{public_id}/sessions")
+def create_widget_session(public_id: str, request: Request, db: DbSession) -> dict[str, object]:
+    widget = _widget(db, public_id)
+    origin = _widget_origin(widget, request)
     token = secrets.token_urlsafe(32)
     conversation = InboxConversation(
         organization_id=widget.organization_id,
@@ -855,47 +1273,43 @@ def widget_message(
     public_id: str, session_token: str, body: WidgetMessageBody, request: Request, db: DbSession
 ) -> dict[str, str]:
     widget = _widget(db, public_id)
-    origin = request.headers.get("origin", "")
-    if widget.allowed_domains and origin not in widget.allowed_domains:
-        raise AppError(
-            403, "widget_origin_denied", "This website is not allowed to use the chat widget"
-        )
-    session = db.scalar(
-        select(WidgetSession).where(
-            WidgetSession.widget_id == widget.id,
-            WidgetSession.visitor_token_hash == hashlib.sha256(session_token.encode()).hexdigest(),
-        )
-    )
-    if session is None:
-        raise AppError(401, "invalid_widget_session", "Chat session is invalid")
-    provider_id = f"webchat-{body.client_message_id}" if body.client_message_id else f"webchat-{uuid.uuid4()}"
+    origin = _widget_origin(widget, request)
+    session = _widget_session(db, widget, session_token, origin, lock=True)
+    client_id = body.client_message_id or str(uuid.uuid4())
+    provider_id = f"webchat-{session.id}-{client_id}"
     existing = db.scalar(
         select(InboxMessage).where(
             InboxMessage.organization_id == widget.organization_id,
-            InboxMessage.provider_message_id == provider_id,
+            InboxMessage.conversation_id == session.conversation_id,
+            InboxMessage.provider_message_id.in_((provider_id, f"webchat-{client_id}")),
         )
     )
     if existing is not None:
+        if existing.body != body.message:
+            raise AppError(409, "widget_message_conflict", "This message ID has already been used")
         return {"status": "duplicate"}
     inbound = InboxMessage(
-            organization_id=widget.organization_id,
-            conversation_id=session.conversation_id,
-            sender="visitor",
-            recipient="ATLAS",
-            body=body.message,
-            direction="inbound",
-            channel="webchat",
-            delivery_status="received",
-            provider_message_id=provider_id,
-        )
+        organization_id=widget.organization_id,
+        conversation_id=session.conversation_id,
+        sender="visitor",
+        recipient="ATLAS",
+        body=body.message,
+        direction="inbound",
+        channel="webchat",
+        delivery_status="received",
+        provider_message_id=provider_id,
+    )
     db.add(inbound)
     conversation = db.get(InboxConversation, session.conversation_id)
     if conversation is None:
         raise AppError(404, "conversation_not_found", "Chat conversation not found")
-    conversation.unread_count += 1
-    conversation.updated_at = datetime.utcnow()
+    _register_inbound(conversation, body.message)
     db.commit()
-    if widget.operating_mode == "ai_auto_reply" and not conversation.handoff_requested:
+    if (
+        widget.operating_mode == "ai_auto_reply"
+        and not conversation.handoff_requested
+        and conversation.status != InboxStatus.resolved
+    ):
         try:
             result = evaluate_inbox_draft(
                 db,
@@ -906,13 +1320,17 @@ def widget_message(
                 get_chat_client(db, widget.organization_id),
             )
             if result["grounding"] == "grounded":
+                draft = json.loads(str(result["response"]))
+                reply = draft.get("body") if isinstance(draft, dict) else None
+                if not isinstance(reply, str) or not reply.strip():
+                    raise ValueError("The generated reply is empty")
                 db.add(
                     InboxMessage(
                         organization_id=widget.organization_id,
                         conversation_id=conversation.id,
                         sender="ATLAS AI",
                         recipient="visitor",
-                        body=str(result["response"]),
+                        body=reply.strip()[:10000],
                         direction="outbound",
                         channel="webchat",
                         delivery_status="delivered",
@@ -921,10 +1339,13 @@ def widget_message(
                 )
             else:
                 conversation.handoff_requested = True
-                conversation.handoff_reason = str(result.get("reason") or "AI could not answer safely")
+                conversation.handoff_reason = str(
+                    result.get("reason") or "AI could not answer safely"
+                )
                 conversation.status = InboxStatus.pending
             db.commit()
         except Exception:
+            db.rollback()
             conversation.handoff_requested = True
             conversation.handoff_reason = "AI service unavailable"
             conversation.status = InboxStatus.pending
@@ -937,23 +1358,11 @@ def widget_messages(
     public_id: str, session_token: str, request: Request, db: DbSession
 ) -> list[dict[str, object]]:
     widget = _widget(db, public_id)
-    origin = request.headers.get("origin", "")
-    if widget.allowed_domains and origin not in widget.allowed_domains:
-        raise AppError(
-            403, "widget_origin_denied", "This website is not allowed to use the chat widget"
-        )
-    session = db.scalar(
-        select(WidgetSession).where(
-            WidgetSession.widget_id == widget.id,
-            WidgetSession.visitor_token_hash == hashlib.sha256(session_token.encode()).hexdigest(),
-        )
-    )
-    if session is None:
-        raise AppError(401, "invalid_widget_session", "Chat session is invalid")
+    session = _widget_session(db, widget, session_token, _widget_origin(widget, request))
     messages = db.scalars(
         select(InboxMessage)
         .where(InboxMessage.conversation_id == session.conversation_id)
-        .order_by(InboxMessage.created_at)
+        .order_by(InboxMessage.created_at, InboxMessage.id)
     ).all()
     return [
         {

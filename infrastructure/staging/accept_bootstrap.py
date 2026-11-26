@@ -25,6 +25,7 @@ PROJECT = "atlas-bootstrap-proof"
 FORBIDDEN_PROJECTS = {"atlas", "atlas-staging", "infrastructure", "titan", "legalstats"}
 SECRET_KEYS = {
     "STAGING_SECRET_KEY",
+    "STAGING_CREDENTIAL_ENCRYPTION_KEYS",
     "STAGING_POSTGRES_PASSWORD",
     "STAGING_N8N_ENCRYPTION_KEY",
     "ATLAS_BOOTSTRAP_PASSWORD",
@@ -88,6 +89,7 @@ def write_env() -> dict[str, str]:
     values = {
         "STAGING_ENVIRONMENT": "production",
         "STAGING_SECRET_KEY": secrets.token_hex(32),
+        "STAGING_CREDENTIAL_ENCRYPTION_KEYS": f"stage-01={secrets.token_hex(32)}",
         "STAGING_POSTGRES_USER": "atlas",
         "STAGING_POSTGRES_PASSWORD": secrets.token_hex(24),
         "STAGING_POSTGRES_DB": "atlas",

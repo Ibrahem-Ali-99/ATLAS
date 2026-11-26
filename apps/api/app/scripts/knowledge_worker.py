@@ -1,4 +1,5 @@
 """Run the durable knowledge-ingestion worker until interrupted."""
+
 from __future__ import annotations
 
 import signal

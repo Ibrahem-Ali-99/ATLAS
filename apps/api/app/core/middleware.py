@@ -1,11 +1,40 @@
+import re
 import time
 import uuid
 
 import structlog
 from starlette.datastructures import MutableHeaders
+from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = structlog.get_logger(__name__)
+_WIDGET_SESSION = re.compile(r"^(/api/v1/widget/[^/]+/sessions/)[^/]+")
+_CAMPAIGN_PREFERENCE = re.compile(r"^(/api/v1/campaign-preferences/)[^/]+")
+
+
+class AtlasCorsMiddleware:
+    def __init__(self, app: ASGIApp, workspace_origins: list[str]) -> None:
+        self.workspace = CORSMiddleware(
+            app,
+            allow_origins=workspace_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["Content-Type", "X-CSRF-Token"],
+            expose_headers=["X-Request-ID"],
+        )
+        self.widget = CORSMiddleware(
+            app,
+            allow_origins=["*"],
+            allow_methods=["GET", "POST"],
+            allow_headers=["Content-Type"],
+        )
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["path"].startswith("/api/v1/widget/"):
+            # These routes use the widget's origin list and a visitor token.
+            await self.widget(scope, receive, send)
+            return
+        await self.workspace(scope, receive, send)
 
 
 class RequestContextMiddleware:
@@ -34,7 +63,8 @@ class RequestContextMiddleware:
             await self.app(scope, receive, send_with_request_id)
         finally:
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
-            path = str(scope.get("path", ""))
+            path = _WIDGET_SESSION.sub(r"\1{session_token}", str(scope.get("path", "")))
+            path = _CAMPAIGN_PREFERENCE.sub(r"\1{preference_token}", path)
             fields = {
                 "method": scope.get("method"),
                 "path": path,

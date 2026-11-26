@@ -24,7 +24,7 @@ from app.domains.automation.models import (
 )
 from app.domains.automation.signatures import open_webhook_secret, sign_webhook
 from app.domains.billing.service import enforce_limit
-from app.domains.crm.models import Contact, Inquiry, Lead
+from app.domains.crm.models import Contact, Inquiry, Lead, LeadStatus, Opportunity
 from app.domains.provenance.origin import Origin
 from app.integrations.language import get_chat_client
 from app.integrations.n8n import post_webhook
@@ -85,6 +85,7 @@ def stage_lead_created(
                     agent_run_id=agent_run_id,
                     payload={
                         "lead_id": str(lead_id),
+                        "new_status": lead.status.value if lead is not None else None,
                         "workflow_definition_id": str(definition.id),
                         "definition": definition.definition,
                     },
@@ -113,12 +114,11 @@ def stage_lead_status_changed(
             WorkflowDefinition.definition["trigger"].as_string() == "lead_status_changed",
         )
     ).all()
+    transition_id = uuid.uuid4()
     for definition in definitions:
         key = hashlib.sha256(
-            f"definition:{definition.id}:lead:{lead_id}:status:{previous_status}:{new_status}".encode()
+            f"definition:{definition.id}:lead-status:{transition_id}".encode()
         ).hexdigest()
-        if db.scalar(select(WorkflowRun).where(WorkflowRun.idempotency_key == key)) is not None:
-            continue
         db.add(
             WorkflowRun(
                 organization_id=organization_id,
@@ -155,12 +155,11 @@ def stage_opportunity_changed(
             WorkflowDefinition.definition["trigger"].as_string() == "opportunity_stage_changed",
         )
     ).all()
+    transition_id = uuid.uuid4()
     for definition in definitions:
         key = hashlib.sha256(
-            f"definition:{definition.id}:opportunity:{opportunity_id}:stage:{previous_stage}:{new_stage}".encode()
+            f"definition:{definition.id}:opportunity-stage:{transition_id}".encode()
         ).hexdigest()
-        if db.scalar(select(WorkflowRun).where(WorkflowRun.idempotency_key == key)) is not None:
-            continue
         db.add(
             WorkflowRun(
                 organization_id=organization_id,
@@ -238,7 +237,11 @@ def dispatch_workflow(db: Session, organization_id: uuid.UUID, run_id: uuid.UUID
     if _execute_local_actions(db, run):
         return
     settings = get_settings()
-    key = db.scalar(select(WebhookKey).where(WebhookKey.organization_id == organization_id))
+    key = db.scalar(
+        select(WebhookKey).where(
+            WebhookKey.organization_id == organization_id, WebhookKey.revoked_at.is_(None)
+        )
+    )
     if not settings.n8n_lead_webhook_url or key is None:
         _finish(db, run.id, WorkflowStatus.not_configured, "n8n_not_configured", None)
         return
@@ -275,60 +278,184 @@ def dispatch_workflow(db: Session, organization_id: uuid.UUID, run_id: uuid.UUID
 
 
 def _execute_local_actions(db: Session, run: WorkflowRun) -> bool:
-    definition = run.payload.get("definition") if isinstance(run.payload, dict) else None
-    actions = definition.get("actions", []) if isinstance(definition, dict) else []
+    definition = run.payload.get("definition")
+    if not isinstance(definition, dict):
+        return False
+    actions = definition.get("actions", [])
     if not actions:
         return False
     from app.domains.agents.models import AgentRun, RunStatus
     from app.domains.approvals.models import ActionType
     from app.domains.approvals.service import create_approval
+    from app.domains.audit.service import record_event
+    from app.domains.crm.service import update_lead
 
-    lead = db.get(Lead, run.lead_id) if run.lead_id else None
+    run_id = run.id
+    organization_id = run.organization_id
+    steps: list[dict[str, str]] = []
+    current_action = "load_context"
+    lead = (
+        db.scalar(
+            select(Lead).where(
+                Lead.id == run.lead_id,
+                Lead.organization_id == organization_id,
+                Lead.archived_at.is_(None),
+            )
+        )
+        if run.lead_id
+        else None
+    )
+
+    def fail(code: str) -> bool:
+        db.rollback()
+        run.payload = {
+            **run.payload,
+            "steps": [
+                *(
+                    {**step, "status": "rolled_back"} if step["status"] == "completed" else step
+                    for step in steps
+                ),
+                {"type": current_action, "status": "failed"},
+            ],
+        }
+        run.status = WorkflowStatus.failed
+        run.last_error = code
+        db.commit()
+        return True
+
+    opportunity = None
+    opportunity_id = run.payload.get("opportunity_id")
+    if isinstance(opportunity_id, str):
+        try:
+            parsed_id = uuid.UUID(opportunity_id)
+        except ValueError:
+            return fail("workflow_opportunity_invalid")
+        opportunity = db.scalar(
+            select(Opportunity).where(
+                Opportunity.id == parsed_id,
+                Opportunity.organization_id == organization_id,
+                Opportunity.archived_at.is_(None),
+            )
+        )
+        if opportunity is None:
+            return fail("workflow_opportunity_missing")
+
+    trigger = definition.get("trigger")
+    if trigger in {"lead_created", "lead_status_changed"} and lead is None:
+        return fail("workflow_lead_missing")
+    results = []
+    conditions = definition.get("conditions", [])
+    for condition in conditions:
+        value = (
+            run.payload.get("new_status") or (lead.status.value if lead is not None else None)
+            if condition["field"] == "lead_status"
+            else run.payload.get("new_stage")
+        )
+        passes = value is not None and (
+            (value == condition["value"]) == (condition["operator"] == "equals")
+        )
+        results.append(passes)
+        steps.append({"type": "condition", "status": "matched" if passes else "not_matched"})
+    if conditions:
+        matches = any(results) if definition.get("condition_mode") == "any" else all(results)
+        path = run.payload.get("branch") or ("matched" if matches else "otherwise")
+        run.payload = {**run.payload, "branch": path}
+        steps.append({"type": "branch", "status": path})
+        actions = actions if path == "matched" else definition.get("otherwise_actions", [])
+        if not actions:
+            run.payload = {**run.payload, "steps": steps, "outcome": "skipped"}
+            run.status = WorkflowStatus.completed
+            db.commit()
+            return True
+
+    approval_id = None
     for action in actions:
         if not isinstance(action, dict):
-            continue
+            return fail("invalid_workflow_action")
         action_type = action.get("type")
-        if action_type == "create_task":
-            if (
-                db.scalar(select(WorkflowTask).where(WorkflowTask.workflow_run_id == run.id))
-                is None
-            ):
-                contact_id = lead.contact_id if lead is not None else None
-                db.add(
-                    WorkflowTask(
-                        organization_id=run.organization_id,
-                        workflow_run_id=run.id,
-                        lead_id=run.lead_id,
-                        contact_id=contact_id,
-                        assignee_user_id=lead.owner_user_id if lead is not None else None,
-                        title=str(action.get("title") or "Workflow follow-up"),
-                        description=str(action.get("description"))
-                        if action.get("description")
-                        else None,
-                        status="open",
-                    )
+        current_action = str(action_type)
+        if action_type == "require_approval":
+            if run.payload.get("review", {}).get("decision") != "approve":
+                steps.append({"type": "require_approval", "status": "awaiting_approval"})
+                run.payload = {
+                    **run.payload,
+                    "steps": steps,
+                    "outcome": "awaiting_approval",
+                    "review_note": action.get("note"),
+                }
+                run.status = WorkflowStatus.accepted
+                db.commit()
+                return True
+        elif action_type == "update_lead":
+            if lead is None:
+                return fail("workflow_lead_missing")
+            target_status = action.get("status")
+            if not isinstance(target_status, str):
+                return fail("workflow_lead_status_invalid")
+            try:
+                status = LeadStatus(target_status)
+                previous = lead.status
+                update_lead(db, organization_id, lead.id, {"status": status}, commit=False)
+            except ValueError:
+                return fail("workflow_lead_status_invalid")
+            except AppError as exc:
+                return fail(exc.code)
+            if previous != status:
+                record_event(
+                    db,
+                    organization_id,
+                    "workflow_lead_updated",
+                    {
+                        "workflow_run_id": str(run_id),
+                        "lead_id": str(lead.id),
+                        "previous_status": previous.value,
+                        "status": status.value,
+                    },
                 )
+        elif action_type == "create_task":
+            title = action.get("title", "Workflow follow-up")
+            if not isinstance(title, str) or not 1 <= len(title.strip()) <= 200:
+                return fail("workflow_task_title_invalid")
+            priority = action.get("priority", "normal")
+            due_hours = action.get("due_in_hours")
+            if priority not in ("low", "normal", "high", "urgent") or (
+                due_hours is not None and (type(due_hours) is not int or not 1 <= due_hours <= 8760)
+            ):
+                return fail("workflow_task_configuration_invalid")
+            db.add(
+                WorkflowTask(
+                    organization_id=organization_id,
+                    workflow_run_id=run_id,
+                    lead_id=lead.id if lead is not None else None,
+                    contact_id=lead.contact_id if lead is not None else None,
+                    assignee_user_id=lead.owner_user_id if lead is not None else None,
+                    title=title.strip(),
+                    description=str(action["description"]) if action.get("description") else None,
+                    status="open",
+                    priority=priority,
+                    due_at=datetime.now(UTC) + timedelta(hours=due_hours) if due_hours else None,
+                    opportunity_id=opportunity.id if opportunity is not None else None,
+                )
+            )
         elif action_type == "prepare_follow_up":
             if lead is None or lead.contact_id is None:
-                _finish(db, run.id, WorkflowStatus.failed, "follow_up_contact_missing", None)
-                return True
-            contact = db.get(Contact, lead.contact_id)
-            inquiry = db.scalar(
-                select(Inquiry).where(
-                    Inquiry.organization_id == run.organization_id, Inquiry.lead_id == lead.id
+                return fail("follow_up_contact_missing")
+            contact = db.scalar(
+                select(Contact).where(
+                    Contact.id == lead.contact_id,
+                    Contact.organization_id == organization_id,
+                    Contact.archived_at.is_(None),
                 )
+            )
+            inquiry = db.scalar(
+                select(Inquiry)
+                .where(Inquiry.organization_id == run.organization_id, Inquiry.lead_id == lead.id)
+                .order_by(Inquiry.created_at.desc(), Inquiry.id.desc())
+                .limit(1)
             )
             if contact is None or not contact.email or inquiry is None:
-                _finish(db, run.id, WorkflowStatus.failed, "follow_up_recipient_unavailable", None)
-                return True
-            existing = db.scalar(
-                select(AgentRun).where(
-                    AgentRun.organization_id == run.organization_id,
-                    AgentRun.inquiry_id == inquiry.id,
-                    AgentRun.status == RunStatus.awaiting_approval,
-                )
-            )
-            if existing is None:
+                return fail("follow_up_recipient_unavailable")
+            if approval_id is None:
                 try:
                     draft = get_chat_client(db, run.organization_id).complete(
                         "You draft concise customer follow-up emails. "
@@ -338,18 +465,19 @@ def _execute_local_actions(db: Session, run: WorkflowRun) -> bool:
                         "Write a factual, helpful follow-up.",
                     )
                     parsed = json.loads(draft)
+                    if not isinstance(parsed, dict):
+                        raise ValueError("Expected a follow-up draft object")
                     subject = str(parsed.get("subject") or f"Following up on {lead.title}")
                     body = str(
                         parsed.get("body") or "We would be glad to continue the conversation."
                     )
                 except (AppError, ValueError, TypeError, json.JSONDecodeError) as exc:
-                    _finish(db, run.id, WorkflowStatus.failed, "follow_up_drafting_failed", None)
                     logger.warning(
                         "workflow_follow_up_draft_failed",
-                        workflow_run_id=str(run.id),
+                        workflow_run_id=str(run_id),
                         error_code=getattr(exc, "code", "draft_error"),
                     )
-                    return True
+                    return fail("follow_up_drafting_failed")
                 agent_run = AgentRun(
                     organization_id=run.organization_id,
                     inquiry_id=inquiry.id,
@@ -359,7 +487,7 @@ def _execute_local_actions(db: Session, run: WorkflowRun) -> bool:
                 )
                 db.add(agent_run)
                 db.flush()
-                create_approval(
+                approval = create_approval(
                     db,
                     organization_id=run.organization_id,
                     run_id=agent_run.id,
@@ -368,13 +496,19 @@ def _execute_local_actions(db: Session, run: WorkflowRun) -> bool:
                     payload={
                         "lead_id": str(lead.id),
                         "contact_id": str(contact.id),
-                        "recipient": contact.email,
+                        "to": contact.email,
+                        "recipient_snapshot": contact.email,
                         "subject": subject,
                         "body": body,
                     },
                     position=0,
                     commit=False,
                 )
+                approval_id = str(approval.id)
+        else:
+            return fail("invalid_workflow_action")
+        steps.append({"type": current_action, "status": "completed"})
+    run.payload = {**run.payload, "steps": steps, "approval_id": approval_id}
     run.status = WorkflowStatus.completed
     run.last_error = None
     db.commit()
@@ -382,7 +516,12 @@ def _execute_local_actions(db: Session, run: WorkflowRun) -> bool:
 
 
 def complete_lead_callback(
-    db: Session, organization_id: uuid.UUID, workflow_run_id: uuid.UUID, lead_id: uuid.UUID
+    db: Session,
+    organization_id: uuid.UUID,
+    workflow_run_id: uuid.UUID,
+    lead_id: uuid.UUID,
+    *,
+    commit: bool = True,
 ) -> dict[str, Any]:
     updated = db.execute(
         update(WorkflowRun)
@@ -400,11 +539,12 @@ def complete_lead_callback(
         )
         .values(status=WorkflowStatus.completed, last_error=None)
     )
-    db.commit()
+    if commit:
+        db.commit()
     changed = updated.rowcount if isinstance(updated, CursorResult) else 0
     if changed == 0:
         run = db.get(WorkflowRun, workflow_run_id)
-        if run is None or run.organization_id != organization_id:
+        if run is None or run.organization_id != organization_id or run.lead_id != lead_id:
             return {"status": "ignored"}
         return {"status": run.status.value, "workflow_run_id": str(run.id)}
     logger.info(
@@ -426,6 +566,8 @@ def recover_workflows(db: Session) -> None:
         )
     )
     for run in uncertain:
+        if run.payload.get("outcome") == "awaiting_approval":
+            continue
         missing_callback = run.status == WorkflowStatus.accepted
         run.status = WorkflowStatus.needs_attention
         run.last_error = "callback_missing" if missing_callback else "execution_uncertain"

@@ -7,23 +7,37 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+/.pytest-tmp/
 .ruff_cache/
 .mypy_cache/
+/.uv-cache/
 .coverage
 htmlcov/
 *.log
 
 node_modules/
 .next/
+/.next-*/
+/apps/web/.next-*/
 out/
 dist/
 *.tsbuildinfo
+/apps/web/playwright-report/
+/apps/web/test-results/
+/apps/web/review/
+/apps/web/ui-shots/
+/review/
 
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
+/.cursor/mcp.json
 var/
+*.sqlite
+*.sqlite3
+*.dump
+*.sql.gz
 infrastructure/staging/local-ca.crt
 infrastructure/staging/accept-ca.crt
 infrastructure/staging/backup-proof-ca.crt

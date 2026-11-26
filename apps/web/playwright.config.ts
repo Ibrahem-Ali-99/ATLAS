@@ -25,10 +25,11 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
     baseURL: `http://127.0.0.1:${e2eWebPort}`,
     trace: "retain-on-failure",
+    actionTimeout: 20_000,
   },
   globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",
-  webServer: {
+  webServer: process.env.ATLAS_E2E_EXTERNAL_WEB === "1" ? undefined : {
     command: e2eProduction
       ? `npm run build && npm run start -- --hostname 127.0.0.1 --port ${e2eWebPort}`
       : `npm run dev -- --hostname 127.0.0.1 --port ${e2eWebPort}`,

@@ -15,8 +15,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { createContact, deleteContact, listCompanies, listContacts, listInquiries, listLeads, restoreContact, updateContact } from "@/lib/records-api";
+import { createContact, getContact, deleteContact, listCompanies, listContacts, listInquiries, listLeads, restoreContact, updateContact } from "@/lib/records-api";
 import { blankToNull, type Contact } from "@/lib/records";
+import { getMarketingConsent, recordMarketingConsent, type ConsentStatus } from "@/lib/campaigns";
 
 const schema = z.object({
   full_name: z.string().trim().min(1, "Name is required").max(200),
@@ -38,16 +39,16 @@ function payload(values: FormValues) {
   };
 }
 
-type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string }) => void;
+type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string | null }) => void;
 
 export function ContactsPanel({ organizationId, selectedId: requestedId, onNavigate }: { organizationId: string; selectedId?: string | null; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [includeArchived, setIncludeArchived] = useState(Boolean(requestedId));
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(requestedId ?? null);
+  const selectedId = requestedId ?? null;
   const contacts = useQuery({
     queryKey: ["contacts", organizationId, query, page, includeArchived],
     queryFn: () => listContacts(organizationId, { q: query, page, includeArchived }),
@@ -70,7 +71,13 @@ export function ContactsPanel({ organizationId, selectedId: requestedId, onNavig
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  const selected = contacts.data?.items.find((item) => item.id === selectedId) ?? null;
+  const selectedInList = contacts.data?.items.find((item) => item.id === selectedId);
+  const record = useQuery({
+    queryKey: ["contacts", organizationId, "record", selectedId],
+    queryFn: () => getContact(organizationId, selectedId ?? ""),
+    enabled: Boolean(selectedId && !selectedInList),
+  });
+  const selected = selectedInList ?? record.data ?? null;
   const companyName = (companyId: string | null) =>
     companies.data?.items.find((company) => company.id === companyId)?.name ?? "—";
 
@@ -123,11 +130,11 @@ export function ContactsPanel({ organizationId, selectedId: requestedId, onNavig
           onNavigate={onNavigate}
           onSaved={() => void queryClient.invalidateQueries({ queryKey: ["contacts", organizationId] })}
           onDeleted={() => {
-            setSelectedId(null);
+            onNavigate({ tab: "contacts", id: null });
             void queryClient.invalidateQueries({ queryKey: ["contacts", organizationId] });
           }}
         />
-      ) : (
+      ) : record.isError ? <RequestError error={record.error} /> : (
         <aside className="rounded-[10px] bg-muted p-6 text-sm text-muted-foreground">
           Select a contact to view and edit it.
         </aside>
@@ -138,7 +145,7 @@ export function ContactsPanel({ organizationId, selectedId: requestedId, onNavig
         open={open}
         onOpenChange={setOpen}
         onCreated={(contact) => {
-          setSelectedId(contact.id);
+          onNavigate({ tab: "contacts", id: contact.id });
           void queryClient.invalidateQueries({ queryKey: ["contacts", organizationId] });
         }}
       />
@@ -240,7 +247,55 @@ function ContactEditor({
         <Button type="submit" form="contact-edit" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
         {contact.archived_at ? <Button type="button" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button> : <ConfirmButton label="Archive" confirmLabel="Confirm archive" pendingLabel="Archiving…" pending={remove.isPending} onConfirm={() => remove.mutate()} />}
       </div>
+      {!contact.archived_at && contact.email ? (
+        <ContactConsent key={contact.email} organizationId={organizationId} contactId={contact.id} />
+      ) : null}
     </aside>
+  );
+}
+
+function ContactConsent({ organizationId, contactId }: { organizationId: string; contactId: string }) {
+  const client = useQueryClient();
+  const key = ["marketing-consent", organizationId, contactId] as const;
+  const [status, setStatus] = useState<ConsentStatus | "">("");
+  const [source, setSource] = useState("");
+  const consent = useQuery({ queryKey: key, queryFn: () => getMarketingConsent(organizationId, contactId) });
+  const save = useMutation({
+    mutationFn: (decision: ConsentStatus) => recordMarketingConsent(organizationId, contactId, decision, source.trim()),
+    onSuccess: (record) => {
+      client.setQueryData(key, record);
+      void client.invalidateQueries({ queryKey: ["campaign-preview", organizationId] });
+      setStatus("");
+      setSource("");
+    },
+  });
+  return (
+    <section aria-label="Marketing consent" className="mt-5 space-y-3 border-t border-border pt-4">
+      <h3 className="text-sm font-semibold">Marketing consent</h3>
+      {consent.isPending ? <Skeleton className="h-5" /> : null}
+      {consent.error ? <RequestError error={consent.error} /> : null}
+      {consent.data ? (
+        <p className="break-words text-sm text-muted-foreground">
+          {consent.data.status === "granted" ? "Granted" : consent.data.status === "revoked" ? "Revoked" : "No consent recorded"}
+          {consent.data.source ? ` · ${consent.data.source === "email_changed" ? "Email address changed" : consent.data.source}` : ""}
+        </p>
+      ) : null}
+      <form className="grid gap-2" onSubmit={(event) => { event.preventDefault(); if (status && source.trim()) save.mutate(status); }}>
+        <label className="grid gap-1 text-sm">Consent decision
+          <select className="h-9 rounded-md border border-input bg-background px-2" value={status} onChange={(event) => setStatus(event.target.value as ConsentStatus | "")} required>
+            <option value="">Choose a decision</option>
+            <option value="granted">Record consent</option>
+            <option value="revoked">Record withdrawal</option>
+          </select>
+        </label>
+        <label className="grid gap-1 text-sm">Consent source
+          <Input value={source} onChange={(event) => setSource(event.target.value)} placeholder="Where the decision was recorded" required maxLength={80} />
+        </label>
+        <Button type="submit" variant="outline" className="justify-self-start" disabled={!status || !source.trim() || save.isPending}>Save consent</Button>
+      </form>
+      {save.error ? <RequestError error={save.error} /> : null}
+      {save.isSuccess ? <p role="status" className="text-sm text-muted-foreground">Marketing consent updated.</p> : null}
+    </section>
   );
 }
 
@@ -260,7 +315,7 @@ function ContactFields({
       <div className="grid gap-1.5">
         <Label htmlFor={`${formId}-name`}>Name</Label>
         <Input id={`${formId}-name`} {...form.register("full_name")} />
-        {form.formState.errors.full_name ? <p className="text-sm text-red-300">{form.formState.errors.full_name.message}</p> : null}
+        {form.formState.errors.full_name ? <p className="text-sm text-destructive">{form.formState.errors.full_name.message}</p> : null}
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor={`${formId}-email`}>Email</Label>

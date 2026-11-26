@@ -68,7 +68,15 @@
     ".next-overview-capture-final/types/**/*.ts",
     ".next-overview-capture-final/dev/types/**/*.ts",
     ".next-crm-acceptance/types/**/*.ts",
-    ".next-crm-acceptance/dev/types/**/*.ts"
+    ".next-crm-acceptance/dev/types/**/*.ts",
+    ".next-release-check/types/**/*.ts",
+    ".next-release-check/dev/types/**/*.ts",
+    ".next-release-check-fresh/types/**/*.ts",
+    ".next-release-check-fresh/dev/types/**/*.ts",
+    ".next-release-check-browser/types/**/*.ts",
+    ".next-release-check-browser/dev/types/**/*.ts",
+    ".next-release-check-browser-2/types/**/*.ts",
+    ".next-release-check-browser-2/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

@@ -12,6 +12,7 @@ from app.integrations.language import get_chat_client, get_embedding_client
 from tests.ai_clients import HashEmbeddingClient
 from tests.factories import PASSWORD, make_membership, make_organization, make_user
 from tests.helpers import login
+from tests.test_assistant import _process_ingestion
 from tests.test_crm import _csrf, _org
 
 
@@ -130,6 +131,7 @@ def test_capability_inventory_and_records_do_not_call_the_model(
         headers=headers,
     )
     assert uploaded.status_code == 201, uploaded.text
+    _process_ingestion()
     ready = client.get(f"/api/v1/organizations/{org}/documents/{uploaded.json()['id']}")
     assert ready.json()["status"] == "ready"
     after_index = embedder.calls
@@ -205,6 +207,7 @@ def test_follow_up_uses_conversation_and_retrieves_again(client: TestClient, db:
         headers=headers,
     )
     assert uploaded.status_code == 201, uploaded.text
+    _process_ingestion()
     first = _ask(client, org, headers, "What does Cedar & Pine Logistics offer?")
     assert first["message"]["content"] == "Grounded answer from the supplied company records."
     assert first["message"]["sources"] == []

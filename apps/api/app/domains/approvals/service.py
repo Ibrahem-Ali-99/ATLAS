@@ -34,6 +34,15 @@ def create_approval(
     commit: bool = True,
 ) -> Approval:
     run = db.get(AgentRun, run_id)
+    settings = get_settings()
+    if action_type == ActionType.prepare_customer_response:
+        payload = {**payload, "delivery_mode": settings.email_mode}
+    if action_type == ActionType.request_appointment:
+        from app.integrations.google_calendar import active_connection
+
+        calendar = active_connection(db, organization_id)
+        if calendar is not None:
+            payload = {**payload, "provider_calendar_id": calendar.calendar_id}
     approval = Approval(
         organization_id=organization_id,
         run_id=run_id,
@@ -44,7 +53,7 @@ def create_approval(
         payload_hash=payload_hash(payload),
         status=ApprovalStatus.pending,
         origin=run.origin if run is not None else Origin.unknown,
-        expires_at=datetime.now(UTC) + timedelta(hours=get_settings().approval_ttl_hours),
+        expires_at=datetime.now(UTC) + timedelta(hours=settings.approval_ttl_hours),
     )
     db.add(approval)
     if commit:
@@ -199,14 +208,20 @@ def _execute_external(db: Session, approval: Approval) -> dict[str, Any]:
     from app.domains.automation.intents import dispatch_intent, stage_intent
 
     payload = dict(approval.payload)
+    settings = get_settings()
+    if (
+        approval.action_type == ActionType.prepare_customer_response
+        and payload.get("delivery_mode", "sandbox") != settings.email_mode
+    ):
+        raise AppError(
+            409, "delivery_mode_changed", "Request approval in the current delivery mode"
+        )
     payload["lead_id"] = str(_resolve_lead(db, approval, payload))
     intent = stage_intent(db, approval, payload)
     approval.status = ApprovalStatus.executing
     db.commit()
     if approval.action_type == ActionType.prepare_customer_response:
-        from app.core.config import get_settings
-
-        if get_settings().environment != "test":
+        if settings.environment != "test":
             return {
                 "status": "queued",
                 "intent_id": str(intent.id),

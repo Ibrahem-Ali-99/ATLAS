@@ -43,6 +43,9 @@ def open_integration_secret(
     try:
         key_id, nonce, ciphertext = stored.removeprefix(_CREDENTIAL_PREFIX).split(":", 2)
         key = dict(_credential_keyring()).get(key_id)
+        if key is None and key_id == "legacy-secret-key":
+            # Existing development seals can still be read after installing a keyring.
+            key = hashlib.sha256(get_settings().secret_key.encode()).digest()
         if key is None:
             raise ValueError("unknown credential key")
         return AESGCM(key).decrypt(_unb64(nonce), _unb64(ciphertext), key_id.encode()).decode()

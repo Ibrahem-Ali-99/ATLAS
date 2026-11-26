@@ -23,10 +23,11 @@ from app.domains.automation.models import (
 from app.domains.crm import service as crm
 from app.domains.crm.models import Contact, InteractionKind, Lead
 from app.domains.inbox.models import InboxMessage
+from app.domains.provenance.origin import Origin
 from app.integrations.calendar import Slot, calendar_adapter
 from app.integrations.email import OutboundEmail, normalize_recipient, send_email
 from app.integrations.outcomes import DeliveryFailed, OutcomeUncertain
-from app.integrations.whatsapp import send_whatsapp_text
+from app.integrations.whatsapp import normalize_phone, send_whatsapp_text
 
 _MAX_ATTEMPTS = 2
 
@@ -218,10 +219,16 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
     if not isinstance(body, str) or not body.strip():
         raise AppError(409, "approval_invalid", "The action payload no longer matches the approval")
     if intent.action_type == ActionType.prepare_customer_response:
+        settings = get_settings()
+        if payload.get("delivery_mode", "sandbox") != settings.email_mode:
+            raise AppError(
+                409, "delivery_mode_changed", "Request approval in the current delivery mode"
+            )
         lead = db.scalar(
             select(Lead).where(
                 Lead.id == lead_id,
                 Lead.organization_id == intent.organization_id,
+                Lead.archived_at.is_(None),
             )
         )
         if lead is None:
@@ -238,9 +245,12 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
             select(Contact).where(
                 Contact.id == contact_id,
                 Contact.organization_id == intent.organization_id,
+                Contact.archived_at.is_(None),
             )
         )
         channel = str(payload.get("channel", "email"))
+        if channel not in {"email", "whatsapp"}:
+            raise AppError(422, "unsupported_reply_channel", "This reply channel is unavailable")
         if contact is None:
             raise AppError(
                 422,
@@ -256,22 +266,29 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
             )
         if lead.contact_id != contact.id:
             raise AppError(409, "recipient_not_owned", "The recipient is not linked to this lead")
-        if not isinstance(snapshot, str) or normalize_recipient(snapshot) != normalize_recipient(
-            contact_value
-        ):
+        normalize = normalize_phone if channel == "whatsapp" else normalize_recipient
+        if not isinstance(snapshot, str) or normalize(snapshot) != normalize(contact_value):
             raise AppError(
                 409,
                 "recipient_changed",
                 "The approved recipient changed; review the action again",
             )
-        if normalize_recipient(recipient) != normalize_recipient(snapshot):
+        if normalize(recipient) != normalize(snapshot):
             raise AppError(
                 409,
                 "recipient_changed",
                 "The approved recipient changed; review the action again",
             )
         recipient = contact_value
-        if get_settings().email_mode == "live":
+        if settings.email_mode == "live" and (
+            intent.origin != Origin.operational
+            or lead.origin != Origin.operational
+            or contact.origin != Origin.operational
+        ):
+            raise AppError(
+                409, "live_record_required", "Live delivery requires operational CRM records"
+            )
+        if channel == "email" and settings.email_mode == "live":
             from app.integrations.email_delivery_policy import live_delivery_eligibility
 
             eligibility = live_delivery_eligibility(
@@ -287,31 +304,34 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
                 )
         subject = payload.get("subject")
         if channel == "whatsapp":
-            last_inbound = payload.get("last_inbound_at")
             template_name = payload.get("template_name")
-            if isinstance(last_inbound, str):
-                try:
-                    inbound_at = datetime.fromisoformat(last_inbound)
-                except ValueError as exc:
-                    raise AppError(
-                        409, "approval_invalid", "The WhatsApp conversation timestamp is invalid"
-                    ) from exc
-                if inbound_at.tzinfo is None:
-                    inbound_at = inbound_at.replace(tzinfo=UTC)
-                if datetime.now(UTC) - inbound_at > timedelta(hours=24) and not isinstance(
-                    template_name, str
-                ):
-                    raise AppError(
-                        409,
-                        "whatsapp_template_required",
-                        "A WhatsApp template is required outside the customer-service window",
-                    )
+            latest = db.scalar(
+                select(InboxMessage)
+                .where(
+                    InboxMessage.organization_id == intent.organization_id,
+                    InboxMessage.conversation_id == _uuid(payload.get("conversation_id")),
+                    InboxMessage.channel == "whatsapp",
+                    InboxMessage.direction == "inbound",
+                )
+                .order_by(InboxMessage.created_at.desc(), InboxMessage.id)
+                .limit(1)
+            )
+            if latest is None or normalize_phone(latest.sender) != normalize_phone(recipient):
+                raise AppError(409, "whatsapp_recipient_mismatch", "The WhatsApp sender changed")
+            if datetime.now(UTC) - latest.created_at > timedelta(hours=24) and not (
+                isinstance(template_name, str) and template_name.strip()
+            ):
+                raise AppError(
+                    409,
+                    "whatsapp_template_required",
+                    "A WhatsApp template is required outside the customer-service window",
+                )
             provider_message_id = send_whatsapp_text(
                 db,
                 intent.organization_id,
                 recipient,
                 body.strip()[:4000],
-                template_name=template_name if isinstance(template_name, str) else None,
+                template_name=template_name.strip() if isinstance(template_name, str) else None,
                 template_language=str(payload.get("template_language", "en_US")),
             )
             return {
@@ -359,6 +379,7 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
             "body": body.strip()[:4000],
             "starts_at": starts_at.isoformat(),
             "ends_at": ends_at.isoformat(),
+            "provider_calendar_id": payload.get("provider_calendar_id"),
         }
     raise AppError(422, "invalid_action", "This action type is not supported")
 
@@ -402,8 +423,11 @@ def _succeed(
         raise AppError(404, "not_found", "Resource not found")
     try:
         result = _record_success(db, intent, plan)
+    except OutcomeUncertain as exc:
+        _fail(db, intent_id, attempt_id, AttemptOutcome.uncertain, "outcome_uncertain")
+        raise AppError(409, "needs_attention", "The Calendar event could not be confirmed") from exc
     except AppError as exc:
-        if plan.get("kind") == "email":
+        if plan.get("kind") in {"email", "whatsapp"}:
             _fail(db, intent_id, attempt_id, AttemptOutcome.uncertain, "outcome_uncertain")
             raise AppError(
                 409, "needs_attention", "The external outcome could not be determined"
@@ -510,6 +534,7 @@ def _record_success(db: Session, intent: ExecutionIntent, plan: dict[str, Any]) 
             starts_at=starts_at,
             ends_at=ends_at,
             origin=intent.origin,
+            provider_calendar_id=plan.get("provider_calendar_id"),
         ),
     )
     interaction = crm.add_interaction(
@@ -520,7 +545,7 @@ def _record_success(db: Session, intent: ExecutionIntent, plan: dict[str, Any]) 
         {"kind": InteractionKind.call, "body": plan["body"], "origin": intent.origin},
         commit=False,
     )
-    intent.external_id = str(booking.id)
+    intent.external_id = booking.provider_event_id or str(booking.id)
     return {
         "lead_id": str(lead_id),
         "interaction_id": str(interaction.id),
@@ -551,7 +576,13 @@ def _record_failure_side_effect(db: Session, intent: ExecutionIntent, error: str
                 if intent.status == IntentStatus.needs_attention
                 else EmailStatus.failed
             ),
-            mode="sandbox",
+            mode=(
+                "whatsapp"
+                if payload.get("channel") == "whatsapp"
+                else "live"
+                if payload.get("delivery_mode") == "live"
+                else "sandbox"
+            ),
             origin=intent.origin,
             error=error,
         )

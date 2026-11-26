@@ -4,26 +4,52 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
-import { DataScopeControl } from "@/components/data-scope";
+import { WorkflowStudio } from "./workflow-studio";
 import { RequestError } from "@/components/request-error";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cancelBooking, getAutomations, type AutomationSnapshot, type WorkflowRun } from "@/lib/automations";
-import type { DataScope } from "@/lib/provenance";
+import { calendarExportUrl, cancelBooking, getAutomations, type AutomationSnapshot, type WorkflowRun } from "@/lib/automations";
 import { useWorkspace } from "@/lib/use-workspace";
-import { createWorkflowDefinition, createWorkflowTask, deleteWorkflowDefinition, listWorkflowDefinitions, listWorkflowTasks, updateWorkflowTask, workflowAction } from "@/lib/workflow-definitions";
+import { createWorkflowTask, listWorkflowTasks, updateWorkflowTask } from "@/lib/workflow-definitions";
 
-export function WorkflowsScreen() {
+export function WorkflowsScreen({ requestedWorkflow, requestedRun, showArchived }: {
+  requestedWorkflow?: string; requestedRun?: string; showArchived?: boolean;
+}) {
+  const { organizationId, role } = useWorkspace();
+  const [showActivity, setShowActivity] = useState(false);
+  return (
+    <div className="mx-auto w-full max-w-[1450px] min-w-0 space-y-6">
+      {organizationId && role === "admin" ? <WorkflowStudio key={organizationId} organizationId={organizationId} requestedWorkflow={requestedWorkflow} requestedRun={requestedRun} showArchived={showArchived} /> : (
+        <header>
+          <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Track workflow tasks and activity. A workspace administrator manages automation.</p>
+        </header>
+      )}
+      <WorkflowTaskList />
+      <details onToggle={(event) => setShowActivity(event.currentTarget.open)} className="rounded-xl border border-border bg-card px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium">Built-in automation activity</summary>
+        {showActivity ? <BuiltInWorkflows /> : null}
+      </details>
+    </div>
+  );
+}
+function BuiltInWorkflows() {
   const workspace = useWorkspace();
   const organizationId = workspace.organizationId;
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [scope, setScope] = useState<DataScope>("operational");
+  const scope = "operational";
   const automations = useQuery({
     queryKey: ["automations", organizationId, scope],
     queryFn: () => getAutomations(organizationId ?? "", scope),
     enabled: Boolean(organizationId),
+    staleTime: 0,
+    refetchInterval: (query) => query.state.data?.emails.some(
+      ({ state }) => state === "queued" || state === "sending",
+    ) ? 2_000 : false,
   });
   const cancel = useMutation({
     mutationFn: (bookingId: string) => cancelBooking(organizationId ?? "", bookingId),
@@ -39,9 +65,9 @@ export function WorkflowsScreen() {
   }
   return (
     <WorkflowsBody
+      key={organizationId}
       data={automations.data}
-      scope={scope}
-      onScope={setScope}
+      organizationId={organizationId}
       kind={kind}
       onKind={setKind}
       status={status}
@@ -56,8 +82,7 @@ export function WorkflowsScreen() {
 
 function WorkflowsBody({
   data,
-  scope,
-  onScope,
+  organizationId,
   kind,
   onKind,
   status,
@@ -68,8 +93,7 @@ function WorkflowsBody({
   onCancel,
 }: {
   data: AutomationSnapshot;
-  scope: DataScope;
-  onScope: (scope: DataScope) => void;
+  organizationId: string;
   kind: string | null;
   onKind: (kind: string | null) => void;
   status: string | null;
@@ -86,18 +110,8 @@ function WorkflowsBody({
   const searched = visible.filter((run) => `${run.kind} ${run.lead_title ?? ""} ${run.company_name ?? ""} ${run.status}`.toLowerCase().includes(search.trim().toLowerCase()));
   const focus = data.automations.find((item) => item.kind === kind);
   return (
-    <div className="flex w-full min-w-0 flex-col gap-6">
-      <header>
-        <h1 className="text-3xl font-semibold leading-tight text-foreground">Workflows</h1>
-        <p className="mt-3 max-w-4xl text-sm text-muted-foreground">
-          Read-only workflow topology and observable execution outcomes.
-        </p>
-        <p className="mt-2 max-w-4xl text-xs leading-5 text-subtle">{configurationCopy(data)}</p>
-        <DataScopeControl value={scope} onChange={onScope} />
-      </header>
-      <WorkflowTopology data={data} />
-      {isAdmin ? <WorkflowBuilder /> : null}
-      <WorkflowTaskList />
+    <div className="mx-auto flex w-full max-w-[1240px] min-w-0 flex-col gap-5">
+      <p className="mt-4 text-sm text-muted-foreground">{configurationCopy(data)}</p>
       <nav className="flex flex-wrap gap-2 border-b border-border pb-3" aria-label="Automation workspace views">
         {([ ["overview", "Overview"], ["approvals", "Approvals"], ["history", "Execution history"], ["email", "Email activity"] ] as const).map(([id, label]) => (
           <button key={id} type="button" className={`rounded-md px-3 py-2 text-sm ${view === id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`} aria-pressed={view === id} onClick={() => setView(id)}>{label}</button>
@@ -105,7 +119,7 @@ function WorkflowsBody({
       </nav>
       {view === "overview" ? <section className="grid gap-4 lg:grid-cols-2">
         {data.automations.map((automation) => (
-          <article key={automation.kind} className="flex min-h-52 flex-col rounded-[10px] bg-muted px-6 py-6">
+          <article key={automation.kind} className="flex min-h-52 flex-col rounded-lg border border-border bg-card px-5 py-5 shadow-sm transition hover:border-primary/40">
             <div className="flex items-start justify-between gap-4">
               <h2 className="text-[21px] text-foreground">{automation.name}</h2>
               <p className={`text-[11px] uppercase tracking-[0.12em] ${automation.configured ? "text-success" : "text-warning"}`}>
@@ -198,24 +212,27 @@ function WorkflowsBody({
         <section className="rounded-[10px] bg-muted px-5 py-6">
           <h2 className="text-lg text-foreground">Calendar bookings</h2>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            {data.calendar_provider === "simulation"
-              ? "These are simulated ATLAS records. Cancel removes the stored booking. No external calendar is contacted."
-              : `Bookings use ${data.calendar_provider}.`}
+            Download a workspace reservation to import it into your calendar. Cancelling a Google Calendar booking also removes its event.
           </p>
           <ul className="mt-4 space-y-3">
             {data.bookings.map((booking) => (
               <li key={booking.id} className="flex flex-wrap items-center justify-between gap-3 text-sm">
                 <div>
-                  <p className="text-foreground">{booking.status}</p>
+                  <p className="capitalize text-foreground">{booking.status} · {booking.provider === "google" ? "Google Calendar" : "ATLAS workspace"}</p>
                   <p className="text-xs text-subtle">
                     {new Date(booking.starts_at).toLocaleString()} – {new Date(booking.ends_at).toLocaleString()}
                   </p>
                 </div>
-                {isAdmin && booking.status === "booked" ? (
+                {booking.status === "booked" ? <div className="flex flex-wrap gap-2">
+                  {booking.provider !== "google" ? <Button asChild variant="outline">
+                    <a href={calendarExportUrl(organizationId, booking.id)}>Download calendar event</a>
+                  </Button> : null}
+                  {isAdmin ? (
                   <Button type="button" variant="outline" disabled={cancelPending} onClick={() => onCancel(booking.id)}>
                     Cancel booking
                   </Button>
-                ) : null}
+                  ) : null}
+                </div> : null}
               </li>
             ))}
           </ul>
@@ -226,106 +243,107 @@ function WorkflowsBody({
   );
 }
 
-function WorkflowBuilder() {
-  const workspace = useWorkspace();
-  const id = workspace.organizationId ?? "";
-  const queryClient = useQueryClient();
-  const definitions = useQuery({ queryKey: ["workflow-definitions", id], queryFn: () => listWorkflowDefinitions(id), enabled: Boolean(id) });
-  const [name, setName] = useState("");
-  const [trigger, setTrigger] = useState("lead_created");
-  const [action, setAction] = useState("update_lead");
-  const [message, setMessage] = useState("");
-  const create = useMutation({ mutationFn: () => createWorkflowDefinition(id, { name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "workflow", definition: { trigger, actions: [{ type: action }] } }), onSuccess: () => { setName(""); setMessage("Workflow saved as a draft."); void queryClient.invalidateQueries({ queryKey: ["workflow-definitions", id] }); }, onError: (e) => setMessage(e instanceof Error ? e.message : "Workflow could not be saved.") });
-  return <section className="rounded-xl border border-border bg-card p-5" aria-label="Workflow builder" data-testid="workflow-builder"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-base font-semibold text-foreground">Workflow builder</h2><p className="mt-1 text-sm text-muted-foreground">Create a validated draft from a trigger and action. Activation remains administrator-controlled.</p></div><span className="text-xs text-muted-foreground">{definitions.data?.length ?? 0} saved</span></div><div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto_auto]" ><input aria-label="Workflow name" className="h-10 rounded-md border border-input bg-background px-3 text-sm" placeholder="Follow up new leads" value={name} onChange={(e) => setName(e.target.value)} /><select aria-label="Workflow trigger" value={trigger} onChange={(e) => setTrigger(e.target.value)}><option value="lead_created">Lead created</option><option value="lead_status_changed">Lead status changed</option><option value="schedule">Scheduled</option></select><select aria-label="Workflow action" value={action} onChange={(e) => setAction(e.target.value)}><option value="update_lead">Update CRM lead</option><option value="create_task">Create task</option><option value="prepare_follow_up">Prepare follow-up for approval</option></select><Button size="sm" onClick={() => create.mutate()} disabled={!name.trim() || create.isPending}>Create draft</Button></div>{message ? <p className="mt-3 text-xs text-muted-foreground" role="status">{message}</p> : null}<div className="mt-4 space-y-2">{(definitions.data ?? []).map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted p-3 text-sm"><span><strong>{item.name}</strong><span className="ml-2 text-muted-foreground">v{item.version} · {item.active ? "Active" : "Draft"}</span></span><div className="flex gap-2">{item.active ? <Button size="sm" variant="outline" onClick={() => void workflowAction(id, item.id, "pause").then(() => queryClient.invalidateQueries({ queryKey: ["workflow-definitions", id] }))}>Pause</Button> : <Button size="sm" onClick={() => void workflowAction(id, item.id, "activate").then(() => queryClient.invalidateQueries({ queryKey: ["workflow-definitions", id] }))}>Activate</Button>}<Button size="sm" variant="ghost" onClick={() => void workflowAction(id, item.id, "duplicate").then(() => queryClient.invalidateQueries({ queryKey: ["workflow-definitions", id] }))}>Duplicate</Button><Button size="sm" variant="ghost" onClick={() => { if (window.confirm("Delete this workflow?")) void deleteWorkflowDefinition(id, item.id).then(() => queryClient.invalidateQueries({ queryKey: ["workflow-definitions", id] })); }}>Delete</Button></div></div>)}</div></section>;
-}
+const selectClass = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
 
 function WorkflowTaskList() {
   const { organizationId } = useWorkspace();
-  const tasks = useQuery({ queryKey: ["workflow-tasks", organizationId], queryFn: () => listWorkflowTasks(organizationId ?? ""), enabled: Boolean(organizationId) });
   const queryClient = useQueryClient();
+  const queryKey = ["workflow-tasks", organizationId] as const;
+  const tasks = useQuery({
+    queryKey,
+    queryFn: () => listWorkflowTasks(organizationId ?? ""),
+    enabled: Boolean(organizationId),
+    refetchInterval: 10_000,
+  });
   const [title, setTitle] = useState("");
-  const create = useMutation({ mutationFn: () => createWorkflowTask(organizationId ?? "", { title }), onSuccess: () => { setTitle(""); void queryClient.invalidateQueries({ queryKey: ["workflow-tasks", organizationId] }); } });
-  return <section className="rounded-xl border border-border bg-card p-5" aria-label="Workflow tasks"><div className="flex items-center justify-between"><h2 className="text-base font-semibold text-foreground">Tasks</h2><span className="text-xs text-muted-foreground">{tasks.data?.length ?? 0}</span></div><div className="mt-3 flex gap-2"><input aria-label="New task title" className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm" placeholder="Add a follow-up task" value={title} onChange={(e) => setTitle(e.target.value)} /><Button size="sm" onClick={() => create.mutate()} disabled={!title.trim() || create.isPending}>Add task</Button></div>{tasks.isError ? <RequestError error={tasks.error} /> : null}{tasks.isPending ? <Skeleton className="mt-3 h-12 w-full" /> : null}{tasks.data?.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">No tasks yet.</p> : <div className="mt-3 space-y-2">{tasks.data?.map((task) => <article key={task.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted p-3 text-sm"><div><p className="font-medium text-foreground">{task.title}</p><p className="text-xs text-muted-foreground">{task.source === "manual" ? "Manual task" : "Workflow task"}{task.priority ? ` · ${task.priority}` : ""}{task.lead_id ? ` · Lead ${task.lead_id.slice(0, 8)}` : ""}</p></div><select aria-label={`Task status for ${task.title}`} value={task.status} onChange={(e) => void updateWorkflowTask(organizationId ?? "", task.id, e.target.value).then(() => queryClient.invalidateQueries({ queryKey: ["workflow-tasks", organizationId] }))}><option value="open">To Do</option><option value="in_progress">In Progress</option><option value="completed">Completed</option></select></article>)}</div>}</section>;
-}
+  const create = useMutation({
+    mutationFn: () => createWorkflowTask(organizationId ?? "", { title: title.trim() }),
+    onSuccess: () => { setTitle(""); void queryClient.invalidateQueries({ queryKey }); },
+  });
+  const change = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) => updateWorkflowTask(organizationId ?? "", id, status),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey }); },
+  });
 
-function WorkflowTopology({ data }: { data: AutomationSnapshot }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)]" aria-label="Workflow topology" data-testid="workflow-topology">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">Workflow topology</h2>
-          <p className="mt-1 text-sm text-muted-foreground">These connected stages reflect the workflows currently exposed by ATLAS. Editing definitions is not enabled in this environment.</p>
-        </div>
-        <span className="rounded-full border border-border bg-muted px-2.5 py-1 text-xs text-subtle">Read only</span>
+    <section className="rounded-xl border border-border bg-card p-5" aria-label="Workflow tasks">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">Tasks</h2>
+        {tasks.data ? <Badge variant="secondary">{tasks.data.length}</Badge> : null}
       </div>
-      <div className="relative mt-5 grid gap-3 md:grid-cols-3 md:items-center md:gap-8">
-        <svg className="pointer-events-none absolute inset-x-[16%] top-1/2 hidden h-8 w-[68%] -translate-y-1/2 md:block" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true">
-          <path d="M0 5 H100" fill="none" stroke="currentColor" strokeDasharray="2 2" strokeWidth="0.7" className="text-primary/60" />
-          <path d="M33 2 L37 5 L33 8 M63 2 L67 5 L63 8" fill="none" stroke="currentColor" strokeWidth="0.7" className="text-primary" />
-        </svg>
-        {[
-          ["trigger", "CRM event", "Lead created"],
-          ["process", "AI processing", "Lead intake"],
-          ["outcome", "Human review", "Approval or execution"],
-        ].map(([key, eyebrow, label]) => (
-          <div key={key} className="contents">
-            <div className="rounded-lg border border-border bg-muted p-4" data-testid={`workflow-node-${key}`}>
-              <p className="text-[11px] uppercase tracking-[0.14em] text-primary">{eyebrow}</p>
-              <p className="mt-2 text-sm font-medium text-foreground">{label}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{nodeDetail(data, key)}</p>
-            </div>
-          </div>
-        ))}
-      </div>
+      <form className="mt-3 flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); if (title.trim()) create.mutate(); }}>
+        <Input aria-label="New task title" className="min-w-0 flex-1" placeholder="Add a follow-up task" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} required />
+        <Button size="sm" type="submit" disabled={!title.trim() || create.isPending}>Add task</Button>
+      </form>
+      {tasks.error || create.error ? <div className="mt-3"><RequestError error={tasks.error ?? create.error} /></div> : null}
+      {tasks.isPending ? <Skeleton className="mt-3 h-12 w-full" /> : null}
+      {tasks.data?.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">No tasks yet.</p> : null}
+      {tasks.data?.length ? (
+        <ul className="mt-3 space-y-2">
+          {tasks.data.map((task) => (
+            <li key={task.id} className="rounded-lg border border-border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-medium">{task.title}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {task.source === "manual" ? "Manual task" : "Workflow task"}{task.priority ? ` · ${task.priority}` : ""}
+                    {task.lead_id ? <> · <Link className="text-primary underline" href={`/crm?tab=leads&id=${task.lead_id}`}>Open lead</Link></> : null}
+                  </p>
+                </div>
+                <select aria-label={`Task status for ${task.title}`} className={selectClass} value={task.status} disabled={change.isPending} onChange={(event) => change.mutate({ id: task.id, status: event.target.value })}>
+                  <option value="open">To do</option><option value="in_progress">In progress</option><option value="completed">Completed</option>
+                </select>
+              </div>
+              {change.error && change.variables?.id === task.id ? <div className="mt-2"><RequestError error={change.error} /></div> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
 }
 
-function nodeDetail(data: AutomationSnapshot, key: string): string {
-  if (key === "trigger") return `${data.runs.length} recorded run${data.runs.length === 1 ? "" : "s"}`;
-  if (key === "process") return `${data.automations.length} configured process${data.automations.length === 1 ? "" : "es"}`;
-  const approvals = data.automations.reduce((total, item) => total + item.awaiting_review, 0);
-  return `${approvals} approval${approvals === 1 ? "" : "s"} requiring review`;
-}
 
 function EmailActivitySection({ emails }: { emails: AutomationSnapshot["emails"] }) {
   if (emails.length === 0) {
     return (
-      <section className="rounded-[10px] bg-muted px-5 py-6">
+      <section className="rounded-[10px] bg-muted px-5 py-6" aria-label="Email activity">
         <h2 className="text-[22px] text-foreground">Email activity</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Approved customer responses will appear here. ATLAS sends only through the local sandbox mailbox.
+          Approved customer responses will appear here with their delivery status.
         </p>
       </section>
     );
   }
   return (
-    <section className="rounded-[10px] bg-muted px-5 py-6">
+    <section className="rounded-[10px] bg-muted px-5 py-6" aria-label="Email activity">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-[22px] text-foreground">Email activity</h2>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            A durable history of approved sandbox messages. SMTP acceptance is not inbox delivery.
+            Review approved messages and their recorded delivery attempts.
           </p>
         </div>
-        <span className="text-xs uppercase tracking-[0.12em] text-subtle">Mailpit sandbox</span>
+        {emails.every((email) => email.mode === "sandbox") ? (
+          <span className="text-xs uppercase tracking-[0.12em] text-subtle">Mailpit sandbox</span>
+        ) : null}
       </div>
       <ul className="mt-5 divide-y divide-border/50">
         {emails.map((email) => (
-          <li key={email.intent_id ?? email.id} className="py-4 first:pt-0 last:pb-0">
+          <li key={email.intent_id ?? email.id} data-approval-id={email.approval_id ?? undefined} className="py-4 first:pt-0 last:pb-0">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-foreground">{email.subject ?? "Customer response"}</p>
                 <p className="mt-1 truncate text-xs text-muted-foreground">To {email.recipient ?? "recipient unavailable"}</p>
               </div>
               <span className={`text-xs uppercase tracking-[0.1em] ${emailStateClass(email.state)}`}>
-                {emailStateLabel(email.state)}
+                {emailStateLabel(email.state, email.mode)}
               </span>
             </div>
             <div className="mt-3 grid gap-2 text-xs text-subtle sm:grid-cols-3">
               <span>{email.attempt_count ?? 0} attempt{email.attempt_count === 1 ? "" : "s"}</span>
               <span>Queued {email.queued_at ? new Date(email.queued_at).toLocaleString() : "—"}</span>
-              <span>{email.provider_message_id ? "Accepted by SMTP server" : "No provider receipt yet"}</span>
+              <span>{email.provider_message_id ? (email.mode === "whatsapp" ? "Accepted by WhatsApp" : "Accepted by SMTP server") : "No provider receipt yet"}</span>
             </div>
             {email.error ? <p className="mt-2 text-xs leading-5 text-destructive">{email.error}</p> : null}
             {email.attempts && email.attempts.length > 0 ? (
@@ -347,13 +365,13 @@ function EmailActivitySection({ emails }: { emails: AutomationSnapshot["emails"]
   );
 }
 
-function emailStateLabel(state?: string | null): string {
+function emailStateLabel(state?: string | null, mode?: string): string {
   return ({
     awaiting_approval: "Awaiting approval",
     approved: "Approved",
     queued: "Queued",
     sending: "Sending",
-    accepted: "Accepted by SMTP",
+    accepted: mode === "whatsapp" ? "Accepted by WhatsApp" : "Accepted by SMTP",
     failed: "Failed",
     needs_attention: "Needs attention",
   } as Record<string, string>)[state ?? ""] ?? "Recorded";
@@ -413,7 +431,7 @@ function configurationCopy(data: AutomationSnapshot): string {
   const calendar =
     data.calendar_provider === "simulation"
       ? "Calendar bookings are simulated in ATLAS."
-      : `Calendar provider: ${data.calendar_provider}.`;
+      : "Google Calendar is connected for new approved appointments.";
   const n8n = data.n8n_configured
     ? "A lead webhook URL is configured."
     : "The lead webhook URL is empty, so new runs are stored as not configured.";

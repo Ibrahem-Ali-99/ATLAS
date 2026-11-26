@@ -57,18 +57,21 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     return undefined as T;
   }
 
-  const payload = (await response.json().catch(() => null)) as (T & ErrorEnvelope) | null;
+  const unreadable = Symbol("unreadable response");
+  const payload = await response.json().catch(() => unreadable) as
+    (T & ErrorEnvelope) | null | typeof unreadable;
   if (!response.ok) {
+    const error = payload === unreadable ? undefined : payload?.error;
     throw new ApiError(
       response.status,
-      payload?.error?.code ?? "request_failed",
-      payload?.error?.message ?? "Request failed",
+      error?.code ?? "request_failed",
+      error?.message ?? "Request failed",
     );
   }
-  if (payload === null) {
+  if (payload === unreadable) {
     throw new ApiError(response.status, "invalid_response", "The API returned an unreadable response.");
   }
-  return payload;
+  return payload as T;
 }
 
 export async function getSession(): Promise<AuthSession> {
@@ -89,6 +92,14 @@ export async function login(input: { email: string; password: string }): Promise
 export async function logout(): Promise<void> {
   await apiFetch<void>("/api/v1/auth/logout", { method: "POST" });
   setCsrfToken(null);
+}
+
+export function requestPasswordReset(email: string): Promise<{ detail: string }> {
+  return apiFetch("/api/v1/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
+}
+
+export function confirmPasswordReset(token: string, password: string): Promise<void> {
+  return apiFetch("/api/v1/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) });
 }
 
 export function getHealth(): Promise<HealthStatus> {

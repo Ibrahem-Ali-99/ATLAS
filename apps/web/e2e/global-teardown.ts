@@ -24,21 +24,23 @@ function stopRecordedProcess(pid: number): Promise<void> {
 
 export default async function globalTeardown(): Promise<void> {
   const apiPort = process.env.ATLAS_E2E_API_PORT ?? "8011";
-  const pidFile = path.resolve(process.cwd(), `../../var/e2e-api-${apiPort}.pid`);
+  const databaseName = process.env.ATLAS_E2E_DATABASE_NAME ?? "";
+  if (!/^atlas_e2e_[0-9a-f]{32}$/.test(databaseName)) return;
+  const pidFile = path.resolve(process.cwd(), `../../var/${databaseName}.pid`);
   try {
     const pid = Number(readFileSync(pidFile, "utf8"));
-    if (!Number.isFinite(pid) || pid <= 0) {
-      return;
-    }
-    await stopRecordedProcess(pid);
+    if (Number.isInteger(pid) && pid > 0) await stopRecordedProcess(pid);
+    unlinkSync(pidFile);
   } catch {
     // The API process was already stopped.
   }
+  const mailpitFile = path.resolve(process.cwd(), `../../var/e2e-mailpit-${apiPort}.name`);
+  const mailpitHttpFile = path.resolve(process.cwd(), `../../var/e2e-mailpit-${apiPort}.http-port`);
   try {
-    const name = readFileSync(path.resolve(process.cwd(), "../../var/e2e-mailpit.name"), "utf8").trim();
+    const name = readFileSync(mailpitFile, "utf8").trim();
     if (name) execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
-    unlinkSync(path.resolve(process.cwd(), "../../var/e2e-mailpit.name"));
-    unlinkSync(path.resolve(process.cwd(), "../../var/e2e-mailpit.http-port"));
+    unlinkSync(mailpitFile);
+    unlinkSync(mailpitHttpFile);
   } catch {
     // The disposable Mailpit was already removed.
   }
