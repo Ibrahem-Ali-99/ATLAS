@@ -24,7 +24,7 @@ export function ProductWindow({
           <span className="size-2 rounded-full bg-[var(--border-strong)]" />
           <span className="size-2 rounded-full bg-[var(--border-strong)]" />
         </span>
-        <span className="truncate text-xs text-muted-foreground">{capture.title} · Atlas Demo</span>
+        <span className="truncate text-xs text-muted-foreground">{capture.frame ? `${capture.title} · ${capture.frame}` : capture.title}</span>
       </div>
       <div className="relative aspect-[16/10] bg-[#111318]">
         <Image

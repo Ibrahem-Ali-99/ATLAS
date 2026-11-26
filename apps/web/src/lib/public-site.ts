@@ -53,10 +53,12 @@ export type ProductCapture = {
   width: number;
   height: number;
   /**
-   * True only after a 1440×900 capture of the redesigned workspace replaces
-   * the file. The current portfolio files are not that set.
+   * True when this file is a 1440×900 capture of the redesigned Harbor workspace.
+   * The assistant frame stays false until that workstream replaces it.
    */
   releaseReady: boolean;
+  /** Name shown in the product-window chrome. */
+  frame?: string;
 };
 
 export function landscapeCropFraction(width: number, height: number): number {
@@ -77,26 +79,30 @@ export function isReleaseCapture(capture: ProductCapture): boolean {
   );
 }
 
-const recordNote = "Figures in the capture are stored records for that workspace.";
+const recordNote = "Figures in the capture are stored Harbor & Co. records.";
+const harbor = { width: 1440, height: 900, releaseReady: true, frame: "Harbor & Co." } as const;
 
 export const captures = {
   overview: {
     src: "/portfolio/01-overview.png",
     title: "Overview",
-    alt: "ATLAS overview showing the approval queue and lead pipeline for Atlas Demo.",
-    caption: `Overview for Atlas Demo. ${recordNote}`,
-    width: 1440,
-    height: 975,
-    releaseReady: false,
+    alt: "ATLAS overview for Harbor & Co., with company, lead, inquiry, and approval counts from stored records.",
+    caption: `Overview for the fictional Harbor & Co. workspace. ${recordNote}`,
+    ...harbor,
   },
   crm: {
     src: "/portfolio/02-crm.png",
     title: "CRM",
-    alt: "ATLAS CRM with customer records for the Atlas Demo workspace.",
-    caption: "CRM companies, contacts, leads, and inquiries for one organization. Harbor & Co. is fictional.",
-    width: 1440,
-    height: 1388,
-    releaseReady: false,
+    alt: "ATLAS CRM company list for Harbor & Co., including Brine & Barrel, Lumen Freight, and Harbor & Co.",
+    caption: "Companies for one organization. Harbor & Co. is fictional, and the rows are stored CRM records.",
+    ...harbor,
+  },
+  inbox: {
+    src: "/portfolio/14-inbox.png",
+    title: "Inbox",
+    alt: "ATLAS inbox thread from Mina Patel about cold storage at the north pier, with an unsent reply draft.",
+    caption: "One inbox thread for Harbor & Co. The reply on screen is a draft. Nothing in this capture was sent.",
+    ...harbor,
   },
   lead: {
     src: "/portfolio/06-crm-lead.png",
@@ -110,11 +116,9 @@ export const captures = {
   knowledge: {
     src: "/portfolio/03-knowledge.png",
     title: "Knowledge",
-    alt: "ATLAS knowledge library for the Atlas Demo workspace.",
-    caption: "Uploaded documents are indexed for the organization that owns them.",
-    width: 1440,
-    height: 4470,
-    releaseReady: false,
+    alt: "ATLAS knowledge library for Harbor & Co., with the bonded warehousing note marked ready.",
+    caption: "Service notes are stored for Harbor & Co. Search uses those files. A paid embedding service is not called.",
+    ...harbor,
   },
   assistant: {
     src: "/portfolio/04-assistant.png",
@@ -138,21 +142,23 @@ export const captures = {
   workflows: {
     src: "/portfolio/07-workflows.png",
     title: "Workflows",
-    alt: "ATLAS workflow studio with triggers, conditions, and recorded runs.",
-    caption:
-      "Workflows record the branch that ran. An empty n8n URL is reported as not configured, and sandbox mail stays in the local mailbox.",
-    width: 1440,
-    height: 976,
-    releaseReady: false,
+    alt: "ATLAS workflow canvas for a qualified-lead follow-up, with a matching path and an otherwise path.",
+    caption: "The qualified-lead workflow is inactive in the demonstration. The canvas shows both paths. A preview saves nothing.",
+    ...harbor,
   },
   analytics: {
     src: "/portfolio/08-analytics.png",
     title: "Analytics",
-    alt: "ATLAS analytics for stored lead and activity records.",
-    caption: "Analytics reads stored rows. A conversion rate is omitted when there are no won or lost leads.",
-    width: 1440,
-    height: 1250,
-    releaseReady: false,
+    alt: "ATLAS analytics for Harbor & Co. showing 20 companies, 50 leads, and 40 open inquiries from stored rows.",
+    caption: "Analytics reads stored rows for the selected period. Amounts in different currencies are not added together.",
+    ...harbor,
+  },
+  integrations: {
+    src: "/portfolio/15-integrations.png",
+    title: "Integrations",
+    alt: "ATLAS integrations for the Harbor & Co. demonstration, with simulated email and calendar and no live connections.",
+    caption: "The demonstration lists supported services. Simulated and not-connected states are labeled. No live provider is called.",
+    ...harbor,
   },
   monitoring: {
     src: "/portfolio/09-monitoring.png",
@@ -193,8 +199,8 @@ export const captures = {
 } as const satisfies Record<string, ProductCapture>;
 
 /**
- * Surfaces the release pass will photograph at 1440×900 once the redesigned
- * workspace and Harbor demonstration rows are the ones on screen.
+ * Product surfaces photographed at 1440×900. The assistant frame is still the
+ * previous file and stays off the site until that workstream replaces it.
  */
 export const releaseShotPlan = [
   "Overview",
@@ -218,14 +224,12 @@ export const homepageStages = {
 export const demoSteps: ProductCapture[] = [
   captures.overview,
   captures.crm,
-  captures.lead,
+  captures.inbox,
   captures.knowledge,
   captures.assistant,
-  captures.runs,
   captures.workflows,
   captures.analytics,
-  captures.rejected,
-  captures.mobile,
+  captures.integrations,
 ];
 
 export const capabilities = [

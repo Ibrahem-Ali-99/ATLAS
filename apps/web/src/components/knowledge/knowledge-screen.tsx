@@ -149,7 +149,7 @@ function KnowledgeWorkspace({
   const comparison = useQuery({ queryKey: ["knowledge-evaluation-comparison", organizationId], queryFn: () => compareKnowledgeEvaluations(organizationId), enabled: view === "evaluation" });
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-6">
+    <div className="flex w-full min-w-0 max-w-full flex-col gap-6 overflow-x-hidden">
       <PageHeader title="Company knowledge" actions={
         <Button onClick={() => { upload.reset(); setUploadOpen(true); }}><UploadCloud size={16} /> Upload document</Button>
       }>
@@ -201,9 +201,9 @@ function KnowledgeWorkspace({
       </Dialog>
       {upload.isSuccess ? <p role="status" className="text-sm text-success">Document uploaded. The library shows its indexing status.</p> : null}
       {view === "library" ? (
-        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]">
-          <section aria-label="Document library" className="min-w-0 rounded-xl border border-border bg-card">
-            <div className="flex flex-wrap items-center gap-2 border-b border-border p-4 [&>select]:h-9 [&>select]:rounded-md [&>select]:border [&>select]:border-border [&>select]:bg-background [&>select]:px-2 [&>select]:text-sm">
+        <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]">
+          <section aria-label="Document library" className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-card">
+            <div className="flex w-full min-w-0 flex-wrap items-center gap-2 border-b border-border p-4 [&>select]:h-9 [&>select]:max-w-full [&>select]:rounded-md [&>select]:border [&>select]:border-border [&>select]:bg-background [&>select]:px-2 [&>select]:text-sm">
               <Input className="min-w-40 flex-1" aria-label="Search document library" placeholder="Search by document name" value={documentName} onChange={(event) => { setDocumentName(event.target.value); setPage(1); }} />
               <select aria-label="Filter by processing status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as DocumentStatus | ""); setPage(1); }}>
                 <option value="">All statuses</option>
@@ -232,7 +232,7 @@ function KnowledgeWorkspace({
           </div>
         ) : null}
         {documents.data && documents.data.items.length > 0 ? (
-          <div className="overflow-x-auto">
+          <div className="min-w-0 overflow-x-auto">
           <Table aria-label="Knowledge documents">
             <TableHeader>
               <TableRow>
@@ -398,7 +398,7 @@ function DocumentRow({
   return (
     <TableRow className={selected ? "bg-accent/40" : undefined}>
       <TableCell>
-        <button type="button" aria-pressed={selected} className="flex min-w-[12rem] items-start gap-2 break-words text-left font-medium hover:text-primary" onClick={onSelect}>
+        <button type="button" aria-pressed={selected} className="flex min-w-0 items-start gap-2 break-words text-left font-medium hover:text-primary" onClick={onSelect}>
           <FileText className="mt-0.5 shrink-0 text-primary" size={16} /> {document.title}
         </button>
         <p className="mt-1 pl-6 text-xs text-muted-foreground">{Math.ceil(document.byte_size / 1024)} KB</p>
@@ -417,7 +417,7 @@ function DocumentRow({
       </TableCell>
       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{new Date(document.updated_at).toLocaleDateString()}</TableCell>
       <TableCell>
-        <div className="flex flex-nowrap gap-2">
+        <div className="flex flex-wrap gap-2 sm:flex-nowrap">
           {archived ? (
             <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button>
           ) : (

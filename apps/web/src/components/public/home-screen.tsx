@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button";
 import {
   architectureSteps,
   capabilities,
+  captures,
   evaluationEvidence,
   homepageStages,
   integrationGroups,
   isReleaseCapture,
   reportingRules,
   useCases,
+  type ProductCapture,
 } from "@/lib/public-site";
 
 export function HomeScreen() {
@@ -93,6 +95,25 @@ export function HomeScreen() {
       </section>
 
       <Feature
+        id="inbox"
+        eyebrow="Inbox"
+        title="Email, chat, and WhatsApp in one queue."
+        body="A thread keeps the customer, the company, and the draft together. Sending still waits for approval. The capture shows a Harbor & Co. conversation that has not left the workspace."
+        capture={captures.inbox}
+        fallback={null}
+      />
+
+      <Feature
+        id="knowledge"
+        eyebrow="Knowledge"
+        title="The library the assistant is allowed to read."
+        body="PDF and text files are stored, chunked, and embedded for that organization. In the demonstration those files are short service notes, and search does not call a paid embedding service."
+        capture={captures.knowledge}
+        fallback={null}
+        flip
+      />
+
+      <Feature
         id="assistant"
         eyebrow="Intelligent assistant"
         title="Answers stay tied to the records you uploaded."
@@ -103,12 +124,15 @@ export function HomeScreen() {
 
       <section id="crm" className="border-t border-border bg-card">
         <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:py-24">
-          <SectionHeading
-            eyebrow="CRM and communication"
-            title="The thread and the account are the same customer."
-            body="Companies, contacts, leads, inquiries, opportunities, and tasks live in the CRM. Inbox keeps email, WhatsApp, and website chat in one queue, with assignment and handoff. Harbor & Co. is not a customer. The path below is the one the application implements."
-          />
-          <ol className="mt-12 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
+            <SectionHeading
+              eyebrow="CRM"
+              title="The account is a stored record."
+              body="Companies, contacts, leads, inquiries, opportunities, and tasks stay on the organization. Harbor & Co. is fictional. The list in the picture is the seeded workspace, not a hardcoded total."
+            />
+            <ReleaseShot capture={captures.crm} fallback={null} />
+          </div>
+          <ol className="mt-16 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {useCases.map((item, index) => (
               <li key={item.title} className="rounded-2xl border border-border bg-background p-6">
                 <p className="text-xs font-semibold tracking-[0.16em] text-primary">{String(index + 1).padStart(2, "0")}</p>
@@ -132,12 +156,15 @@ export function HomeScreen() {
 
       <section id="analytics" className="border-t border-border bg-card">
         <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:py-24">
-          <SectionHeading
-            eyebrow="Analytics and reporting"
-            title="Reports count what is already stored."
-            body="A chart on this page would be a picture of one workspace on one day. The rules below are what the product actually computes."
-          />
-          <div className="mt-12 grid gap-4 lg:grid-cols-3">
+          <div className="grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
+            <SectionHeading
+              eyebrow="Analytics and reporting"
+              title="Reports count what is already stored."
+              body="Overview and analytics read the signed-in organization for the selected period. The picture is Harbor & Co. on one day. The rules below are what the product computes."
+            />
+            <ReleaseShot capture={captures.analytics} fallback={null} />
+          </div>
+          <div className="mt-16 grid gap-4 lg:grid-cols-3">
             {reportingRules.map((item) => (
               <article key={item.title} className="rounded-2xl border border-border bg-background p-6">
                 <h3 className="text-lg font-semibold tracking-tight">{item.title}</h3>
@@ -150,12 +177,15 @@ export function HomeScreen() {
 
       <section id="integrations" className="border-t border-border">
         <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:py-24">
-          <SectionHeading
-            eyebrow="Integrations"
-            title="The connections the product actually ships."
-            body="Credentials stay encrypted in the workspace. A public demo refuses a paid model key, live email, and an n8n URL. Empty provider keys fail closed."
-          />
-          <div className="mt-12 grid gap-10 lg:grid-cols-3">
+          <div className="grid items-center gap-12 lg:grid-cols-2 lg:gap-16 lg:[&>*:first-child]:order-2">
+            <SectionHeading
+              eyebrow="Integrations"
+              title="The connections the product actually ships."
+              body="Credentials stay encrypted in the workspace. A public demo refuses a paid model key, live email, and an n8n URL. Empty provider keys fail closed. The picture labels each service as simulated or not connected."
+            />
+            <ReleaseShot capture={captures.integrations} fallback={null} />
+          </div>
+          <div className="mt-16 grid gap-10 lg:grid-cols-3">
             {integrationGroups.map((group) => (
               <div key={group.name}>
                 <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">{group.name}</h3>
@@ -278,7 +308,7 @@ function ReleaseShot({
   priority = false,
   fallback,
 }: {
-  capture: (typeof homepageStages)[keyof typeof homepageStages];
+  capture: ProductCapture;
   priority?: boolean;
   fallback: ReactNode;
 }) {
@@ -360,7 +390,7 @@ function Feature({
   eyebrow: string;
   title: string;
   body: string;
-  capture: (typeof homepageStages)[keyof typeof homepageStages];
+  capture: ProductCapture;
   fallback: ReactNode;
   flip?: boolean;
 }) {

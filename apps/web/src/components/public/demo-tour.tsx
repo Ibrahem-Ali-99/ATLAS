@@ -43,7 +43,7 @@ export function DemoTour() {
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">{step.title}</p>
             <p className="mt-4 text-base leading-7">{step.caption}</p>
             <p className="mt-4 text-sm leading-6 text-muted-foreground">
-              A release capture for this chapter is a 1440×900 view of the redesigned workspace. The files currently in the site are not that set, so this chapter is not pictured.
+              A release capture for this chapter is a 1440×900 view of the redesigned workspace. The assistant frame stays unpublished until that retrieval work replaces it.
             </p>
           </div>
         )}

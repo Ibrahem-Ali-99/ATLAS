@@ -24,20 +24,10 @@ test("homepage stages fit the 16:10 frame", () => {
   }
 });
 
-test("tall and phone captures stay off the desktop stages", () => {
-  const staged = new Set<string>(Object.values(homepageStages).map((item) => item.src));
-  const held = [
-    captures.knowledge,
-    captures.crm,
-    captures.lead,
-    captures.runs,
-    captures.analytics,
-    captures.monitoring,
-    captures.rejected,
-    captures.mobile,
-  ];
+test("older tall captures stay off the release frames", () => {
+  const held = [captures.lead, captures.runs, captures.monitoring, captures.rejected, captures.mobile];
   for (const capture of held) {
-    assert.equal(staged.has(capture.src), false, capture.src);
+    assert.equal(capture.releaseReady, false, capture.src);
     assert.equal(fitsLandscapeFrame(capture), false, capture.src);
   }
 });
@@ -53,14 +43,25 @@ test("evaluation figures are the recorded suite results", () => {
   assert.match(evaluationEvidence.caveat, /did not send a message or create a charge/);
 });
 
-test("current portfolio files are not release captures", () => {
-  for (const capture of Object.values(captures)) {
-    assert.equal(capture.releaseReady, false, capture.src);
-    assert.equal(isReleaseCapture(capture), false, capture.src);
+test("Harbor frames are 1440×900 and the assistant frame is not published", () => {
+  const published = [
+    captures.overview,
+    captures.crm,
+    captures.inbox,
+    captures.knowledge,
+    captures.workflows,
+    captures.analytics,
+    captures.integrations,
+  ];
+  for (const capture of published) {
+    assert.equal(isReleaseCapture(capture), true, capture.src);
+    assert.equal(capture.frame, "Harbor & Co.");
   }
-  for (const capture of Object.values(homepageStages)) {
-    assert.equal(isReleaseCapture(capture), false);
-  }
+  assert.equal(captures.assistant.releaseReady, false);
+  assert.equal(isReleaseCapture(captures.assistant), false);
+  assert.equal(isReleaseCapture(homepageStages.assistant), false);
+  assert.equal(isReleaseCapture(homepageStages.hero), true);
+  assert.equal(isReleaseCapture(homepageStages.automation), true);
   assert.deepEqual(releaseShotPlan, [
     "Overview",
     "CRM",
