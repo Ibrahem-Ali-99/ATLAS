@@ -66,6 +66,19 @@ API tests cover tenant isolation, CSRF, approval integrity, webhook authenticati
 
 Lead scoring trains on a documented synthetic set. A stored prediction is advisory. It does not change the lead, create an approval, or authorize an external action. The score is not a measurement of real conversion.
 
+## Release evidence
+
+On 26 November 2026 the working tree that included `b71d0de` and the qualification fixes in `44631e1` was checked without restarting the shared API or web app.
+
+| Check | Result |
+| --- | --- |
+| API | 284 passed, 1 skipped, 0 failed |
+| Browser | 37 passed, 2 skipped, 0 failed |
+| Frontend unit tests | 12 passed, 0 failed |
+| TypeScript and production build | passed |
+
+The API skip does not call Groq or Ollama. The browser skips are design screenshots and the Resend transport settings test. The runs used `atlas_test` and a disposable `atlas_e2e_*` database, sandbox billing, and sandbox mail. They did not send a message or create a charge. Alembic had one head, `20261126_0055`. Stripe test-mode checkout, the portal, upgrade, downgrade, cancellation, a declined card, and a failed renewal were recorded earlier that day and were not repeated. The tree also held uncommitted demo and deployment files, so these counts are not a clean checkout of `44631e1`. The clean command is `.\scripts\verify-release.ps1` in [release-checklist.md](release-checklist.md).
+
 ## Deployment
 
 Production is one API process and one Next.js app behind one browser origin. The session cookie is HttpOnly and SameSite=Lax, and CSRF expects the browser to call the API that issued the token. PostgreSQL with pgvector holds the rows. Uploads live on a persistent disk. Staging HTTPS is served by Caddy. Migrations run before traffic. A second copy of the API would recover the same rows, so ingestion and workflow recovery stay in the one API process.

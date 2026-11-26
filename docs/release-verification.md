@@ -1,6 +1,8 @@
 # Release verification
 
-Run this procedure on `feature/atlas-product-completion` in `D:\ATLAS` before treating a commit as the release candidate. It uses disposable databases. It does not restart the API on port 8000 or the web app on port 3000, and it does not send a message or create a charge.
+The automated command is `.\scripts\verify-release.ps1`. Run it from the repository root on `feature/atlas-product-completion` only after `git status --porcelain` is empty. It refuses a dirty tree, uses disposable databases, writes the production build to `.next-release-check`, and does not restart the API on port 8000 or the web app on port 3000. It does not send a message, create a charge, or create a tag.
+
+The steps below are what that command runs. The counts in [release-checklist.md](release-checklist.md) were accepted on a dirty working tree and are not a substitute for this command.
 
 Leave `ATLAS_LIVE_PROVIDERS` unset. Do not set `ATLAS_E2E_ARTIFACT_DIR` or `ATLAS_FIGMA_SCREENSHOT_DIR` to `docs/demo/screenshots`. Those captures are opt-in and belong to the portfolio rehearsal.
 

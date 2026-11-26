@@ -98,6 +98,15 @@ export default function CaseStudyPage() {
         </p>
       </Section>
 
+      <Section title="Release evidence">
+        <p>
+          On 26 November 2026 the working tree that included b71d0de and the qualification fixes in 44631e1 was checked without restarting the shared API or web app. The API suite passed 284 tests, skipped 1, and failed 0. The skip does not call Groq or Ollama. The browser suite passed 37 tests, skipped 2, and failed 0. Those skips are design screenshots and the Resend transport settings test. Frontend unit tests passed 12. TypeScript and the production build passed.
+        </p>
+        <p>
+          The runs used atlas_test and a disposable atlas_e2e database, sandbox billing, and sandbox mail. They did not send a message or create a charge. Alembic had one head, 20261126_0055. Stripe test-mode checkout, the portal, upgrade, downgrade, cancellation, a declined card, and a failed renewal were recorded earlier that day and were not repeated. The tree also held uncommitted demo and deployment files, so these counts are not a clean checkout of 44631e1.
+        </p>
+      </Section>
+
       <Section title="Deployment">
         <p>
           Production is one API process and one Next.js app behind one browser origin, because the session cookie is HttpOnly and SameSite=Lax and CSRF expects the browser to call the API that issued the token. PostgreSQL with pgvector holds the rows. Uploads live on a persistent disk. Staging HTTPS is served by Caddy. Migrations run before traffic. A second API process would recover the same rows, so ingestion and workflow recovery stay in the one API process.

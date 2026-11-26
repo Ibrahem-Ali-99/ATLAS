@@ -4,7 +4,7 @@ Checkpoint date: 2026-11-26. The permanent development workspace is `D:\ATLAS` o
 
 ## Release candidate
 
-Qualification date: 2026-11-26. Portfolio acceptance is `f55c608`, and these suites ran on the tree that includes the Harbor rehearsal commit `b71d0de`. The shared API on port 8000 and the web app on port 3000 were left running. Checks used `atlas_test`, `atlas_migration_test`, and a disposable `atlas_e2e_*` database on API port 8011 and web port 3011. `ATLAS_LIVE_PROVIDERS` was unset. No message was sent and no Stripe charge was created. Repeat the commands in [release verification](release-verification.md).
+Qualification date: 2026-11-26. Portfolio acceptance is `f55c608`, and these suites ran on the tree that includes the Harbor rehearsal commit `b71d0de`. The shared API on port 8000 and the web app on port 3000 were left running. Checks used `atlas_test`, `atlas_migration_test`, and a disposable `atlas_e2e_*` database on API port 8011 and web port 3011. `ATLAS_LIVE_PROVIDERS` was unset. No message was sent and no Stripe charge was created. The counts below are the accepted working-tree result. [Release checklist](release-checklist.md) is the gate for the portfolio deploy. `.\scripts\verify-release.ps1` repeats the suites only when the working tree is clean.
 
 | Check | Result |
 | --- | --- |
