@@ -4,8 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, FileText, MessageSquare, PanelLeft, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
+import { ConfirmButton } from "@/components/confirm-button";
 import { ProviderNotice } from "@/components/provider-notice";
 import { RequestError } from "@/components/request-error";
 import { Badge } from "@/components/ui/badge";
@@ -23,8 +24,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
 import { isEvaluationConversation } from "@/lib/conversations";
 import { RichText } from "@/components/assistant/rich-text";
-import { createConversation, getConversation, listConversations, streamConversationMessage } from "@/lib/records-api";
-import type { AssistantReply, ChatMessage, Conversation, MessageSource } from "@/lib/records";
+import { archiveConversation, createConversation, dismissAssistantProposal, getConversation, listConversations, renameConversation, restoreConversation, streamConversationMessage, submitAssistantProposal } from "@/lib/records-api";
+import type { AssistantProposal, AssistantReply, ChatMessage, Conversation, ConversationDetail, MessageSource } from "@/lib/records";
 import { useWorkspace } from "@/lib/use-workspace";
 
 const NO_RECORDS = "I could not find relevant company documents or CRM records for that question.";
@@ -55,13 +56,16 @@ function AssistantWorkspace({
   const [streaming, setStreaming] = useState("");
   const [phases, setPhases] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [retention, setRetention] = useState("active");
+  const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [sourcesDialog, setSourcesDialog] = useState(false);
   const [focusSource, setFocusSource] = useState<string | null>(null);
   const conversations = useQuery({
-    queryKey: ["conversations", organizationId],
-    queryFn: () => listConversations(organizationId),
+    queryKey: ["conversations", organizationId, retention],
+    queryFn: () => listConversations(organizationId, retention),
   });
   const detail = useQuery({
     queryKey: ["conversation", organizationId, conversationId],
@@ -82,21 +86,28 @@ function AssistantWorkspace({
       setPhases([]);
       setNotice(null);
       let phase = "";
-      return streamConversationMessage(
-        organizationId,
-        targetConversationId,
-        content,
-        (token) => {
-          if (phase === "verifying") {
-            return;
-          }
-          setStreaming((current) => current + token);
-        },
-        (next) => {
-          phase = next;
-          setPhases((current) => (current.at(-1) === next ? current : [...current, next]));
-        },
-      );
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        return await streamConversationMessage(
+          organizationId,
+          targetConversationId,
+          content,
+          (token) => {
+            if (phase === "verifying") {
+              return;
+            }
+            setStreaming((current) => current + token);
+          },
+          (next) => {
+            phase = next;
+            setPhases((current) => (current.at(-1) === next ? current : [...current, next]));
+          },
+          controller.signal,
+        );
+      } finally {
+        abortRef.current = null;
+      }
     },
     onSuccess: async (reply) => {
       setDraft("");
@@ -109,14 +120,56 @@ function AssistantWorkspace({
       await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, reply.conversation_id] });
       await queryClient.invalidateQueries({ queryKey: ["conversations", organizationId] });
     },
-    onError: async (_error, { targetConversationId }) => {
+    onError: async (error, { targetConversationId }) => {
       setStreaming("");
       setPhases([]);
       await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, targetConversationId] });
+      if (error instanceof ApiError && error.code === "cancelled") {
+        const saved = queryClient.getQueryData<ConversationDetail>([
+          "conversation",
+          organizationId,
+          targetConversationId,
+        ]);
+        setNotice(saved?.messages.at(-1)?.role === "assistant" ? null : "Stopped before the answer was saved.");
+      }
+    },
+  });
+  const rename = useMutation({
+    mutationFn: (title: string) => renameConversation(organizationId, conversationId ?? "", title),
+    onSuccess: async () => {
+      setTitleDraft(null);
+      await queryClient.invalidateQueries({ queryKey: ["conversations", organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, conversationId] });
+    },
+  });
+  const archive = useMutation({
+    mutationFn: () => archiveConversation(organizationId, conversationId ?? ""),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["conversations", organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, conversationId] });
+    },
+  });
+  const restore = useMutation({
+    mutationFn: () => restoreConversation(organizationId, conversationId ?? ""),
+    onSuccess: async () => {
+      setRetention("active");
+      await queryClient.invalidateQueries({ queryKey: ["conversations", organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, conversationId] });
+    },
+  });
+  const proposalAction = useMutation({
+    mutationFn: (input: { proposalId: string; times?: { starts_at: string; ends_at: string }; dismiss?: boolean }) =>
+      input.dismiss
+        ? dismissAssistantProposal(organizationId, conversationId ?? "", input.proposalId)
+        : submitAssistantProposal(organizationId, conversationId ?? "", input.proposalId, input.times),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["conversation", organizationId, conversationId] });
     },
   });
 
   const current = conversations.data?.find((item) => item.id === conversationId) ?? null;
+  const threadTitle = detail.data?.title ?? current?.title ?? "Assistant";
+  const archivedAt = detail.data?.archived_at ?? current?.archived_at ?? null;
   const sources = useMemo(() => {
     const messages = detail.data?.messages ?? [];
     return messages.flatMap((message) => message.sources);
@@ -161,6 +214,8 @@ function AssistantWorkspace({
       pending={conversations.isPending}
       error={conversations.isError ? conversations.error : create.isError ? create.error : null}
       query={query}
+      retention={retention}
+      onRetention={setRetention}
       onQuery={setQuery}
       conversationId={conversationId}
       creating={create.isPending}
@@ -181,10 +236,26 @@ function AssistantWorkspace({
       <section className="flex min-h-0 min-w-0 flex-1 flex-col px-2 sm:px-6">
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border py-4">
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold leading-tight text-foreground">{current?.title ?? "Assistant"}</h1>
+            {titleDraft === null ? (
+              <h1 className="truncate text-xl font-semibold leading-tight text-foreground">{threadTitle}</h1>
+            ) : (
+              <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); if (titleDraft.trim()) rename.mutate(titleDraft.trim()); }}>
+                <Input aria-label="Conversation title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} className="h-9 max-w-xs" />
+                <Button type="submit" size="sm" disabled={!titleDraft.trim() || rename.isPending}>Save title</Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setTitleDraft(null)}>Cancel</Button>
+              </form>
+            )}
             <p className="mt-1 text-sm text-muted-foreground">Ask ATLAS about your workspace, then follow the evidence.</p>
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {conversationId && titleDraft === null ? (
+              <Button type="button" size="sm" variant="outline" onClick={() => setTitleDraft(threadTitle)}>Rename</Button>
+            ) : null}
+            {conversationId && archivedAt ? (
+              <Button type="button" size="sm" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate()}>Restore</Button>
+            ) : conversationId ? (
+              <ConfirmButton size="sm" label="Archive" confirmLabel="Archive and keep messages" pendingLabel="Archiving…" pending={archive.isPending} onConfirm={() => archive.mutate()} />
+            ) : null}
             <Button type="button" size="sm" variant="outline" className="lg:hidden" onClick={() => setHistoryOpen(true)}>
               <PanelLeft size={15} /> History
             </Button>
@@ -213,10 +284,13 @@ function AssistantWorkspace({
               <MessageView
                 key={message.id}
                 message={message}
+                proposalPending={proposalAction.isPending}
                 onSource={(source) => {
                   setFocusSource(sourceKey(source));
                   revealSources();
                 }}
+                onProposal={(proposalId, times) => proposalAction.mutate({ proposalId, times })}
+                onDismiss={(proposalId) => proposalAction.mutate({ proposalId, dismiss: true })}
               />
             ))}
             {send.isPending ? (
@@ -230,7 +304,8 @@ function AssistantWorkspace({
         <div className="py-4">
           <div className="mx-auto w-full max-w-3xl space-y-3">
             {notice ? <StatusNote>{notice}</StatusNote> : null}
-            {send.isError ? <FailureNotice error={send.error} onRetry={() => submit()} canRetry={draft.trim().length > 0} /> : null}
+            {send.isError && !(send.error instanceof ApiError && send.error.code === "cancelled") ? <FailureNotice error={send.error} onRetry={() => submit()} canRetry={draft.trim().length > 0} /> : null}
+            {rename.error || archive.error || restore.error || proposalAction.error ? <RequestError error={rename.error ?? archive.error ?? restore.error ?? proposalAction.error} /> : null}
             <form
               className="rounded-2xl border border-border bg-card px-4 py-3 shadow-sm"
               onSubmit={(event) => {
@@ -256,9 +331,11 @@ function AssistantWorkspace({
                 <p className="text-[10px] uppercase tracking-[0.14em] text-subtle">
                   Enter to send · Shift + Enter for a new line
                 </p>
-                <Button type="submit" className="rounded-[10px]" disabled={send.isPending || create.isPending || draft.trim().length === 0}>
-                  {send.isPending ? "Answering…" : "Send →"}
-                </Button>
+                {send.isPending ? (
+                  <Button type="button" variant="outline" className="rounded-[10px]" onClick={() => abortRef.current?.abort()}>Stop</Button>
+                ) : (
+                  <Button type="submit" className="rounded-[10px]" disabled={create.isPending || draft.trim().length === 0}>Send →</Button>
+                )}
               </div>
             </form>
           </div>
@@ -302,6 +379,8 @@ function ConversationHistory({
   pending,
   error,
   query,
+  retention,
+  onRetention,
   onQuery,
   conversationId,
   creating,
@@ -314,6 +393,8 @@ function ConversationHistory({
   pending: boolean;
   error: unknown;
   query: string;
+  retention: string;
+  onRetention: (value: string) => void;
   onQuery: (value: string) => void;
   conversationId: string | null;
   creating: boolean;
@@ -333,11 +414,15 @@ function ConversationHistory({
       </div>
       <p className="sr-only">Stored for {organizationName}. A new chat takes its title from the first question.</p>
       <Input className="mt-4 h-10 rounded-[10px] border-0 bg-secondary" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search conversations…" aria-label="Search conversations" />
+      <select aria-label="Conversation retention" className="mt-2 h-10 w-full rounded-[10px] border-0 bg-secondary px-3 text-sm" value={retention} onChange={(event) => onRetention(event.target.value)}>
+        <option value="active">Active conversations</option>
+        <option value="archived">Archived conversations</option>
+      </select>
       {pending ? <Skeleton className="mt-4 h-16 w-full" /> : null}
       {error ? <div className="mt-4"><RequestError error={error} /></div> : null}
       {conversations && customer.length === 0 ? (
         <p className="mt-4 text-sm text-muted-foreground">
-          {query.trim() ? "No conversations match this search." : "No conversations yet."}
+          {query.trim() ? "No conversations match this search." : retention === "archived" ? "No archived conversations." : "No conversations yet."}
         </p>
       ) : null}
       <ul className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
@@ -394,6 +479,10 @@ function EmptyThread({
     "What information do you have?",
     "Which companies are in my CRM?",
     "What documents are available?",
+    "Summarize the lead ",
+    "Draft a follow-up for ",
+    "Request an appointment for ",
+    "Create a follow-up task for ",
   ];
   return (
     <div className="rounded-xl border border-border bg-card px-4 py-6 text-center sm:px-6 sm:py-8">
@@ -418,10 +507,16 @@ function EmptyThread({
 
 function MessageView({
   message,
+  proposalPending,
   onSource,
+  onProposal,
+  onDismiss,
 }: {
   message: ChatMessage;
+  proposalPending: boolean;
   onSource: (source: MessageSource) => void;
+  onProposal: (proposalId: string, times?: { starts_at: string; ends_at: string }) => void;
+  onDismiss: (proposalId: string) => void;
 }) {
   const documents = message.sources.filter((source) => source.kind === "document");
   const records = message.sources.filter((source) => source.kind === "crm");
@@ -449,6 +544,9 @@ function MessageView({
       )}
       {documents.length > 0 ? <SourceList kind="document" sources={documents} onSource={onSource} /> : null}
       {records.length > 0 ? <SourceList kind="crm" sources={records} onSource={onSource} /> : null}
+      {message.proposals?.map((proposal) => (
+        <ProposalCard key={proposal.id} proposal={proposal} pending={proposalPending} onSubmit={onProposal} onDismiss={onDismiss} />
+      ))}
       {documents.length > 0 || records.length > 0 ? (
         <div className="mt-5">
           <p className="text-sm text-muted-foreground">Relevant actions</p>
@@ -496,6 +594,10 @@ function SourceList({
               View exact excerpt →
             </button>
           </div>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-xs text-muted-foreground">Preview</summary>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{source.excerpt}</p>
+          </details>
         </div>
       ))}
     </div>
@@ -585,6 +687,9 @@ function failureCopy(error: unknown): { heading: string; detail: string } {
   if (error.status === 403 || error.code === "forbidden") {
     return { heading: "Permission denied", detail: error.message };
   }
+  if (error.code === "cancelled") {
+    return { heading: "Stopped", detail: error.message };
+  }
   if (error.status === 404 || error.code === "not_found") {
     return { heading: "You cannot use this conversation", detail: error.message };
   }
@@ -639,6 +744,7 @@ function sourceKindLabel(source: MessageSource): string {
 }
 
 function crmRecordHref(source: MessageSource): string {
+  if (source.record_type === "conversation") return "/inbox";
   const tab = source.record_type === "company" ? "companies"
     : source.record_type === "contact" ? "contacts"
       : source.record_type === "inquiry" ? "inquiries"
@@ -650,5 +756,59 @@ function recordLabel(source: MessageSource): string {
   if (source.record_type === "company") return "company record";
   if (source.record_type === "contact") return "contact record";
   if (source.record_type === "inquiry") return "inquiry";
+  if (source.record_type === "conversation") return "conversation";
   return "lead record";
+}
+
+function ProposalCard({
+  proposal,
+  pending,
+  onSubmit,
+  onDismiss,
+}: {
+  proposal: AssistantProposal;
+  pending: boolean;
+  onSubmit: (proposalId: string, times?: { starts_at: string; ends_at: string }) => void;
+  onDismiss: (proposalId: string) => void;
+}) {
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const validTime = proposal.kind !== "appointment" || (Boolean(start && end) && Date.parse(start) < Date.parse(end));
+  const href = proposal.approval_id
+    ? `/approvals?approval=${proposal.approval_id}`
+    : proposal.task_id
+      ? "/workflows"
+      : proposal.lead_id
+        ? `/crm?tab=leads&id=${proposal.lead_id}`
+        : null;
+  const linkLabel = proposal.approval_id ? "Open approval" : proposal.task_id ? "Open tasks" : proposal.lead_id ? "Open lead" : null;
+  return (
+    <section className="mt-4 rounded-[10px] border border-border bg-card px-4 py-4">
+      <p className="text-[10px] uppercase tracking-[0.14em] text-primary">Proposed action</p>
+      <h3 className="mt-2 text-sm font-semibold text-foreground">{proposal.title}</h3>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">{proposal.summary}</p>
+      <p className="mt-2 text-sm font-medium text-foreground">{proposal.result_label}</p>
+      {proposal.status === "proposed" && proposal.kind === "appointment" ? (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <label className="grid gap-1 text-xs text-muted-foreground">Starts
+            <Input type="datetime-local" value={start} onChange={(event) => setStart(event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">Ends
+            <Input type="datetime-local" value={end} onChange={(event) => setEnd(event.target.value)} />
+          </label>
+        </div>
+      ) : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {proposal.status === "proposed" ? (
+          <>
+            <Button type="button" size="sm" disabled={pending || !validTime} onClick={() => onSubmit(proposal.id, proposal.kind === "appointment" ? { starts_at: new Date(start).toISOString(), ends_at: new Date(end).toISOString() } : undefined)}>
+              {proposal.kind === "task" ? "Create task" : "Request approval"}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => onDismiss(proposal.id)}>Dismiss</Button>
+          </>
+        ) : null}
+        {href && linkLabel ? <Link href={href} className="rounded-[10px] bg-muted px-4 py-2 text-xs text-primary">{linkLabel} →</Link> : null}
+      </div>
+    </section>
+  );
 }

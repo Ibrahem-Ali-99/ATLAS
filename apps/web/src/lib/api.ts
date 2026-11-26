@@ -115,6 +115,7 @@ export async function apiStream<T>(
   body: unknown,
   onToken: (text: string) => void,
   onPhase?: (phase: string) => void,
+  signal?: AbortSignal,
 ): Promise<T> {
   const headers = new Headers({
     Accept: "text/event-stream",
@@ -132,8 +133,12 @@ export async function apiStream<T>(
       body: JSON.stringify(body),
       credentials: "include",
       cache: "no-store",
+      signal,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError(0, "cancelled", "Stopped before the answer was saved.");
+    }
     throw new ApiError(0, "network_error", "The API is unreachable. Start the backend and try again.");
   }
 
@@ -153,41 +158,49 @@ export async function apiStream<T>(
   const decoder = new TextDecoder();
   let buffer = "";
   let result: T | null = null;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-    buffer += decoder.decode(value, { stream: true });
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() ?? "";
-    for (const frame of frames) {
-      const name = /^event: (.+)$/m.exec(frame)?.[1];
-      const data = /^data: (.*)$/m.exec(frame)?.[1];
-      if (!name || data === undefined) {
-        continue;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
       }
-      if (name === "token") {
-        const payload = JSON.parse(data) as { text?: unknown };
-        if (typeof payload.text === "string") {
-          onToken(payload.text);
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() ?? "";
+      for (const frame of frames) {
+        const name = /^event: (.+)$/m.exec(frame)?.[1];
+        const data = /^data: (.*)$/m.exec(frame)?.[1];
+        if (!name || data === undefined) {
+          continue;
         }
-      } else if (name === "phase") {
-        const payload = JSON.parse(data) as { phase?: unknown };
-        if (typeof payload.phase === "string") {
-          onPhase?.(payload.phase);
+        if (name === "token") {
+          const payload = JSON.parse(data) as { text?: unknown };
+          if (typeof payload.text === "string") {
+            onToken(payload.text);
+          }
+        } else if (name === "phase") {
+          const payload = JSON.parse(data) as { phase?: unknown };
+          if (typeof payload.phase === "string") {
+            onPhase?.(payload.phase);
+          }
+        } else if (name === "done") {
+          result = JSON.parse(data) as T;
+        } else if (name === "error") {
+          const payload = JSON.parse(data) as { code?: unknown; message?: unknown };
+          throw new ApiError(
+            502,
+            typeof payload.code === "string" ? payload.code : "llm_failed",
+            typeof payload.message === "string" ? payload.message : "The assistant failed.",
+          );
         }
-      } else if (name === "done") {
-        result = JSON.parse(data) as T;
-      } else if (name === "error") {
-        const payload = JSON.parse(data) as { code?: unknown; message?: unknown };
-        throw new ApiError(
-          502,
-          typeof payload.code === "string" ? payload.code : "llm_failed",
-          typeof payload.message === "string" ? payload.message : "The assistant failed.",
-        );
       }
     }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      if (result) return result;
+      throw new ApiError(0, "cancelled", "Stopped before the answer was saved.");
+    }
+    throw error;
   }
   if (result === null) {
     throw new ApiError(502, "invalid_response", "The assistant stream ended without a reply.");

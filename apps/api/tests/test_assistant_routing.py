@@ -28,6 +28,18 @@ def test_clear_questions_route_without_a_model() -> None:
     assert route_question("What leads need attention?", has_history=False) is Intent.leads
     assert route_question("What did we discuss earlier?", has_history=True) is Intent.recall
     assert route_question("Please delete the North pier lead", has_history=False) is Intent.mutation
+    assert route_question("Summarize the lead Harbor Desk", has_history=False) is Intent.summary
+    assert (
+        route_question("Draft a follow-up for Harbor Desk", has_history=False) is Intent.follow_up
+    )
+    assert (
+        route_question("Request an appointment for Harbor Desk", has_history=False)
+        is Intent.appointment
+    )
+    assert (
+        route_question("Create a follow-up task for Harbor Desk", has_history=False) is Intent.task
+    )
+    assert route_question("Send the customer an email", has_history=False) is Intent.mutation
     assert route_question("Hello", has_history=False) is Intent.greeting
     assert parse_classifier_intent('{"intent":"general"}') is Intent.general
     assert parse_classifier_intent("not json") is None

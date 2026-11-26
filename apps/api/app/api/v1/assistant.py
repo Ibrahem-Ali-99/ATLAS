@@ -2,18 +2,21 @@ import json
 import time
 import uuid
 from collections.abc import Iterator
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import StreamingResponse
 
 from app.core.errors import AppError
-from app.domains.assistant import service
+from app.domains.assistant import operations, service
 from app.domains.assistant.schemas import (
     ConversationCreate,
     ConversationDetail,
     ConversationOut,
+    ConversationRename,
     MessageCreate,
+    ProposalOut,
+    ProposalSubmit,
     ReplyOut,
 )
 from app.domains.billing.service import meter_assistant_request
@@ -44,8 +47,15 @@ def organization_chat(request: Request, member: Member, db: DbSession) -> ChatCl
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
-def list_conversations(member: Member, db: DbSession) -> list[ConversationOut]:
-    rows = service.list_conversations(db, member.organization.id, member.user.id)
+def list_conversations(
+    member: Member,
+    db: DbSession,
+    retention: Literal["active", "archived"] = "active",
+    q: str | None = None,
+) -> list[ConversationOut]:
+    rows = service.list_conversations(
+        db, member.organization.id, member.user.id, retention=retention, q=q
+    )
     return [ConversationOut.model_validate(row, from_attributes=True) for row in rows]
 
 
@@ -57,6 +67,74 @@ def create_conversation(
         db, member.organization.id, member.user.id, body.title
     )
     return ConversationOut.model_validate(conversation, from_attributes=True)
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationOut)
+def rename_conversation(
+    conversation_id: uuid.UUID, body: ConversationRename, member: CsrfMember, db: DbSession
+) -> ConversationOut:
+    conversation = service.rename_conversation(
+        db, member.organization.id, member.user.id, conversation_id, body.title
+    )
+    return ConversationOut.model_validate(conversation, from_attributes=True)
+
+
+@router.post("/conversations/{conversation_id}/archive", response_model=ConversationOut)
+def archive_conversation(
+    conversation_id: uuid.UUID, member: CsrfMember, db: DbSession
+) -> ConversationOut:
+    conversation = service.archive_conversation(
+        db, member.organization.id, member.user.id, conversation_id
+    )
+    return ConversationOut.model_validate(conversation, from_attributes=True)
+
+
+@router.post("/conversations/{conversation_id}/restore", response_model=ConversationOut)
+def restore_conversation(
+    conversation_id: uuid.UUID, member: CsrfMember, db: DbSession
+) -> ConversationOut:
+    conversation = service.restore_conversation(
+        db, member.organization.id, member.user.id, conversation_id
+    )
+    return ConversationOut.model_validate(conversation, from_attributes=True)
+
+
+@router.post(
+    "/conversations/{conversation_id}/proposals/{proposal_id}/submit",
+    response_model=ProposalOut,
+)
+def submit_proposal(
+    conversation_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    member: CsrfMember,
+    db: DbSession,
+    body: ProposalSubmit | None = None,
+) -> ProposalOut:
+    conversation = service.get_conversation(
+        db, member.organization.id, member.user.id, conversation_id
+    )
+    submitted = body or ProposalSubmit()
+    return operations.submit_proposal(
+        db,
+        conversation,
+        proposal_id,
+        member.user.id,
+        submitted.starts_at,
+        submitted.ends_at,
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/proposals/{proposal_id}/dismiss",
+    response_model=ProposalOut,
+)
+def dismiss_proposal(
+    conversation_id: uuid.UUID, proposal_id: uuid.UUID, member: CsrfMember, db: DbSession
+) -> ProposalOut:
+    conversation = service.get_conversation(
+        db, member.organization.id, member.user.id, conversation_id
+    )
+    return operations.dismiss_proposal(db, conversation, proposal_id)
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationDetail)

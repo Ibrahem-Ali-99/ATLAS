@@ -2,11 +2,14 @@ import re
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
+from app.domains.assistant import operations
 from app.domains.assistant.catalog import InventoryDocument, ReadAnswer
 from app.domains.assistant.catalog import answer_companies as read_companies
 from app.domains.assistant.catalog import answer_documents as read_documents
@@ -110,15 +113,61 @@ def conversation_title(content: str) -> str:
 
 
 def list_conversations(
-    db: Session, organization_id: uuid.UUID, user_id: uuid.UUID
+    db: Session,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    retention: Literal["active", "archived"] = "active",
+    q: str | None = None,
 ) -> list[Conversation]:
-    return list(
-        db.scalars(
-            select(Conversation)
-            .where(Conversation.organization_id == organization_id, Conversation.user_id == user_id)
-            .order_by(Conversation.updated_at.desc())
-        ).all()
+    query = select(Conversation).where(
+        Conversation.organization_id == organization_id,
+        Conversation.user_id == user_id,
     )
+    if retention == "archived":
+        query = query.where(Conversation.archived_at.is_not(None))
+    else:
+        query = query.where(Conversation.archived_at.is_(None))
+    if q and q.strip():
+        query = query.where(Conversation.title.icontains(q.strip(), autoescape=True))
+    return list(db.scalars(query.order_by(Conversation.updated_at.desc())).all())
+
+
+def rename_conversation(
+    db: Session,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    title: str,
+) -> Conversation:
+    conversation = get_conversation(db, organization_id, user_id, conversation_id)
+    conversation.title = " ".join(title.split())[:200]
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+def archive_conversation(
+    db: Session, organization_id: uuid.UUID, user_id: uuid.UUID, conversation_id: uuid.UUID
+) -> Conversation:
+    conversation = get_conversation(db, organization_id, user_id, conversation_id)
+    if conversation.archived_at is None:
+        conversation.archived_at = datetime.now(UTC)
+        conversation.archived_by = user_id
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+def restore_conversation(
+    db: Session, organization_id: uuid.UUID, user_id: uuid.UUID, conversation_id: uuid.UUID
+) -> Conversation:
+    conversation = get_conversation(db, organization_id, user_id, conversation_id)
+    conversation.archived_at = None
+    conversation.archived_by = None
+    db.commit()
+    db.refresh(conversation)
+    return conversation
 
 
 def create_conversation(
@@ -157,13 +206,17 @@ def list_messages(db: Session, conversation_id: uuid.UUID) -> list[MessageOut]:
         .order_by(Message.created_at.asc())
     ).all()
     result: list[MessageOut] = []
+    organization_id = messages[0].organization_id if messages else uuid.uuid4()
+    proposal_map = operations.proposals_for_messages(
+        db, organization_id, [message.id for message in messages]
+    )
     for message in messages:
         sources = db.scalars(
             select(MessageSource)
             .where(MessageSource.message_id == message.id)
             .order_by(MessageSource.title.asc())
         ).all()
-        result.append(_message_out(message, list(sources)))
+        result.append(_message_out(message, list(sources), proposal_map.get(message.id, [])))
     return result
 
 
@@ -198,6 +251,11 @@ def prepare_turn(
             expand = True
         else:
             intent = _classify_ambiguous(chat, content)
+    if intent in {Intent.summary, Intent.follow_up, Intent.appointment, Intent.task}:
+        read, draft = operations.prepare_operation(
+            db, organization_id, intent, content
+        )
+        return _stored_operation(db, conversation, read, draft)
     if intent is Intent.mutation:
         return _stored_reply(db, conversation, MUTATION_ANSWER, _phases())
     if intent is Intent.handoff:
@@ -583,6 +641,29 @@ def _stored_read(db: Session, conversation: Conversation, read: ReadAnswer) -> P
     )
 
 
+def _stored_operation(
+    db: Session,
+    conversation: Conversation,
+    read: ReadAnswer,
+    draft: operations.ProposalDraft | None,
+) -> PreparedTurn:
+    saved = _save_answer(db, conversation, read.content, [], read.crm_records, read.documents)
+    if draft is not None:
+        operations.attach_proposal(db, conversation, saved, draft)
+    return PreparedTurn(
+        conversation=conversation,
+        needs_model=False,
+        system_prompt="",
+        user_prompt="",
+        documents=[],
+        crm_records=read.crm_records,
+        document_search="skipped",
+        refusal=saved.content,
+        phases=_phases("searching_crm"),
+        inventory_documents=read.documents,
+    )
+
+
 def _stored_reply(
     db: Session, conversation: Conversation, content: str, phases: list[str]
 ) -> PreparedTurn:
@@ -854,7 +935,8 @@ def _latest_assistant(db: Session, conversation_id: uuid.UUID) -> MessageOut:
     )
     if message is None:
         raise AppError(500, "internal_error", "An unexpected error occurred")
-    return _message_out(message, _sources_for(db, message.id))
+    proposals = operations.proposals_for_messages(db, message.organization_id, [message.id])
+    return _message_out(message, _sources_for(db, message.id), proposals.get(message.id, []))
 
 
 def _sources_for(db: Session, message_id: uuid.UUID) -> list[MessageSource]:
@@ -863,7 +945,11 @@ def _sources_for(db: Session, message_id: uuid.UUID) -> list[MessageSource]:
     )
 
 
-def _message_out(message: Message, sources: list[MessageSource]) -> MessageOut:
+def _message_out(
+    message: Message,
+    sources: list[MessageSource],
+    proposals: list[operations.ProposalOut] | None = None,
+) -> MessageOut:
     role = message.role.value if isinstance(message.role, MessageRole) else str(message.role)
     return MessageOut(
         id=message.id,
@@ -871,6 +957,7 @@ def _message_out(message: Message, sources: list[MessageSource]) -> MessageOut:
         content=message.content,
         created_at=message.created_at,
         sources=[_source_out(source) for source in sources],
+        proposals=proposals or [],
     )
 
 

@@ -68,6 +68,15 @@ _HANDOFF = re.compile(
     r"\b(speak|talk|chat) (to|with) (a |an )?(human|person|agent|representative)\b|"
     r"\b(connect|transfer|hand) me (over )?to (a |an )?(human|person|agent|representative)\b"
 )
+_SUMMARY = re.compile(r"\bsummar(?:y|ize|ise)\b.{0,40}\b(lead|customer|contact)\b")
+_FOLLOW_UP = re.compile(
+    r"\b(draft|write|prepare)\b.{0,40}\b(follow-up|follow up|reply|response|message)\b"
+)
+_APPOINTMENT = re.compile(r"\b(request|schedule|book|propose)\b.{0,40}\b(appointment|meeting)\b")
+_TASK = re.compile(r"\b(create|add|make)\b.{0,40}\btask\b")
+_EXTERNAL_SEND = re.compile(
+    r"\b(send|email|text)\b.{0,40}\b(message|email|customer|lead|contact)\b"
+)
 
 
 class Intent(enum.StrEnum):
@@ -80,6 +89,10 @@ class Intent(enum.StrEnum):
     recall = "recall"
     mutation = "mutation"
     handoff = "handoff"
+    summary = "summary"
+    follow_up = "follow_up"
+    appointment = "appointment"
+    task = "task"
     greeting = "greeting"
     grounded = "grounded"
     general = "general"
@@ -104,11 +117,14 @@ CAPABILITY_ANSWER = "\n".join(
         "- Explain the CRM, Knowledge, Agent Runs, approvals, and workflows.",
         "- List records and documents stored in this organization.",
         "- Answer questions from retrieved records or documents with supporting sources.",
+        "- Summarize a stored lead, customer, or contact, including a linked conversation.",
+        "- Propose a follow-up draft, an appointment request, or a workspace task.",
         "",
         "For company facts, I check the organization’s records and say when evidence is missing.",
         "",
-        "I do not change records, send email, or book meetings from chat. "
-        "Those actions require an Agent Run; an admin must approve and execute them.",
+        "A follow-up or appointment is only a proposal. An administrator approves it before "
+        "anything is sent or booked. An administrator must execute it afterward. Confirming a task "
+        "creates that task and does not send a message.",
     ]
 )
 
@@ -116,11 +132,12 @@ MUTATION_ANSWER = "\n".join(
     [
         "## I can't change records from this chat",
         "",
-        "This assistant is read-only. I did not update, delete, create, or send anything.",
+        "This assistant is read-only for that request. "
+        "I did not update, delete, create, or send anything.",
         "",
-        "To change a lead, start an agent run from the inquiry. The run proposes the change. "
-        "An admin approves that proposal, then executes it. Email and calendar actions use "
-        "the same approval and execute steps. Rejecting the proposal writes nothing.",
+        "I can draft a follow-up, request an appointment, or create a follow-up task when you "
+        "name one stored lead. A draft or appointment waits until an administrator approves it. "
+        "Rejecting that approval writes nothing.",
     ]
 )
 
@@ -141,6 +158,16 @@ def route_question(question: str, *, has_history: bool) -> Intent:
     text = normalize_question(question)
     if _HANDOFF.search(text):
         return Intent.handoff
+    if _EXTERNAL_SEND.search(text) and not _FOLLOW_UP.search(text):
+        return Intent.mutation
+    if _FOLLOW_UP.search(text):
+        return Intent.follow_up
+    if _APPOINTMENT.search(text):
+        return Intent.appointment
+    if _TASK.search(text):
+        return Intent.task
+    if _SUMMARY.search(text):
+        return Intent.summary
     if _MUTATION_VERB.search(text) and _MUTATION_OBJECT.search(text):
         return Intent.mutation
     if _DOCUMENTS.search(text):

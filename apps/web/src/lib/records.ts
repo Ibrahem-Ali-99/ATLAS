@@ -153,6 +153,23 @@ export type Conversation = {
   title: string;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
+};
+
+export type AssistantProposal = {
+  id: string;
+  kind: "follow_up" | "appointment" | "task";
+  status: "proposed" | "submitted" | "dismissed";
+  title: string;
+  summary: string;
+  result_label: string;
+  lead_id: string | null;
+  contact_id: string | null;
+  inquiry_id: string | null;
+  approval_id: string | null;
+  approval_status: string | null;
+  task_id: string | null;
+  run_id: string | null;
 };
 
 export type MessageSource = {
@@ -172,6 +189,7 @@ export type ChatMessage = {
   content: string;
   created_at: string;
   sources: MessageSource[];
+  proposals?: AssistantProposal[];
 };
 
 export type ConversationDetail = Conversation & {

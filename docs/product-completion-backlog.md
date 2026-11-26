@@ -26,6 +26,8 @@ Local continuation on 2026-11-26 used the existing Atlas Demo database. Sign-in 
 
 These checks used the running Atlas Demo workspace. Disposable records were archived or deleted through the product API afterward. Website-chat threads and assistant conversations have no delete operation, so those threads remain. No text from the two existing documents was sent to Groq.
 
+A later assistant check used one disposable shelf note, lead, and inquiry. Ollama indexed the note and Groq answered from that note and the inquiry. The note was then deleted. A follow-up draft and an appointment request were submitted and rejected, so nothing was sent or booked. The follow-up task was created and completed. The conversation was archived, and its messages remain.
+
 | Integration | Acceptance evidence |
 | --- | --- |
 | Ollama | The host API reaches `http://127.0.0.1:11434/v1`. A disposable document completed the replacement-index lifecycle: a failed build, cancellation with the previous vectors kept, then promotion. The two existing ready documents, Cedar brochure and acceptance-yard-433129a2, were then rebuilt with `nomic-embed-text:v1.5` at 768 dimensions. Passage content, chunk identifiers, and ready status stayed in place until promotion replaced the vectors. Local search retrieved both documents. Promotion saved that local Ollama configuration for the workspace. |

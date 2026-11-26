@@ -1,6 +1,7 @@
 import { apiFetch, apiStream } from "@/lib/api";
 import { documentUploadForm } from "@/lib/document-upload";
 import type {
+  AssistantProposal,
   AssistantReply,
   ChunkHit,
   Company,
@@ -261,8 +262,46 @@ export function deleteDocument(organizationId: string, documentId: string): Prom
   return apiFetch(organizationPath(organizationId, `/documents/${documentId}`), { method: "DELETE" });
 }
 
-export function listConversations(organizationId: string): Promise<Conversation[]> {
-  return apiFetch(organizationPath(organizationId, "/conversations"));
+export function listConversations(organizationId: string, retention = "active"): Promise<Conversation[]> {
+  const query = retention === "archived" ? "?retention=archived" : "";
+  return apiFetch(organizationPath(organizationId, `/conversations${query}`));
+}
+
+export function renameConversation(organizationId: string, conversationId: string, title: string): Promise<Conversation> {
+  return apiFetch(organizationPath(organizationId, `/conversations/${conversationId}`), {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
+export function archiveConversation(organizationId: string, conversationId: string): Promise<Conversation> {
+  return apiFetch(organizationPath(organizationId, `/conversations/${conversationId}/archive`), { method: "POST" });
+}
+
+export function restoreConversation(organizationId: string, conversationId: string): Promise<Conversation> {
+  return apiFetch(organizationPath(organizationId, `/conversations/${conversationId}/restore`), { method: "POST" });
+}
+
+export function submitAssistantProposal(
+  organizationId: string,
+  conversationId: string,
+  proposalId: string,
+  times?: { starts_at: string; ends_at: string },
+): Promise<AssistantProposal> {
+  return apiFetch(organizationPath(organizationId, `/conversations/${conversationId}/proposals/${proposalId}/submit`), {
+    method: "POST",
+    body: JSON.stringify(times ?? {}),
+  });
+}
+
+export function dismissAssistantProposal(
+  organizationId: string,
+  conversationId: string,
+  proposalId: string,
+): Promise<AssistantProposal> {
+  return apiFetch(organizationPath(organizationId, `/conversations/${conversationId}/proposals/${proposalId}/dismiss`), {
+    method: "POST",
+  });
 }
 
 export function createConversation(organizationId: string): Promise<Conversation> {
@@ -282,11 +321,13 @@ export function streamConversationMessage(
   content: string,
   onToken: (text: string) => void,
   onPhase?: (phase: string) => void,
+  signal?: AbortSignal,
 ): Promise<AssistantReply> {
   return apiStream(
     organizationPath(organizationId, `/conversations/${conversationId}/messages/stream`),
     { content },
     onToken,
     onPhase,
+    signal,
   );
 }
