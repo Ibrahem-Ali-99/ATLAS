@@ -5,11 +5,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
-from app.domains.assistant import operations
+from app.domains.assistant import executions, operations
 from app.domains.assistant.catalog import InventoryDocument, ReadAnswer
 from app.domains.assistant.catalog import answer_companies as read_companies
 from app.domains.assistant.catalog import answer_documents as read_documents
@@ -25,6 +25,8 @@ from app.domains.assistant.models import (
     MessageSource,
     SourceKind,
 )
+from app.domains.assistant.orchestrator import TurnPlan, chat_selects_tools, orchestrate_turn
+from app.domains.assistant.planner import asks_for_several_sources
 from app.domains.assistant.prompts import (
     GENERAL_SYSTEM,
     GROUNDED_SYSTEM,
@@ -39,13 +41,16 @@ from app.domains.assistant.routing import (
     GREETING_ANSWER,
     INJECTION_ANSWER,
     MUTATION_ANSWER,
+    RECORD_OVERRIDE_ANSWER,
     UNRELATED_ANSWER,
     Intent,
     allows_ungrounded_chat,
+    asks_for_stored_appointment,
     is_bare_topic,
+    is_record_override,
+    operation_intents,
     parse_classifier_intent,
     recall_answer,
-    refers_to_earlier_record,
     route_question,
     unsupported_without_evidence,
 )
@@ -100,6 +105,8 @@ class PreparedTurn:
     summary: str | None = None
     evidence_confidence: float | None = None
     escalation_reason: str | None = None
+    execution_id: uuid.UUID | None = None
+    proposal_draft: operations.ProposalDraft | None = None
 
     def holds_evidence(self) -> bool:
         """A grounded draft can state a fact the retrieved rows do not support."""
@@ -215,16 +222,23 @@ def list_messages(db: Session, conversation_id: uuid.UUID) -> list[MessageOut]:
     ).all()
     result: list[MessageOut] = []
     organization_id = messages[0].organization_id if messages else uuid.uuid4()
-    proposal_map = operations.proposals_for_messages(
-        db, organization_id, [message.id for message in messages]
-    )
+    message_ids = [message.id for message in messages]
+    proposal_map = operations.proposals_for_messages(db, organization_id, message_ids)
+    step_map = executions.steps_for_messages(db, organization_id, message_ids)
     for message in messages:
         sources = db.scalars(
             select(MessageSource)
             .where(MessageSource.message_id == message.id)
             .order_by(MessageSource.title.asc())
         ).all()
-        result.append(_message_out(message, list(sources), proposal_map.get(message.id, [])))
+        result.append(
+            _message_out(
+                message,
+                list(sources),
+                proposal_map.get(message.id, []),
+                step_map.get(message.id, []),
+            )
+        )
     return result
 
 
@@ -252,9 +266,14 @@ def prepare_turn(
     summary = _checkpoint_summary(db, conversation, user_message.id, chat)
     titles = _recent_source_titles(db, organization_id, conversation.id, user_message.id, content)
     intent = route_question(content, has_history=bool(history))
-    expand = refers_to_earlier_record(content)
     if intent is Intent.injection:
         return _stored_reply(db, conversation, INJECTION_ANSWER, _phases())
+    if is_record_override(content):
+        excerpts = _safe_passages(db, organization_id, content, embedder)
+        answer = RECORD_OVERRIDE_ANSWER
+        if excerpts:
+            answer += f"\n\nFrom {excerpts[0].document_title}: {excerpts[0].content[:700]}"
+        return _stored_reply(db, conversation, answer, _phases("retrieving_documents"))
     if intent is Intent.unrelated:
         return _stored_reply(db, conversation, UNRELATED_ANSWER, _phases())
     if intent is Intent.ambiguous and is_bare_topic(content):
@@ -262,12 +281,33 @@ def prepare_turn(
     if intent is Intent.ambiguous:
         if titles:
             intent = Intent.grounded
-            expand = True
         else:
             intent = _classify_ambiguous(chat, content)
-    if intent in {Intent.summary, Intent.follow_up, Intent.appointment, Intent.task}:
-        read, draft = operations.prepare_operation(db, organization_id, intent, content)
-        return _stored_operation(db, conversation, read, draft)
+    if asks_for_stored_appointment(content):
+        return _stored_reply(
+            db,
+            conversation,
+            _stored_appointments(db, organization_id),
+            _phases("searching_crm"),
+        )
+    actions = operation_intents(content)
+    if intent is Intent.summary:
+        actions = [Intent.summary]
+    elif not (
+        actions and intent in {Intent.grounded, Intent.follow_up, Intent.appointment, Intent.task}
+    ):
+        actions = []
+    if actions:
+        return _operation_turn(
+            db,
+            conversation,
+            user_message,
+            organization_id,
+            user_id,
+            actions,
+            content,
+            embedder,
+        )
     if intent is Intent.mutation:
         return _stored_reply(db, conversation, MUTATION_ANSWER, _phases())
     if intent is Intent.handoff:
@@ -278,31 +318,126 @@ def prepare_turn(
         )
     if intent is Intent.capability:
         return _stored_reply(db, conversation, CAPABILITY_ANSWER, _phases())
-    if intent is Intent.greeting:
+    if intent is Intent.greeting and not chat_selects_tools(chat):
         return _stored_reply(db, conversation, GREETING_ANSWER, _phases())
     if intent is Intent.recall:
         opening = _opening_user_text(db, organization_id, conversation.id, user_message.id)
         return _stored_reply(db, conversation, recall_answer(history, opening), _phases())
     read = _catalog_answer(db, organization_id, intent)
-    if read is not None:
+    if read is not None and not asks_for_several_sources(content):
         return _stored_read(db, conversation, read)
-    if intent is Intent.general:
-        return _general_turn(conversation, content, history, "skipped", summary=summary)
-    return _grounded_turn(
+    if intent is Intent.grounded:
+        clarification = operations.clarify_named_work(db, organization_id, content)
+        if clarification:
+            return _stored_reply(db, conversation, clarification, _phases("searching_crm"))
+    return _from_plan(
         db,
-        organization_id,
         conversation,
+        orchestrate_turn(
+            db,
+            conversation,
+            user_message,
+            content,
+            embedder,
+            chat,
+            history,
+            summary,
+        ),
         content,
-        embedder,
         history,
-        titles,
-        expand=expand,
-        summary=summary,
+    )
+
+
+def _from_plan(
+    db: Session,
+    conversation: Conversation,
+    plan: TurnPlan,
+    question: str,
+    history: list[tuple[str, str]],
+) -> PreparedTurn:
+    if plan.mode == "general":
+        turn = _general_turn(conversation, question, history, "skipped", plan.phases, plan.summary)
+        turn.execution_id = plan.execution_id
+        return turn
+    if plan.mode == "knowledge":
+        confidence = _evidence_confidence(plan.documents, plan.crm_records)
+        threshold = _escalation_threshold(db, conversation.organization_id)
+        system = _configured_system(db, conversation.organization_id, GROUNDED_SYSTEM)
+        if confidence < threshold:
+            reason = "Evidence confidence is below the organization threshold"
+            conversation.needs_human_review = True
+            conversation.escalation_reason = reason
+            saved = _save_answer(
+                db,
+                conversation,
+                "I do not have enough verified information to answer safely. "
+                "A team member should review this request.",
+                plan.documents,
+                plan.crm_records,
+            )
+            executions.finish_execution(
+                db, plan.execution_id, assistant_message_id=saved.id
+            )
+            return PreparedTurn(
+                conversation=conversation,
+                needs_model=False,
+                system_prompt=system,
+                user_prompt="",
+                documents=plan.documents,
+                crm_records=plan.crm_records,
+                document_search="ready",
+                refusal=saved.content,
+                phases=plan.phases,
+                question=question,
+                summary=plan.summary,
+                evidence_confidence=confidence,
+                escalation_reason=reason,
+                execution_id=plan.execution_id,
+            )
+        return PreparedTurn(
+            conversation=conversation,
+            needs_model=True,
+            system_prompt=system,
+            user_prompt=grounded_prompt(
+                question, plan.documents, plan.crm_records, history, plan.summary
+            ),
+            documents=plan.documents,
+            crm_records=plan.crm_records,
+            document_search="ready",
+            phases=plan.phases,
+            question=question,
+            summary=plan.summary,
+            evidence_confidence=confidence,
+            execution_id=plan.execution_id,
+            proposal_draft=plan.proposal,
+        )
+    answer = plan.answer or NO_RECORDS
+    if answer == NO_RECORDS:
+        conversation.needs_human_review = True
+        conversation.escalation_reason = "No relevant organization evidence was found"
+    saved = _save_answer(db, conversation, answer, [], plan.crm_records)
+    if plan.proposal is not None:
+        operations.attach_proposal(db, conversation, saved, plan.proposal)
+    executions.finish_execution(db, plan.execution_id, assistant_message_id=saved.id)
+    return PreparedTurn(
+        conversation=conversation,
+        needs_model=False,
+        system_prompt="",
+        user_prompt="",
+        documents=[],
+        crm_records=plan.crm_records,
+        document_search=plan.document_search,
+        refusal=saved.content,
+        phases=plan.phases,
+        question=question,
+        summary=plan.summary,
+        execution_id=plan.execution_id,
     )
 
 
 def record_provider_failure(db: Session, conversation: Conversation, message: str) -> None:
-    _save_answer(db, conversation, message, [], [])
+    saved = _save_answer(db, conversation, message, [], [])
+    executions.fail_for_conversation(db, conversation.id, saved.id, message)
 
 
 def reject_public_turn(
@@ -331,12 +466,45 @@ def reject_public_turn(
 
 def complete_turn(db: Session, turn: PreparedTurn, client: ChatClient) -> ReplyOut:
     if turn.needs_model:
-        answer = client.complete(turn.system_prompt, turn.user_prompt).strip()
+        try:
+            answer = client.complete(turn.system_prompt, turn.user_prompt).strip()
+        except AppError as exc:
+            if exc.code not in {"llm_rate_limited", "llm_timeout", "llm_unavailable"} or not (
+                turn.documents or turn.crm_records
+            ):
+                raise
+            answer = _answer_from_evidence(turn)
         if not answer:
             raise AppError(502, "llm_failed", "The language model returned an empty answer")
     else:
         answer = turn.refusal or NO_RECORDS
     return save_completed_turn(db, turn, answer)
+
+
+def _stored_appointments(db: Session, organization_id: uuid.UUID) -> str:
+    from app.domains.automation.models import CalendarBooking
+
+    count = db.scalar(
+        select(func.count())
+        .select_from(CalendarBooking)
+        .where(CalendarBooking.organization_id == organization_id)
+    )
+    if not count:
+        return "No appointment is stored for this workspace, and no calendar booking is on file."
+    noun = "appointment is" if count == 1 else "appointments are"
+    return f"{count} {noun} stored. Nothing new was booked."
+
+
+def _answer_from_evidence(turn: PreparedTurn) -> str:
+    lines = ["The language model is busy, so this answer uses the stored records only."]
+    for document in turn.documents[:2]:
+        lines.append(f"From {document.document_title}: {document.content[:700]}")
+    for record in turn.crm_records[:4]:
+        title = record.get("title", "")
+        excerpt = record.get("excerpt", "")
+        if title or excerpt:
+            lines.append(f"{title}: {excerpt}".strip(": "))
+    return "\n\n".join(lines)
 
 
 def save_completed_turn(db: Session, turn: PreparedTurn, answer: str) -> ReplyOut:
@@ -347,7 +515,19 @@ def save_completed_turn(db: Session, turn: PreparedTurn, answer: str) -> ReplyOu
             turn.question, answer, turn.documents, turn.crm_records
         )
         saved = _save_answer(db, turn.conversation, answer, documents, crm_records)
-        message = _message_out(saved, _sources_for(db, saved.id))
+        if turn.proposal_draft is not None:
+            operations.attach_proposal(db, turn.conversation, saved, turn.proposal_draft)
+        executions.finish_execution(db, turn.execution_id, assistant_message_id=saved.id)
+        message = _message_out(
+            saved,
+            _sources_for(db, saved.id),
+            operations.proposals_for_messages(
+                db, turn.conversation.organization_id, [saved.id]
+            ).get(saved.id, []),
+            executions.steps_for_messages(
+                db, turn.conversation.organization_id, [saved.id]
+            ).get(saved.id, []),
+        )
     search = turn.document_search
     if search not in {"ready", "empty", "unconfigured", "unavailable", "skipped"}:
         search = "empty"
@@ -684,26 +864,123 @@ def _stored_read(db: Session, conversation: Conversation, read: ReadAnswer) -> P
     )
 
 
+_OPERATION_TOOLS = {
+    Intent.summary: "list_leads",
+    Intent.follow_up: "draft_customer_message",
+    Intent.appointment: "propose_appointment",
+    Intent.task: "propose_task",
+}
+
+
+def _operation_turn(
+    db: Session,
+    conversation: Conversation,
+    user_message: Message,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    intents: list[Intent],
+    content: str,
+    embedder: EmbeddingClient,
+) -> PreparedTurn:
+    asked = operations.question_for_stored_lead(db, organization_id, content)
+    excerpts = (
+        _safe_passages(db, organization_id, content, embedder)
+        if operations.needs_stored_excerpt(content)
+        else []
+    )
+    leads = operations.leads_for_question(db, organization_id, asked)
+    if not leads and excerpts:
+        blob = " ".join(item.content for item in excerpts[:3])
+        leads = operations.leads_for_question(db, organization_id, f"{asked} {blob}")
+    drafts: list[operations.ProposalDraft] = []
+    if len(leads) == 1:
+        parts: list[str] = []
+        records: list[dict[str, str]] = []
+        for intent in intents:
+            read, draft = operations.prepare_operation(
+                db, organization_id, intent, asked, lead=leads[0]
+            )
+            parts.append(read.content)
+            records.extend(read.crm_records)
+            if draft is not None:
+                drafts.append(draft)
+        if excerpts:
+            top = excerpts[0]
+            parts.append(f"From {top.document_title}: {top.content[:700]}")
+        read = ReadAnswer(
+            content="\n\n".join(parts),
+            crm_records=records,
+            documents=[],
+            searched_crm=True,
+            searched_documents=bool(excerpts),
+        )
+    else:
+        read, draft = operations.prepare_operation(db, organization_id, intents[0], asked)
+        if draft is not None:
+            drafts.append(draft)
+    execution = executions.begin_execution(
+        db,
+        organization_id=organization_id,
+        conversation_id=conversation.id,
+        user_id=user_id,
+        user_message_id=user_message.id,
+        request=content.strip(),
+    )
+    for intent in intents:
+        executions.add_step(
+            db,
+            execution,
+            tool_name=_OPERATION_TOOLS[intent],
+            arguments={"lead_name": operations.requested_name(asked) or ""},
+            status="succeeded",
+            duration_ms=0,
+            records=list(read.crm_records),
+        )
+    return _stored_operation(db, conversation, read, drafts, execution.id, excerpts)
+
+
+def _safe_passages(
+    db: Session,
+    organization_id: uuid.UUID,
+    question: str,
+    embedder: EmbeddingClient,
+) -> list[RetrievedChunk]:
+    try:
+        return search_chunks(db, organization_id, question, embedder, pipeline="hybrid")[:3]
+    except AppError:
+        return []
+
+
 def _stored_operation(
     db: Session,
     conversation: Conversation,
     read: ReadAnswer,
-    draft: operations.ProposalDraft | None,
+    draft: operations.ProposalDraft | list[operations.ProposalDraft] | None,
+    execution_id: uuid.UUID | None = None,
+    excerpts: list[RetrievedChunk] | None = None,
 ) -> PreparedTurn:
-    saved = _save_answer(db, conversation, read.content, [], read.crm_records, read.documents)
-    if draft is not None:
-        operations.attach_proposal(db, conversation, saved, draft)
+    drafts = draft if isinstance(draft, list) else ([draft] if draft is not None else [])
+    saved = _save_answer(
+        db, conversation, read.content, excerpts or [], read.crm_records, read.documents
+    )
+    for item in drafts:
+        operations.attach_proposal(db, conversation, saved, item)
+    executions.finish_execution(db, execution_id, assistant_message_id=saved.id)
+    phases = _phases("searching_crm")
+    if excerpts:
+        phases.append("retrieving_documents")
     return PreparedTurn(
         conversation=conversation,
         needs_model=False,
         system_prompt="",
         user_prompt="",
-        documents=[],
+        documents=excerpts or [],
         crm_records=read.crm_records,
-        document_search="skipped",
+        document_search="ready" if excerpts else "skipped",
         refusal=saved.content,
-        phases=_phases("searching_crm"),
+        phases=phases,
         inventory_documents=read.documents,
+        execution_id=execution_id,
     )
 
 
@@ -979,7 +1256,13 @@ def _latest_assistant(db: Session, conversation_id: uuid.UUID) -> MessageOut:
     if message is None:
         raise AppError(500, "internal_error", "An unexpected error occurred")
     proposals = operations.proposals_for_messages(db, message.organization_id, [message.id])
-    return _message_out(message, _sources_for(db, message.id), proposals.get(message.id, []))
+    steps = executions.steps_for_messages(db, message.organization_id, [message.id])
+    return _message_out(
+        message,
+        _sources_for(db, message.id),
+        proposals.get(message.id, []),
+        steps.get(message.id, []),
+    )
 
 
 def _sources_for(db: Session, message_id: uuid.UUID) -> list[MessageSource]:
@@ -992,6 +1275,7 @@ def _message_out(
     message: Message,
     sources: list[MessageSource],
     proposals: list[operations.ProposalOut] | None = None,
+    steps: list[executions.AssistantStepOut] | None = None,
 ) -> MessageOut:
     role = message.role.value if isinstance(message.role, MessageRole) else str(message.role)
     return MessageOut(
@@ -1001,6 +1285,7 @@ def _message_out(
         created_at=message.created_at,
         sources=[_source_out(source) for source in sources],
         proposals=proposals or [],
+        steps=steps or [],
     )
 
 

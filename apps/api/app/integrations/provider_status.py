@@ -85,6 +85,75 @@ def _embedding_status(settings: Settings) -> tuple[bool, str]:
     return True, "The OpenAI-compatible embedding provider is configured."
 
 
+def connection_health(db: Session, organization_id: uuid.UUID) -> list[dict[str, str | bool]]:
+    """Stored connection state. A stored token is not reported as verified."""
+
+    from sqlalchemy import select
+
+    from app.domains.integrations.calendar_models import GoogleCalendarConnection
+    from app.domains.integrations.models import IntegrationConfig
+
+    rows = list(
+        db.scalars(
+            select(IntegrationConfig)
+            .where(IntegrationConfig.organization_id == organization_id)
+            .order_by(IntegrationConfig.integration_type)
+        )
+    )
+    connections: list[dict[str, str | bool]] = []
+    for row in rows:
+        kind = getattr(row.integration_type, "value", str(row.integration_type))
+        status = getattr(row.status, "value", str(row.status))
+        connections.append(
+            {
+                "kind": kind,
+                "status": status,
+                "verified": row.verified_at is not None,
+                "detail": _safe_detail(row.verification_detail),
+            }
+        )
+    calendar = db.get(GoogleCalendarConnection, organization_id)
+    if calendar is None or not calendar.encrypted_token:
+        connections.append(
+            {
+                "kind": "google_calendar",
+                "status": "absent",
+                "verified": False,
+                "detail": "No Google calendar token is stored",
+            }
+        )
+    elif calendar.connection_error:
+        connections.append(
+            {
+                "kind": "google_calendar",
+                "status": "error",
+                "verified": False,
+                "detail": _safe_detail(calendar.connection_error)
+                or "Google calendar reported an error",
+            }
+        )
+    else:
+        connections.append(
+            {
+                "kind": "google_calendar",
+                "status": "token_stored",
+                "verified": False,
+                "detail": "A Google refresh token is stored. A slot check confirms it",
+            }
+        )
+    return connections
+
+
+def _safe_detail(value: str | None) -> str:
+    if not value:
+        return ""
+    text = " ".join(value.split())[:180]
+    lowered = text.casefold()
+    if any(marker in lowered for marker in ("bearer ", "sk_", "rk_", "re_", "whsec_", "ya29.")):
+        return ""
+    return text
+
+
 def _ollama_status(settings: Settings) -> tuple[bool, str]:
     root = settings.embedding_base_url.rstrip("/").removesuffix("/v1")
     try:

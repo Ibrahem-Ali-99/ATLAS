@@ -28,6 +28,16 @@ function isActive(status?: string) {
   return status === "scheduled" || status === "dispatching";
 }
 
+function draftGuidance(campaign: Campaign, eligible: number): string {
+  const missing: string[] = [];
+  if (!campaign.subject?.trim() || !campaign.body?.trim()) missing.push("a subject and message");
+  if (eligible < 1) missing.push("at least one eligible recipient");
+  else if (eligible > 1_000) missing.push("1,000 or fewer eligible recipients");
+  const base = "Send now or schedule for later. Messages stay in this workspace and are not delivered to customers.";
+  if (!missing.length) return `${base} This draft meets the scheduling requirements.`;
+  return `${base} Still needed: ${missing.join(", ")}.`;
+}
+
 export function CampaignDelivery({ organizationId, campaign, eligible }: {
   organizationId: string;
   campaign: Campaign;
@@ -91,9 +101,7 @@ export function CampaignDelivery({ organizationId, campaign, eligible }: {
       ) : null}
       {isDraft ? (
         <p className="text-xs text-muted-foreground">
-          {role === "admin"
-            ? "Send now or schedule for later. Messages stay in this workspace and are not delivered to customers. Add a subject, message, and 1–1,000 eligible recipients."
-            : "A workspace admin can schedule this campaign."}
+          {role === "admin" ? draftGuidance(campaign, eligible) : "A workspace admin can schedule this campaign."}
         </p>
       ) : null}
       {detail.error ? <RequestError error={detail.error} /> : null}

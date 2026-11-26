@@ -73,9 +73,16 @@ _FOLLOW_UP = re.compile(
     r"\b(draft|write|prepare)\b.{0,40}\b(follow-up|follow up|reply|response|message)\b"
 )
 _APPOINTMENT = re.compile(r"\b(request|schedule|book|propose)\b.{0,40}\b(appointment|meeting)\b")
+_BOOK_PERSON = re.compile(r"\b(book|schedule|arrange)\b")
+_NOT_APPOINTMENT = re.compile(r"\b(campaign|delivery|invoice|report)\b")
+_DRAFT_EMAIL = re.compile(r"\b(e-mail|email)\b")
 _TASK = re.compile(r"\b(create|add|make)\b.{0,40}\btask\b")
 _EXTERNAL_SEND = re.compile(
     r"\b(send|email|text)\b.{0,40}\b(message|email|customer|lead|contact)\b"
+)
+_RECORD_OVERRIDE = re.compile(
+    r"\b(ignore|disregard|override)\b.{0,120}\b(document|documents|record|records|evidence|knowledge)\b"
+    r"|\b(document|documents|record|records|evidence|knowledge)\b.{0,120}\b(ignore|disregard|override)\b"
 )
 _INJECTION = re.compile(
     r"ignore (all |any |the )?(previous |prior |above )?instructions|"
@@ -174,6 +181,11 @@ INJECTION_ANSWER = (
     "Ask a question about a stored record, or ask what I can help with."
 )
 
+RECORD_OVERRIDE_ANSWER = (
+    "I cannot ignore the stored records or replace them with a fact from this message. "
+    "Ask for the stored record and I will answer from it."
+)
+
 AMBIGUOUS_ANSWER = (
     "That word matches more than one kind of record. Name the company or the document "
     "you mean, such as a rate card, a yard, a claim rule, or a lead title, and I will "
@@ -193,6 +205,44 @@ def is_prompt_injection(question: str) -> bool:
 
 def is_bare_topic(question: str) -> bool:
     return bool(_BARE_TOPIC.fullmatch(normalize_question(question).strip(" ?.!")))
+
+
+def is_record_override(question: str) -> bool:
+    """An instruction to discard stored records and assert a different fact."""
+
+    return bool(_RECORD_OVERRIDE.search(normalize_question(question)))
+
+
+_CALENDAR_STATUS = re.compile(
+    r"\b(appointment|appointments|booking|bookings|calendar|meeting|meetings)\b"
+)
+
+
+def asks_for_stored_appointment(question: str) -> bool:
+    """A question about an appointment already on file, not a request to create one."""
+
+    text = normalize_question(question)
+    if _BOOK_PERSON.search(text) or _APPOINTMENT.search(text) or _FOLLOW_UP.search(text):
+        return False
+    return bool(_CALENDAR_STATUS.search(text))
+
+
+def operation_intents(question: str) -> list[Intent]:
+    """Actions this turn may prepare. A direct send stays a refusal, not a draft."""
+
+    text = normalize_question(question)
+    if _EXTERNAL_SEND.search(text) and not _FOLLOW_UP.search(text):
+        return []
+    found: list[Intent] = []
+    if _FOLLOW_UP.search(text) or _DRAFT_EMAIL.search(text):
+        found.append(Intent.follow_up)
+    if _APPOINTMENT.search(text) or (
+        _BOOK_PERSON.search(text) and not _NOT_APPOINTMENT.search(text)
+    ):
+        found.append(Intent.appointment)
+    if _TASK.search(text):
+        found.append(Intent.task)
+    return found
 
 
 def route_question(question: str, *, has_history: bool) -> Intent:

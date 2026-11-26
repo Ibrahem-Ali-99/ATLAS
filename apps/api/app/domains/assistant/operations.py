@@ -23,7 +23,8 @@ from app.domains.assistant.models import AssistantProposal, Conversation, Messag
 from app.domains.assistant.routing import Intent
 from app.domains.assistant.schemas import ProposalOut
 from app.domains.automation.models import WorkflowTask
-from app.domains.crm.models import Company, Contact, Inquiry, Lead
+from app.domains.crm import service as crm
+from app.domains.crm.models import Company, Contact, Inquiry, Lead, LeadStatus
 from app.domains.inbox.models import InboxConversation, InboxMessage
 
 _NAME = re.compile(r"\b(?:for|about|with)\s+(.+)$", re.IGNORECASE)
@@ -32,6 +33,11 @@ _SUMMARY_NAME = re.compile(
     re.IGNORECASE,
 )
 _LEADING_KIND = re.compile(r"^(?:the\s+)?(?:lead|customer|contact)\s+", re.IGNORECASE)
+_OPEN_LEAD = re.compile(
+    r"^(?:the\s+|an?\s+)?(?:first|next|earliest|top)\s+(?:open\s+|qualified\s+|new\s+)?"
+    r"(?:lead|customer)$|^(?:an?\s+)?open\s+lead$|^(?:that|this)\s+lead$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -42,13 +48,36 @@ class ProposalDraft:
     payload: dict[str, Any]
 
 
-def prepare_operation(
-    db: Session, organization_id: uuid.UUID, intent: Intent, question: str
-) -> tuple[ReadAnswer, ProposalDraft | None]:
+def question_for_stored_lead(db: Session, organization_id: uuid.UUID, question: str) -> str:
+    """Replace 'the first open lead' with a stored title. A real name is left as written."""
+
     name = requested_name(question)
-    if name is None:
-        return _read("Name the lead or customer so I can use the stored record."), None
-    leads = _matching_leads(db, organization_id, name)
+    if name is None or _OPEN_LEAD.search(name.strip()) is None:
+        return question
+    title = _priority_lead_title(db, organization_id)
+    if title is None:
+        return question
+    start = question.lower().rfind(name.lower())
+    if start < 0:
+        return question
+    return question[:start] + title
+
+
+def prepare_operation(
+    db: Session,
+    organization_id: uuid.UUID,
+    intent: Intent,
+    question: str,
+    lead: Lead | None = None,
+) -> tuple[ReadAnswer, ProposalDraft | None]:
+    if lead is not None:
+        leads = [lead]
+    else:
+        leads = leads_for_question(db, organization_id, question)
+    if not leads and lead is None:
+        name = requested_name(question)
+        if name and _literal_name(name):
+            leads = _matching_leads(db, organization_id, name)
     if len(leads) > 1:
         lines = [f"- {_clip(lead.title, 200)}" for lead in leads]
         return (
@@ -60,14 +89,18 @@ def prepare_operation(
             None,
         )
     if intent is Intent.summary and not leads:
-        contacts = _matching_contacts(db, organization_id, name)
+        name = requested_name(question)
+        contacts = _matching_contacts(db, organization_id, name) if name and _literal_name(name) else []
         if len(contacts) == 1:
             return _contact_summary(db, organization_id, contacts[0]), None
         if len(contacts) > 1:
             lines = [f"- {_clip(contact.full_name, 200)}" for contact in contacts]
             return _read("More than one contact matches that name.\n\n" + "\n".join(lines)), None
     if not leads:
-        return _read(f'No lead in this organization matches "{name}".'), None
+        name = requested_name(question)
+        if name and _literal_name(name):
+            return _read(f'No lead in this organization matches "{name}".'), None
+        return _read("Name the lead or customer so I can use the stored record."), None
     lead = leads[0]
     if intent is Intent.summary:
         return _lead_summary(db, organization_id, lead), None
@@ -78,16 +111,181 @@ def prepare_operation(
     return _follow_up_proposal(db, organization_id, lead)
 
 
+_CLAUSE = re.compile(
+    r"[.?!]|,\s|\s+\b(?:about|including|before|then|and)\b",
+    re.IGNORECASE,
+)
+_FACTISH = re.compile(
+    r"\b(who|when|where|what|which|how|does|do|is|are|email|phone|status|count|"
+    r"policy|document|note|notes)\b",
+    re.IGNORECASE,
+)
+_STOP_NAMES = {
+    "and",
+    "are",
+    "book",
+    "but",
+    "can",
+    "contact",
+    "customer",
+    "email",
+    "for",
+    "from",
+    "had",
+    "has",
+    "her",
+    "his",
+    "lead",
+    "not",
+    "note",
+    "our",
+    "send",
+    "task",
+    "that",
+    "the",
+    "them",
+    "they",
+    "this",
+    "with",
+    "you",
+    "your",
+}
+
+
 def requested_name(question: str) -> str | None:
     text = " ".join(question.strip().split())
     match = _NAME.search(text) or _SUMMARY_NAME.search(text)
     if match is None:
         return None
     name = _LEADING_KIND.sub("", match.group(1).strip(" .?!"))
-    name = name.strip(" .?!")
+    name = _CLAUSE.split(name, maxsplit=1)[0]
+    name = name.strip(" .?!,;:")
     if len(name) < 3:
         return None
     return name[:200]
+
+
+def _literal_name(name: str) -> bool:
+    return len(name) <= 80 and len(name.split()) <= 6 and "." not in name
+
+
+def _folded(text: str) -> str:
+    cleaned = text.casefold().replace("’", "'")
+    cleaned = re.sub(r"'s\b", " ", cleaned)
+    cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned)
+    return f" {cleaned.strip()} "
+
+
+def _phrase(name: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", name.casefold()).split())
+
+
+def contacts_named_in(db: Session, organization_id: uuid.UUID, text: str) -> list[Contact]:
+    """Contacts in this organization whose stored name appears in the text."""
+
+    folded = _folded(text)
+    contacts = list(
+        db.scalars(
+            select(Contact)
+            .where(Contact.organization_id == organization_id, Contact.archived_at.is_(None))
+            .order_by(Contact.full_name.asc())
+            .limit(300)
+        ).all()
+    )
+    matched = [
+        contact
+        for contact in contacts
+        if len(_phrase(contact.full_name)) >= 5 and f" {_phrase(contact.full_name)} " in folded
+    ]
+    if matched:
+        return matched
+    groups: dict[str, list[Contact]] = {}
+    for contact in contacts:
+        tokens = _phrase(contact.full_name).split()
+        if not tokens:
+            continue
+        first = tokens[0]
+        if len(first) < 3 or first in _STOP_NAMES:
+            continue
+        groups.setdefault(first, []).append(contact)
+    return [
+        group[0]
+        for token, group in groups.items()
+        if len(group) == 1 and f" {token} " in folded
+    ]
+
+
+def leads_for_question(db: Session, organization_id: uuid.UUID, question: str) -> list[Lead]:
+    """Leads named in the question, or the lead linked to one named contact."""
+
+    folded = _folded(question)
+    leads = list(
+        db.scalars(
+            select(Lead)
+            .where(Lead.organization_id == organization_id, Lead.archived_at.is_(None))
+            .order_by(Lead.updated_at.desc())
+            .limit(300)
+        ).all()
+    )
+    titled = [
+        lead
+        for lead in leads
+        if len(_phrase(lead.title)) >= 5 and f" {_phrase(lead.title)} " in folded
+    ]
+    if len(titled) == 1:
+        return titled
+    contacts = contacts_named_in(db, organization_id, question)
+    if len(contacts) == 1:
+        linked = [lead for lead in leads if lead.contact_id == contacts[0].id]
+        if linked:
+            return linked[:8]
+    return titled[:8]
+
+
+def needs_stored_excerpt(question: str) -> bool:
+    """A second clause asks for a stored fact as well as the action."""
+
+    text = " ".join(question.split())
+    if len(text) < 40:
+        return False
+    return bool(re.search(r"[.?!]|\b(include|including|before|still|what|when)\b", text, re.I))
+
+
+def relates_written_person(question: str) -> bool:
+    text = question.casefold()
+    written = re.search(r"\b(document|documents|note|notes|file|passage|policy|procedure)\b", text)
+    person = re.search(r"\b(contact|contacts|crm|customer)\b", text)
+    return bool(written and person)
+
+
+def clarify_named_work(db: Session, organization_id: uuid.UUID, question: str) -> str | None:
+    """Identify one named person when the request does not ask for a fact or an action."""
+
+    from app.domains.assistant.routing import operation_intents
+
+    if operation_intents(question) or _FACTISH.search(question) or relates_written_person(question):
+        return None
+    contacts = contacts_named_in(db, organization_id, question)
+    if len(contacts) > 1:
+        names = ", ".join(_clip(contact.full_name, 80) for contact in contacts[:4])
+        return f"Which person do you mean: {names}?"
+    if len(contacts) != 1:
+        return None
+    contact = contacts[0]
+    leads = [
+        lead
+        for lead in leads_for_question(db, organization_id, question)
+        if lead.contact_id == contact.id
+    ]
+    if len(leads) == 1:
+        return (
+            f"{_clip(contact.full_name, 200)} is a contact on {_clip(leads[0].title, 200)}. "
+            "What should I do with that lead?"
+        )
+    return (
+        f"{_clip(contact.full_name, 200)} is a contact in this workspace. "
+        "What should I do for them?"
+    )
 
 
 def attach_proposal(
@@ -401,15 +599,27 @@ def _task_proposal(
     return _read(summary + f"\n\n- Title: {title}\n- Detail: {description}", [_lead_record(lead)]), draft
 
 
+def _customer_context(
+    db: Session, organization_id: uuid.UUID, lead: Lead
+) -> tuple[Contact | None, Company | None]:
+    contact = _contact(db, organization_id, lead.contact_id) if lead.contact_id else None
+    company = _company(db, organization_id, contact.company_id) if contact and contact.company_id else None
+    return contact, company
+
+
 def _appointment_proposal(
     db: Session, organization_id: uuid.UUID, lead: Lead
 ) -> tuple[ReadAnswer, ProposalDraft | None]:
     inquiry = _latest_inquiry(db, organization_id, lead.id)
     if inquiry is None:
         return _read("This lead has no inquiry, so an appointment approval cannot be requested."), None
+    contact, company = _customer_context(db, organization_id, lead)
+    who = _clip(contact.full_name, 200) if contact else "the stored lead"
+    where = f" at {_clip(company.name, 200)}" if company else ""
     body = f"Appointment requested: {_clip(inquiry.subject, 200)}"
     summary = (
-        f"Proposed appointment for {_clip(lead.title, 200)}. "
+        f"Proposed appointment for {_clip(lead.title, 200)}{where} with {who}. "
+        f"The inquiry is {_clip(inquiry.subject, 200)}. "
         "Choose a time and request approval. Nothing is booked until an administrator approves it."
     )
     draft = ProposalDraft(
@@ -418,7 +628,26 @@ def _appointment_proposal(
         summary=summary,
         payload={"lead_id": str(lead.id), "inquiry_id": str(inquiry.id), "body": body},
     )
-    return _read(summary + f"\n\n- Request: {body}", [_lead_record(lead)]), draft
+    records = [_lead_record(lead)]
+    if contact is not None:
+        records.append(
+            {
+                "record_type": "contact",
+                "record_id": str(contact.id),
+                "title": _clip(contact.full_name, 200),
+                "excerpt": contact.email or contact.full_name,
+            }
+        )
+    if company is not None:
+        records.append(
+            {
+                "record_type": "company",
+                "record_id": str(company.id),
+                "title": _clip(company.name, 200),
+                "excerpt": company.industry or company.name,
+            }
+        )
+    return _read(summary + f"\n\n- Request: {body}", records), draft
 
 
 def _follow_up_proposal(
@@ -440,7 +669,13 @@ def _follow_up_proposal(
             None,
         )
     source = _latest_customer_text(db, organization_id, contact.id) or inquiry.body
-    body = f'We received your message: "{_clip(source, 400)}"'
+    company = _company(db, organization_id, contact.company_id) if contact.company_id else None
+    where = f" at {_clip(company.name, 120)}" if company else ""
+    body = (
+        f"Hello {_clip(contact.full_name, 120)}, this follows up on "
+        f"{_clip(lead.title, 160)}{where}. "
+        f'You wrote: "{_clip(source, 320)}". Reply with how you would like to proceed.'
+    )
     summary = (
         f"Proposed follow-up for {_clip(lead.title, 200)}. "
         "Requesting approval does not send it."
@@ -532,6 +767,25 @@ def _inbox_messages(
         .limit(3)
     ).all()
     return [(message, thread) for message, thread in rows]
+
+
+def _priority_lead_title(db: Session, organization_id: uuid.UUID) -> str | None:
+    for status in (LeadStatus.new, LeadStatus.contacted, LeadStatus.qualified):
+        rows, _total = crm.list_leads(
+            db,
+            organization_id,
+            q=None,
+            status=status.value,
+            company_id=None,
+            owner_user_id=None,
+            origin=None,
+            page=1,
+            page_size=8,
+        )
+        for lead in rows:
+            if _latest_inquiry(db, organization_id, lead.id) is not None:
+                return lead.title
+    return None
 
 
 def _matching_leads(db: Session, organization_id: uuid.UUID, name: str) -> list[Lead]:

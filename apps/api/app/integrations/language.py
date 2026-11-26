@@ -1,5 +1,8 @@
 import json
+import random
+import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import httpx
@@ -10,6 +13,23 @@ from app.core.errors import AppError
 
 logger = structlog.get_logger(__name__)
 HttpTransport = httpx.BaseTransport
+_MAX_PROVIDER_ATTEMPTS = 3
+_MAX_RETRY_WAIT = 8.0
+_TRANSIENT_LLM = {"llm_rate_limited", "llm_timeout"}
+
+
+def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
+    """Honor Retry-After, otherwise wait with exponential backoff and jitter."""
+
+    if response is not None:
+        raw = response.headers.get("retry-after")
+        if raw:
+            try:
+                return min(max(float(raw), 0.0), _MAX_RETRY_WAIT)
+            except ValueError:
+                pass
+    base = 0.4 * (2**attempt)
+    return min(base + random.uniform(0, 0.2), _MAX_RETRY_WAIT)
 
 
 class EmbeddingClient(Protocol):
@@ -22,6 +42,21 @@ class ChatClient(Protocol):
     def complete(self, system: str, user: str) -> str: ...
 
     def stream(self, system: str, user: str) -> Iterator[str]: ...
+
+
+@dataclass(frozen=True)
+class ModelToolCall:
+    id: str
+    name: str
+    arguments: str
+
+
+@dataclass(frozen=True)
+class ModelToolResult:
+    content: str | None
+    tool_calls: list[ModelToolCall]
+    prompt_tokens: int | None
+    completion_tokens: int | None
 
 
 class OpenAICompatibleEmbeddingClient:
@@ -77,6 +112,7 @@ class OpenAICompatibleChatClient:
         self._settings = settings
         self._transport = transport
         self._output_limit: int | None = None
+        self._retry_delay = 0.0
 
     def limit_output(self, tokens: int) -> None:
         self._output_limit = tokens
@@ -95,25 +131,32 @@ class OpenAICompatibleChatClient:
 
     def stream(self, system: str, user: str) -> Iterator[str]:
         self.ensure_configured()
-        for attempt in range(2):
+        for attempt in range(_MAX_PROVIDER_ATTEMPTS):
             yielded = False
+            self._retry_delay = 0.0
             try:
-                for token in self._read_stream(system, user):
+                for token in self._read_stream(system, user, attempt):
                     yielded = True
                     yield token
                 return
             except AppError as exc:
-                if yielded or attempt == 1 or exc.code not in {"llm_rate_limited", "llm_timeout"}:
+                if (
+                    yielded
+                    or attempt == _MAX_PROVIDER_ATTEMPTS - 1
+                    or exc.code not in _TRANSIENT_LLM
+                ):
                     raise
+                time.sleep(self._retry_delay or _retry_delay(None, attempt))
             except httpx.TimeoutException as exc:
-                if yielded or attempt == 1:
+                if yielded or attempt == _MAX_PROVIDER_ATTEMPTS - 1:
                     raise AppError(504, "llm_timeout", "The language model timed out.") from exc
+                time.sleep(_retry_delay(None, attempt))
             except httpx.ConnectError as exc:
                 raise AppError(
                     503, "llm_unavailable", "The language model could not be reached."
                 ) from exc
 
-    def _read_stream(self, system: str, user: str) -> Iterator[str]:
+    def _read_stream(self, system: str, user: str, attempt: int = 0) -> Iterator[str]:
         body: dict[str, Any] = {
             "model": self._settings.llm_model,
             "stream": True,
@@ -148,6 +191,8 @@ class OpenAICompatibleChatClient:
                 json=body,
             )
         with response_context as response:
+            if response.status_code in {429, 503}:
+                self._retry_delay = _retry_delay(response, attempt)
             _raise_for_provider_status(response.status_code, kind="llm")
             for line in response.iter_lines():
                 if not line.startswith("data:"):
@@ -181,6 +226,119 @@ class OpenAICompatibleChatClient:
                 text = delta.get("content")
                 if isinstance(text, str) and text:
                     yield text
+
+    def complete_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        *,
+        tool_choice: str = "auto",
+    ) -> ModelToolResult:
+        """One non-streaming tool-calling turn. Reasoning fields are discarded."""
+
+        self.ensure_configured()
+        body: dict[str, Any] = {
+            "model": self._settings.llm_model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": tool_choice,
+        }
+        output_limit = self._output_limit
+        if output_limit is None:
+            output_limit = self._settings.llm_max_output_tokens
+        if output_limit is not None:
+            body["max_tokens"] = output_limit
+        response: httpx.Response | None = None
+        for attempt in range(_MAX_PROVIDER_ATTEMPTS):
+            try:
+                response = _post_chat(self, body)
+            except AppError as exc:
+                if attempt == _MAX_PROVIDER_ATTEMPTS - 1 or exc.code not in _TRANSIENT_LLM:
+                    raise
+                time.sleep(_retry_delay(None, attempt))
+                continue
+            if response.status_code in {429, 503} and attempt < _MAX_PROVIDER_ATTEMPTS - 1:
+                time.sleep(_retry_delay(response, attempt))
+                continue
+            break
+        if response is None:
+            raise AppError(504, "llm_timeout", "The language model timed out.")
+        _raise_for_provider_status(response.status_code, kind="llm")
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as exc:
+            raise AppError(
+                502, "llm_failed", "The language model returned an unexpected response"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise AppError(502, "llm_failed", "The language model returned an unexpected response")
+        _log_usage("llm_usage", payload, self._settings.llm_provider)
+        return _tool_result(payload)
+
+
+def _post_chat(client: OpenAICompatibleChatClient, body: dict[str, Any]) -> httpx.Response:
+    url = f"{client._settings.llm_base_url.rstrip('/')}/chat/completions"
+    headers = _bearer(client._settings.llm_api_key)
+    timeout = client._settings.llm_timeout_seconds
+    try:
+        if client._transport is None:
+            return httpx.post(url, headers=headers, json=body, timeout=timeout)
+        with httpx.Client(transport=client._transport, timeout=timeout) as http:
+            return http.post(url, headers=headers, json=body)
+    except httpx.TimeoutException as exc:
+        raise AppError(504, "llm_timeout", "The language model timed out.") from exc
+    except httpx.ConnectError as exc:
+        raise AppError(503, "llm_unavailable", "The language model could not be reached.") from exc
+
+
+def _tool_result(payload: dict[str, Any]) -> ModelToolResult:
+    if isinstance(payload.get("error"), dict):
+        raise AppError(502, "llm_failed", "The language model returned an unexpected response")
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise AppError(502, "llm_failed", "The language model returned an unexpected response")
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        raise AppError(502, "llm_failed", "The language model returned an unexpected response")
+    content = message.get("content")
+    text = content.strip() if isinstance(content, str) and content.strip() else None
+    calls: list[ModelToolCall] = []
+    raw_calls = message.get("tool_calls")
+    if isinstance(raw_calls, list):
+        for index, raw in enumerate(raw_calls):
+            parsed = _one_tool_call(raw, index)
+            if parsed is not None:
+                calls.append(parsed)
+    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    prompt = usage.get("prompt_tokens")
+    completion = usage.get("completion_tokens")
+    return ModelToolResult(
+        content=text,
+        tool_calls=calls,
+        prompt_tokens=prompt if isinstance(prompt, int) else None,
+        completion_tokens=completion if isinstance(completion, int) else None,
+    )
+
+
+def _one_tool_call(raw: object, index: int) -> ModelToolCall | None:
+    if not isinstance(raw, dict):
+        return None
+    function = raw.get("function")
+    if not isinstance(function, dict):
+        return None
+    name = function.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    arguments = function.get("arguments")
+    if isinstance(arguments, dict):
+        encoded = json.dumps(arguments, default=str)
+    elif isinstance(arguments, str):
+        encoded = arguments
+    else:
+        encoded = "{}"
+    call_id = raw.get("id")
+    identifier = call_id if isinstance(call_id, str) and call_id else f"call_{index}"
+    return ModelToolCall(id=identifier[:80], name=name.strip()[:80], arguments=encoded[:4000])
 
 
 def _embedding_vectors(payload: object, count: int, dimensions: int) -> list[list[float]]:
@@ -293,7 +451,7 @@ def _post_with_retry(
     transport: HttpTransport | None = None,
 ) -> httpx.Response:
     response: httpx.Response | None = None
-    for attempt in range(2):
+    for attempt in range(_MAX_PROVIDER_ATTEMPTS):
         try:
             if transport is None:
                 response = httpx.post(url, headers=headers, json=body, timeout=timeout)
@@ -301,12 +459,14 @@ def _post_with_retry(
                 with httpx.Client(transport=transport, timeout=timeout) as client:
                     response = client.post(url, headers=headers, json=body)
         except httpx.TimeoutException as exc:
-            if attempt == 1:
+            if attempt == _MAX_PROVIDER_ATTEMPTS - 1:
                 raise AppError(504, timeout_code, "The embedding provider timed out.") from exc
+            time.sleep(_retry_delay(None, attempt))
             continue
         except httpx.ConnectError as exc:
             raise AppError(503, unavailable, unavailable_message) from exc
-        if response.status_code in {429, 503} and attempt == 0:
+        if response.status_code in {429, 503} and attempt < _MAX_PROVIDER_ATTEMPTS - 1:
+            time.sleep(_retry_delay(response, attempt))
             continue
         if response.status_code == 429:
             raise AppError(

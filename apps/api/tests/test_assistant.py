@@ -100,7 +100,11 @@ def test_assistant_cites_documents_and_crm_and_refuses_other_organizations(
         headers=headers,
     )
     assert pipeline.status_code == 200, pipeline.text
-    assert pipeline.json()["message"]["sources"] == []
+    pipeline_body = pipeline.json()["message"]["content"]
+    assert "North pier expansion" in pipeline_body
+    assert "qualified" in pipeline_body.lower()
+    assert "cold storage" not in pipeline_body.lower()
+    assert any(item["record_type"] == "lead" for item in pipeline.json()["message"]["sources"])
 
     missing = grounded_client.post(
         f"/api/v1/organizations/{org}/conversations/{conversation_id}/messages",
@@ -153,7 +157,7 @@ def test_assistant_reports_missing_model_credentials(client: TestClient, db: Ses
     assert lead.status_code == 201
     response = client.post(
         f"/api/v1/organizations/{org}/conversations/{created.json()['id']}/messages",
-        json={"content": "What is the status of the North pier expansion?"},
+        json={"content": "Please spell pallet."},
         headers=headers,
     )
     assert response.status_code == 503

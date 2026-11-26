@@ -90,9 +90,12 @@ class _Response:
 
 
 class _Stream:
-    def __init__(self, status: int, lines: list[str]) -> None:
+    def __init__(
+        self, status: int, lines: list[str], headers: dict[str, str] | None = None
+    ) -> None:
         self.status_code = status
         self._lines = lines
+        self.headers = headers or {}
 
     def __enter__(self) -> "_Stream":
         return self
@@ -351,21 +354,25 @@ def test_groq_asks_for_a_json_object_when_the_prompt_requires_json(
 
 def test_chat_retries_a_rate_limit_once(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {"count": 0}
+    waits: list[float] = []
+    monkeypatch.setattr("app.integrations.language.time.sleep", waits.append)
+    monkeypatch.setattr(
+        "app.domains.observability.tracing.record_operation", lambda **_kwargs: None
+    )
 
     def stream(*_args: object, **_kwargs: object) -> _Stream:
         calls["count"] += 1
         if calls["count"] == 1:
-            return _Stream(429, [])
+            return _Stream(429, [], {"retry-after": "1.5"})
         return _Stream(200, ['data: {"choices":[{"delta":{"content":"ok"}}]}', "data: [DONE]"])
 
     monkeypatch.setattr(httpx, "stream", stream)
-    monkeypatch.setattr(
-        "app.domains.observability.tracing.record_operation", lambda **_kwargs: None
-    )
     client = OpenAICompatibleChatClient(_configured())
     assert client.complete("system", "user") == "ok"
     assert calls["count"] == 2
+    assert waits == [1.5]
     calls["count"] = 0
+    waits.clear()
 
     def always_limited(*_args: object, **_kwargs: object) -> _Stream:
         calls["count"] += 1
@@ -375,7 +382,20 @@ def test_chat_retries_a_rate_limit_once(monkeypatch: pytest.MonkeyPatch) -> None
     with pytest.raises(AppError) as exc:
         client.complete("system", "user")
     assert exc.value.code == "llm_rate_limited"
-    assert calls["count"] == 2
+    assert calls["count"] == 3
+    assert len(waits) == 2
+
+    calls["count"] = 0
+
+    def unauthorized(*_args: object, **_kwargs: object) -> _Stream:
+        calls["count"] += 1
+        return _Stream(401, [])
+
+    monkeypatch.setattr(httpx, "stream", unauthorized)
+    with pytest.raises(AppError) as denied:
+        client.complete("system", "user")
+    assert denied.value.code == "llm_unauthorized"
+    assert calls["count"] == 1
 
 
 def test_chat_timeout_is_explicit(monkeypatch: pytest.MonkeyPatch) -> None:

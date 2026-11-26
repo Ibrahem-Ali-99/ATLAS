@@ -21,6 +21,9 @@ from app.domains.assistant.schemas import (
     ConversationDetail,
     ConversationOut,
     ConversationRename,
+    ExecutionOut,
+    ExecutionPage,
+    ExecutionStepOut,
     MessageCreate,
     ProposalOut,
     ProposalSubmit,
@@ -85,6 +88,77 @@ def organization_chat(request: Request, member: Member, db: DbSession) -> ChatCl
     if override is not None:
         return cast(ChatClient, override())
     return get_chat_client(db, member.organization.id)
+
+
+@router.get("/assistant-executions", response_model=ExecutionPage)
+def list_assistant_executions(member: Member, db: DbSession, page: int = 1) -> ExecutionPage:
+    from app.domains.assistant import executions
+
+    current = page if page >= 1 else 1
+    rows, total = executions.list_executions(
+        db,
+        member.organization.id,
+        member.user.id,
+        member.membership.role,
+        page=current,
+        page_size=20,
+    )
+    return ExecutionPage(
+        items=[_execution_detail(row, executions.steps_for_execution(db, row.id)) for row in rows],
+        page=current,
+        page_size=20,
+        total=total,
+    )
+
+
+@router.get("/assistant-executions/{execution_id}", response_model=ExecutionOut)
+def get_assistant_execution(
+    execution_id: uuid.UUID, member: Member, db: DbSession
+) -> ExecutionOut:
+    from app.domains.assistant import executions
+
+    row, steps = executions.get_execution(
+        db,
+        member.organization.id,
+        member.user.id,
+        member.membership.role,
+        execution_id,
+    )
+    return _execution_detail(row, steps)
+
+
+def _execution_detail(row: object, steps: list[object]) -> ExecutionOut:
+    from app.domains.assistant.models import AssistantExecution, AssistantExecutionStep
+
+    if not isinstance(row, AssistantExecution):
+        raise AppError(500, "internal_error", "An unexpected error occurred")
+    parsed = [step for step in steps if isinstance(step, AssistantExecutionStep)]
+    status = row.status if row.status in {"running", "completed", "failed"} else "failed"
+    return ExecutionOut(
+        id=row.id,
+        conversation_id=row.conversation_id,
+        request=row.request,
+        status=status,  # type: ignore[arg-type]
+        tools=list(row.selected_tools),
+        tokens_in=row.tokens_in,
+        tokens_out=row.tokens_out,
+        error_message=row.error_message,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        steps=[
+            ExecutionStepOut(
+                sequence=step.sequence,
+                tool_name=step.tool_name,
+                status=step.status,  # type: ignore[arg-type]
+                duration_ms=step.duration_ms,
+                arguments=step.arguments,
+                records=step.records,
+                error_message=step.error_message,
+                recovery=step.recovery,
+            )
+            for step in parsed
+        ],
+    )
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
@@ -327,7 +401,12 @@ def stream_message(
         started = time.perf_counter()
         try:
             for phase in turn.phases:
-                if phase in {"preparing", "searching_crm", "retrieving_documents"}:
+                if phase in {
+                    "preparing",
+                    "selecting_tools",
+                    "searching_crm",
+                    "retrieving_documents",
+                }:
                     yield _event("phase", {"phase": phase})
             if turn.holds_evidence():
                 yield _event("phase", {"phase": "verifying"})
