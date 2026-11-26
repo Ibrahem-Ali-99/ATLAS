@@ -21,8 +21,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError } from "@/lib/api";
+import { ApiError, sessionQueryOptions } from "@/lib/api";
 import { isEvaluationConversation } from "@/lib/conversations";
+import { isDemoSession } from "@/lib/demo-session";
 import { RichText } from "@/components/assistant/rich-text";
 import { archiveConversation, createConversation, dismissAssistantProposal, getConversation, listConversations, renameConversation, restoreConversation, streamConversationMessage, submitAssistantProposal } from "@/lib/records-api";
 import type { AssistantProposal, AssistantReply, ChatMessage, Conversation, ConversationDetail, MessageSource } from "@/lib/records";
@@ -48,6 +49,8 @@ function AssistantWorkspace({
   organizationName: string;
 }) {
   const router = useRouter();
+  const session = useQuery(sessionQueryOptions);
+  const demonstration = isDemoSession(session.data);
   const params = useSearchParams();
   const conversationId = params.get("conversation");
   const queryClient = useQueryClient();
@@ -253,7 +256,11 @@ function AssistantWorkspace({
                 <Button type="button" size="sm" variant="ghost" onClick={() => setTitleDraft(null)}>Cancel</Button>
               </form>
             )}
-            <p className="mt-1 text-sm text-muted-foreground">Ask ATLAS about your workspace, then follow the evidence.</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {demonstration
+                ? "Demonstration mode. Answers use the Harbor & Co. records in this session and do not call a paid model."
+                : "Ask ATLAS about your workspace, then follow the evidence."}
+            </p>
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             {conversationId && titleDraft === null ? (
@@ -291,6 +298,7 @@ function AssistantWorkspace({
             {detail.data?.messages.map((message) => (
               <MessageView
                 key={message.id}
+                demonstration={demonstration}
                 message={message}
                 proposalPending={proposalAction.isPending}
                 onSource={(source) => {
@@ -514,12 +522,14 @@ function EmptyThread({
 }
 
 function MessageView({
+  demonstration,
   message,
   proposalPending,
   onSource,
   onProposal,
   onDismiss,
 }: {
+  demonstration: boolean;
   message: ChatMessage;
   proposalPending: boolean;
   onSource: (source: MessageSource) => void;
@@ -539,7 +549,7 @@ function MessageView({
   }
   return (
     <article>
-      <p className="flex items-center gap-2 text-xs font-medium text-primary"><Bot size={16} /> ATLAS Assistant</p>
+      <p className="flex items-center gap-2 text-xs font-medium text-primary"><Bot size={16} /> {demonstration ? "Demonstration assistant" : "ATLAS Assistant"}</p>
       {refused ? (
         <div className="mt-3 rounded-[10px] bg-muted px-4 py-3">
           <p className="text-[10px] uppercase tracking-[0.14em] text-subtle">No supporting evidence</p>

@@ -118,6 +118,11 @@ def test_anonymous_launch_opens_harbor_and_blocks_credentials(client: TestClient
     )
     assert reply.status_code == 200, reply.text
     assert "Bonded warehousing is available at the north pier yard." in reply.text
+    status = client.get(f"/api/v1/organizations/{organization_id}/provider-status")
+    assert status.status_code == 200, status.text
+    payload = status.json()
+    assert payload["llm_provider"] == "double"
+    assert payload["llm_detail"].startswith("Demonstration mode.")
 
 
 def test_visitors_cannot_read_each_other(client: TestClient) -> None:
@@ -149,6 +154,11 @@ def test_restart_replaces_only_the_visitor_workspace(
     stored = Path(document.storage_path)
     assert stored.is_file()
     db.rollback()
+    other = upsert_organization(db, name="Northwind Traders", slug="northwind")
+    lookalike = upsert_organization(db, name="Harbor Operations", slug="harbor-operations")
+    db.commit()
+    other_id, lookalike_id = other.id, lookalike.id
+    db.rollback()
     restarted = client.post("/api/v1/demo/sessions/restart", headers={"X-CSRF-Token": csrf})
     assert restarted.status_code == 200, restarted.text
     replacement = uuid.UUID(_org(restarted.json()))
@@ -160,6 +170,9 @@ def test_restart_replaces_only_the_visitor_workspace(
     assert (isolated_storage / "keep.txt").is_file()
     companies = client.get(f"/api/v1/organizations/{replacement}/companies")
     assert any(item["name"] == "Harbor & Co." for item in companies.json()["items"])
+    db.expire_all()
+    assert db.get(Organization, other_id) is not None
+    assert db.get(Organization, lookalike_id) is not None
 
 
 def test_expired_session_is_rejected_and_cleanup_keeps_other_organizations(
@@ -167,7 +180,12 @@ def test_expired_session_is_rejected_and_cleanup_keeps_other_organizations(
 ) -> None:
     body, _csrf = _launch(client)
     visitor_id = uuid.UUID(_org(body))
+    first_cookie = client.cookies.get("atlas_session")
+    client.cookies.clear()
+    second, _csrf = _launch(client)
+    second_id = uuid.UUID(_org(second))
     other = upsert_organization(db, name="Northwind Traders", slug="northwind")
+    lookalike = upsert_organization(db, name="Harbor Operations", slug="harbor-operations")
     db.commit()
     session = db.scalar(
         select(UserSession).where(UserSession.user_id == uuid.UUID(str(body["user"]["id"])))
@@ -175,11 +193,17 @@ def test_expired_session_is_rejected_and_cleanup_keeps_other_organizations(
     assert session is not None
     session.expires_at = datetime.now(UTC) - timedelta(minutes=1)
     db.commit()
+    db.rollback()
+    assert first_cookie is not None
+    client.cookies.clear()
+    client.cookies.set("atlas_session", first_cookie)
     assert client.get("/api/v1/auth/me").status_code == 401
     assert cleanup_expired(db) == 1
     db.expire_all()
     assert db.get(Organization, visitor_id) is None
+    assert db.get(Organization, second_id) is not None
     assert db.get(Organization, other.id) is not None
+    assert db.get(Organization, lookalike.id) is not None
 
 
 def test_launch_rate_upload_and_request_limits(
@@ -213,6 +237,61 @@ def test_launch_rate_upload_and_request_limits(
     )
     assert oversized.status_code == 422
     assert oversized.json()["error"]["code"] == "demo_limited"
+
+
+def test_forwarded_address_does_not_reset_the_launch_limit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(access, "LAUNCH_LIMIT", 1)
+    opened = client.post("/api/v1/demo/sessions")
+    assert opened.status_code == 200, opened.text
+    spoofed = client.post(
+        "/api/v1/demo/sessions",
+        headers={
+            "X-Forwarded-For": "203.0.113.50",
+            "X-Real-IP": "203.0.113.50",
+            "Forwarded": "for=203.0.113.50",
+        },
+    )
+    assert spoofed.status_code == 429
+    assert spoofed.json()["error"]["code"] == "rate_limited"
+
+
+def test_concurrent_launches_stop_at_the_active_organization_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    from app.core.database import SessionLocal
+    from app.core.errors import AppError
+    from app.domains.demo.service import launch_visitor
+
+    monkeypatch.setattr(access, "MAX_ACTIVE_VISITORS", 1)
+    barrier = threading.Barrier(2)
+    outcomes: list[str] = []
+    guard = threading.Lock()
+
+    def attempt() -> None:
+        session = SessionLocal()
+        try:
+            barrier.wait(timeout=20)
+            try:
+                launch_visitor(session)
+                code = "ok"
+            except AppError as exc:
+                code = exc.code
+            with guard:
+                outcomes.append(code)
+        finally:
+            session.close()
+
+    threads = [threading.Thread(target=attempt) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+        assert not thread.is_alive()
+    assert sorted(outcomes) == ["demo_limited", "ok"]
 
 
 def test_production_without_public_demo_refuses_launch(

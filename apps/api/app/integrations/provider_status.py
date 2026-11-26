@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.domains.demo.access import organization_is_visitor
 from app.domains.knowledge.vectors import incompatible_document_count
 from app.integrations.resolver import resolve_settings
 
@@ -25,6 +26,25 @@ class ProviderStatus(BaseModel):
 
 
 def provider_status(db: Session, organization_id: uuid.UUID) -> ProviderStatus:
+    if organization_is_visitor(db, organization_id):
+        settings = get_settings()
+        return ProviderStatus(
+            llm_provider="double",
+            llm_model="demonstration",
+            llm_ready=True,
+            llm_detail=(
+                "Demonstration mode. Answers stay in this session and do not call a paid model."
+            ),
+            embedding_provider="double",
+            embedding_model="demonstration",
+            embedding_dimensions=settings.embedding_dimensions,
+            embedding_ready=True,
+            embedding_detail=(
+                "Demonstration mode. Document search stays in this session "
+                "and does not call a paid model."
+            ),
+            incompatible_documents=0,
+        )
     base_settings = get_settings()
     settings = resolve_settings(db, organization_id, "chat", base_settings=base_settings)
     embedding_settings = resolve_settings(

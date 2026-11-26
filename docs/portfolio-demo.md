@@ -61,6 +61,6 @@ $env:ATLAS_GOOGLE_CALENDAR_CLIENT_SECRET = ""
 uv run --project apps/api python -m app.scripts.portfolio_demo
 ```
 
-Start the API for that database with the same sandbox overrides, `ATLAS_PUBLIC_DEMO=true`, and `ATLAS_STORAGE_DIR` set to the portfolio storage directory. Do not start it on the ports of the running development API. A public demo still requires a session. Give visitors the staff account only after the process is actually in that sandboxed configuration. The development workspace can hold provider credentials and is not the public demo.
+Start the API for that database with the same sandbox overrides, `ATLAS_PUBLIC_DEMO=true`, and `ATLAS_STORAGE_DIR` set to the portfolio storage directory. Do not start it on the ports of the running development API. Visitors enter through Launch interactive demo, which creates its own short-lived organization. Do not give them the staff or administrator password. The development workspace can hold provider credentials and is not the public demo.
 
 Login failures stay limited per email and per client address inside each API process. Webhook calls stay limited per integration key. This command does not change those limits.

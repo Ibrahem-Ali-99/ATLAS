@@ -4,11 +4,13 @@ The public site can open the real ATLAS workspace without a published password. 
 
 The session lasts 45 minutes. The browser cookie uses the same lifetime. `POST /api/v1/demo/sessions/restart` deletes that visitor organization and starts another. Expired visitor organizations are removed when a new session starts. Cleanup refuses every slug that does not use the visitor prefix, so Atlas Demo, Northwind, and any other workspace stay in place.
 
-Harbor & Co. rows are written with the existing CRM, inbox, knowledge, workflow, campaign, and assistant models. The knowledge file is stored ready, with a deterministic embedding, so the ingestion worker does not send it to a paid provider. Chat and embedding calls for a visitor organization use the deterministic stand-in even when the process has a live model key.
+Harbor & Co. rows are written with the existing CRM, inbox, knowledge, workflow, campaign, and assistant models. The knowledge file is stored ready, with a deterministic embedding, so the ingestion worker does not send it to a paid provider. Chat and embedding calls for a visitor organization use the deterministic stand-in even when the process has a live model key. The assistant screen says demonstration mode, and the provider status for that organization reports the stand-in rather than a paid model configured on the process.
 
 ## Limits
 
-Each API process allows 8 launches per direct client address per 15 minutes. The address is the connection peer. A forwarded header is not trusted, the same rule as login. A process also keeps at most 40 active visitor organizations, 400 requests on a session, 12 assistant replies, 3 documents, and 500 KB of knowledge files. An upload larger than 200 KB is refused.
+Each API process allows 8 launches per direct client address per 15 minutes. The address is the connection peer. `X-Forwarded-For`, `X-Real-IP`, and `Forwarded` do not choose a different counter, the same rule as login. Behind Caddy that peer is Caddy, so the launch counter is shared by everyone who reaches that one API process. Do not move the counter onto a forwarded header.
+
+A process also keeps at most 40 active visitor organizations. The count and the insert share one database advisory lock, so two launches at the same moment cannot both pass the limit. A session also allows 400 requests, 12 assistant replies, 3 documents, and 500 KB of knowledge files. An upload larger than 200 KB is refused.
 
 ## What a visitor cannot do
 

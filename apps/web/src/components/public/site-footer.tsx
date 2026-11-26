@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { LaunchDemoButton } from "@/components/public/launch-demo-button";
 import { publicNav } from "@/lib/public-site";
 
 export function SiteFooter() {
@@ -22,9 +23,7 @@ export function SiteFooter() {
           <Link href="/login" className="rounded-md py-1 text-muted-foreground hover:text-foreground">
             Sign in
           </Link>
-          <Link href="/overview" className="rounded-md py-1 text-muted-foreground hover:text-foreground">
-            Workspace
-          </Link>
+          <LaunchDemoButton label="Interactive demo" size="sm" />
         </nav>
       </div>
     </footer>

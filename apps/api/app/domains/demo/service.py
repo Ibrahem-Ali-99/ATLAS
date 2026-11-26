@@ -7,15 +7,16 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import delete, exists, func, select
+from sqlalchemy import delete, exists, func, select, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.security import hash_password
 from app.domains.assistant.models import Message, MessageRole
+from app.domains.demo import access as demo_access
 from app.domains.demo.access import (
-    MAX_ACTIVE_VISITORS,
     MAX_ASSISTANT_REPLIES,
     MAX_DOCUMENTS,
     MAX_KNOWLEDGE_BYTES,
@@ -34,15 +35,25 @@ from app.domains.identity.service import list_memberships, start_session
 from app.domains.knowledge.models import Document
 
 DEMO_TTL = timedelta(minutes=SESSION_MINUTES)
+# One process-wide lock so two launches cannot both pass the active-organization count.
+VISITOR_LAUNCH_LOCK = 88421026
 
 
 def launch_visitor(db: Session) -> tuple[User, UserSession]:
     reason = launch_blocked_reason(get_settings())
     if reason is not None:
         raise AppError(403, "demo_unavailable", reason)
+    connection = _acquire_launch_lock()
+    try:
+        return _open_visitor(db)
+    finally:
+        _release_launch_lock(connection)
+
+
+def _open_visitor(db: Session) -> tuple[User, UserSession]:
     cleanup_expired(db)
     active = _active_visitor_count(db)
-    if active >= MAX_ACTIVE_VISITORS:
+    if active >= demo_access.MAX_ACTIVE_VISITORS:
         raise AppError(
             429,
             "demo_limited",
@@ -55,6 +66,27 @@ def launch_visitor(db: Session) -> tuple[User, UserSession]:
         _delete_visitor(db, organization)
         raise
     return user, start_session(db, user, DEMO_TTL)
+
+
+def _acquire_launch_lock() -> Connection:
+    from app.core.database import engine
+
+    connection = engine.connect()
+    try:
+        connection.execute(text(f"SELECT pg_advisory_lock({VISITOR_LAUNCH_LOCK})"))
+        connection.commit()
+    except Exception:
+        connection.close()
+        raise
+    return connection
+
+
+def _release_launch_lock(connection: Connection) -> None:
+    try:
+        connection.execute(text(f"SELECT pg_advisory_unlock({VISITOR_LAUNCH_LOCK})"))
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def restart_visitor(db: Session, session: UserSession) -> tuple[User, UserSession]:

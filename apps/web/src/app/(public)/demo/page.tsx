@@ -24,7 +24,7 @@ const guards = [
   "Documents are written outside the active upload directory. No integration credential is stored.",
   "Fictional CRM rows use demo origin. Several workspace lists default to operational records, so Demo or All records is the view that includes them.",
   "The prepared organization stays on the Free plan until a confirmed subscription says otherwise: 2 seats, 100 assistant requests, 1 GB of knowledge files, and 2 active workflows.",
-  "Sign-in failures stay limited per email and per client address inside each API process. The visitor account in the seed is staff and cannot approve an external action.",
+  "Sign-in stays on the administrator and staff accounts. Launch interactive demo does not use those passwords, and a visitor cannot approve an external action.",
   "External messages, bookings, and CRM changes proposed by the agent still wait for an administrator. A rejected response is not sent. Sandbox email stays on the local mailbox.",
 ];
 

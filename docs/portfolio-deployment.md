@@ -12,10 +12,10 @@ These rules come from the current application and from `docs/portfolio-demo.md`.
 - Production refuses the deterministic provider. A public demo refuses a paid chat key. Together, those two rules leave no chat provider that `ATLAS_ENVIRONMENT=production` will boot. The portfolio process therefore uses `ATLAS_ENVIRONMENT=development` with the public-demo flag. Caddy answers `/docs`, `/openapi.json`, and `/redoc` with 404, so the development schema is not on the public origin.
 - The prepared records are written only by `python -m app.scripts.portfolio_demo`, only into a database named `atlas_portfolio`, and only from a one-off process with `ATLAS_PUBLIC_DEMO=false`. The serving process refuses that command.
 - The one-off writes the knowledge file outside its own upload directory. The serving process mounts that directory as `ATLAS_STORAGE_DIR`, so the API can index the file after it restarts.
-- The visitor account in the seed is staff and cannot approve an external action. Do not publish the administrator password.
+- Public entry is `POST /api/v1/demo/sessions` from Launch interactive demo. That session is a separate organization. The seeded staff account remains an operator login and cannot approve an external action. Do not publish the administrator or staff password.
 - Assistant answers use the deterministic provider. The stored sentence is the fixed grounded sentence. Retrieval uses the in-process embedding at 1536 dimensions. Nothing is sent to Groq or OpenAI.
 - The seeded organization stays on the Free plan until a confirmed subscription changes it: 2 seats, 100 assistant requests, 1 GB of knowledge files, and 2 active workflows. This stack also caps a model response at 256 tokens and an upload at 2 MiB.
-- Login failures are limited to 5 per email and 120 per client address inside the one API process, over 15 minutes. Behind Caddy every visitor shares Caddy's address, so the per-email limit is the one that isolates an account. Webhook calls are limited to 10 per key per minute. Do not run a second API container. The counters are not shared, and a second process would recover the same rows.
+- Login failures are limited to 5 per email and 120 per client address inside the one API process, over 15 minutes. Demo launches are limited to 8 per direct client address per 15 minutes, and to 40 active visitor organizations. Behind Caddy every visitor shares Caddy's address, so the per-email login limit is the one that isolates an account, and the launch limit is shared by the whole site. A client-supplied forwarded address does not open another bucket. Webhook calls are limited to 10 per key per minute. Do not run a second API container. The counters are not shared, and a second process would recover the same rows.
 
 If the application later accepts a keyless local chat model in production, the environment can move to production. Until that change exists, do not set `ATLAS_ENVIRONMENT=production` on this file. The API will not start.
 
@@ -121,7 +121,17 @@ python3 infrastructure/portfolio/apply_demo.py
 unset SEED_ADMIN_PASSWORD SEED_STAFF_PASSWORD SEED_OUTSIDER_PASSWORD
 ```
 
-Share the staff password with a visitor only after this hostname is serving this stack. Do not share the administrator password. The public pages do not contain either password.
+Visitors use Launch interactive demo on the public site. That writes a short-lived Harbor & Co. organization into `atlas_portfolio` and sets an HttpOnly cookie for 45 minutes. Do not share the administrator or staff password. The public pages do not contain either password. Sign in remains the path for those accounts, and a visitor session cannot open them.
+
+## What the interactive session can do
+
+A visitor can open overview, CRM, inbox, knowledge, the assistant, workflows, analytics, campaigns, and approvals. The records are Harbor & Co. The assistant heading says demonstration mode. Answers and document search use the deterministic stand-in. The provider line on the assistant says the same thing, including when the process would otherwise report a paid model.
+
+Restart deletes that visitor organization and opens another. Expired visitor organizations are removed when a later launch runs. Cleanup deletes a slug only when it starts with `harbor-visitor-`. Atlas Demo, Northwind, and any other slug stay, including one that merely begins with `harbor-`. The visitor address cannot sign in or reset a password.
+
+Integration configuration, billing checkout, invitations, webhook keys, Google Calendar connect, campaign scheduling, and an n8n call return a refusal. A queued visitor delivery is skipped. Approval execution of a message or an appointment is refused before it is staged. The compose file leaves paid provider keys empty. `ATLAS_PUBLIC_DEMO=true` refuses to start if a paid model key, live email, or an n8n URL is added.
+
+The release smoke test does not call the launch route. That route writes a visitor organization. Smoke confirms the origin, the health routes, and a failed login.
 
 ## Update
 

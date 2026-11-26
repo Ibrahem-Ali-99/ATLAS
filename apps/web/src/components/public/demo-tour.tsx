@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 
+import { LaunchDemoButton } from "@/components/public/launch-demo-button";
 import { ProductShot } from "@/components/public/product-shot";
 import { Button } from "@/components/ui/button";
 import { demoSteps, workspaceRoutes } from "@/lib/public-site";
@@ -52,18 +52,19 @@ export function DemoTour() {
       <div className="lg:col-span-2">
         <h2 className="text-xl font-semibold">Open the same modules in the workspace</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-          These links go to the application. The workspace asks for a session before it loads organization data.
-          Sign in only on a deployment prepared for visitors. This page does not publish a password, and it does not create a session.
+          Launch interactive demo opens these modules in a Harbor & Co. session. The pictures stay on this page.
+          The session does not publish a password, and it does not enter an administrator workspace.
         </p>
-        <ul className="mt-4 flex flex-wrap gap-2">
+        <ul className="mt-4 flex flex-wrap gap-2 text-sm text-muted-foreground">
           {workspaceRoutes.map((route) => (
-            <li key={route.href}>
-              <Button asChild variant="outline" size="sm">
-                <Link href={route.href}>{route.label}</Link>
-              </Button>
+            <li key={route.href} className="rounded-md bg-card px-3 py-1.5 ring-1 ring-border">
+              {route.label}
             </li>
           ))}
         </ul>
+        <div className="mt-4">
+          <LaunchDemoButton />
+        </div>
       </div>
     </div>
   );

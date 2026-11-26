@@ -47,6 +47,9 @@ export function ProviderNotice({
     if (!data.llm_ready) {
       return <p className="text-xs text-subtle">{data.llm_detail}</p>;
     }
+    if (data.llm_provider === "double") {
+      return <p className="text-xs text-muted-foreground">{data.llm_detail}</p>;
+    }
     return <p className="text-xs font-medium text-success">Assistant connected</p>;
   }
   const problem = !data.llm_ready || !data.embedding_ready || data.incompatible_documents > 0;
