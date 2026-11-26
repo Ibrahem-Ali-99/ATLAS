@@ -9,7 +9,16 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.domains.campaigns.models import MarketingConsent
-from app.domains.crm.models import Company, Contact, Inquiry, Interaction, Lead
+from app.domains.crm.models import (
+    Company,
+    Contact,
+    Inquiry,
+    Interaction,
+    Lead,
+    LeadStatus,
+    Opportunity,
+    PipelineStage,
+)
 from app.domains.identity.service import get_membership
 from app.domains.provenance.origin import Origin, stated_origin
 
@@ -88,6 +97,56 @@ def _editable(values: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in values.items() if key != "origin"}
 
 
+def _prepare_company(
+    db: Session,
+    organization_id: uuid.UUID,
+    values: dict[str, object],
+    *,
+    ignore_id: uuid.UUID | None = None,
+) -> None:
+    name = values.get("name")
+    if not isinstance(name, str):
+        return
+    cleaned = name.strip()
+    values["name"] = cleaned
+    query = select(Company.id).where(
+        Company.organization_id == organization_id,
+        Company.archived_at.is_(None),
+        func.lower(func.trim(Company.name)) == cleaned.lower(),
+    )
+    if ignore_id is not None:
+        query = query.where(Company.id != ignore_id)
+    if db.scalar(query) is not None:
+        raise AppError(
+            409, "duplicate_company", "A company with this name is already in the workspace."
+        )
+
+
+def _prepare_contact(
+    db: Session,
+    organization_id: uuid.UUID,
+    values: dict[str, object],
+    *,
+    ignore_id: uuid.UUID | None = None,
+) -> None:
+    email = values.get("email")
+    if not isinstance(email, str) or not email.strip():
+        return
+    cleaned = email.strip().lower()
+    query = select(Contact.id).where(
+        Contact.organization_id == organization_id,
+        Contact.archived_at.is_(None),
+        Contact.email.is_not(None),
+        func.lower(func.trim(Contact.email)) == cleaned,
+    )
+    if ignore_id is not None:
+        query = query.where(Contact.id != ignore_id)
+    if db.scalar(query) is not None:
+        raise AppError(
+            409, "duplicate_contact", "A contact with this email is already in the workspace."
+        )
+
+
 def _archive(record: Any, archived: bool) -> None:
     record.archived_at = None if not archived else datetime.now(UTC)
 
@@ -104,6 +163,7 @@ def list_companies(
     page: int,
     page_size: int,
     include_archived: bool = False,
+    sort: str = "name",
 ) -> tuple[list[Company], int]:
     query = _archive_filter(
         select(Company).where(Company.organization_id == organization_id),
@@ -115,11 +175,13 @@ def list_companies(
         query = query.where(
             or_(Company.name.ilike(term), Company.industry.ilike(term), Company.website.ilike(term))
         )
-    query = query.order_by(Company.name.asc())
+    order = {"name": Company.name.asc(), "updated": Company.updated_at.desc()}
+    query = query.order_by(order.get(sort, Company.name.asc()))
     return _page(db, query, page, page_size)
 
 
 def create_company(db: Session, organization_id: uuid.UUID, values: dict[str, object]) -> Company:
+    _prepare_company(db, organization_id, values)
     company = Company(organization_id=organization_id, **_with_origin(values))
     db.add(company)
     db.commit()
@@ -135,6 +197,7 @@ def update_company(
     db: Session, organization_id: uuid.UUID, company_id: uuid.UUID, values: dict[str, object]
 ) -> Company:
     company = _company(db, organization_id, company_id)
+    _prepare_company(db, organization_id, values, ignore_id=company.id)
     _apply(company, _editable(values))
     db.commit()
     db.refresh(company)
@@ -164,6 +227,7 @@ def list_contacts(
     page: int,
     page_size: int,
     include_archived: bool = False,
+    sort: str = "name",
 ) -> tuple[list[Contact], int]:
     query = _archive_filter(
         select(Contact).where(Contact.organization_id == organization_id),
@@ -177,7 +241,8 @@ def list_contacts(
         query = query.where(
             or_(Contact.full_name.ilike(term), Contact.email.ilike(term), Contact.title.ilike(term))
         )
-    query = query.order_by(Contact.full_name.asc())
+    order = {"name": Contact.full_name.asc(), "updated": Contact.updated_at.desc()}
+    query = query.order_by(order.get(sort, Contact.full_name.asc()))
     return _page(db, query, page, page_size)
 
 
@@ -185,6 +250,7 @@ def create_contact(db: Session, organization_id: uuid.UUID, values: dict[str, ob
     company_id = values.get("company_id")
     if isinstance(company_id, uuid.UUID):
         _company(db, organization_id, company_id)
+    _prepare_contact(db, organization_id, values)
     contact = Contact(organization_id=organization_id, **_with_origin(values))
     db.add(contact)
     db.commit()
@@ -208,6 +274,7 @@ def update_contact(
     )
     if "company_id" in values and isinstance(values["company_id"], uuid.UUID):
         _company(db, organization_id, values["company_id"])
+    _prepare_contact(db, organization_id, values, ignore_id=contact.id)
     previous_email = (contact.email or "").strip().lower()
     _apply(contact, _editable(values))
     if previous_email != (contact.email or "").strip().lower():
@@ -251,6 +318,7 @@ def list_leads(
     page: int,
     page_size: int,
     include_archived: bool = False,
+    sort: str = "updated",
 ) -> tuple[list[Lead], int]:
     query = _archive_filter(
         select(Lead).where(Lead.organization_id == organization_id),
@@ -270,7 +338,8 @@ def list_leads(
         query = query.where(
             or_(Lead.title.ilike(term), Lead.source.ilike(term), Lead.notes.ilike(term))
         )
-    query = query.order_by(Lead.updated_at.desc())
+    order = {"updated": Lead.updated_at.desc(), "title": Lead.title.asc()}
+    query = query.order_by(order.get(sort, Lead.updated_at.desc()))
     return _page(db, query, page, page_size)
 
 
@@ -340,6 +409,47 @@ def delete_lead(db: Session, organization_id: uuid.UUID, lead_id: uuid.UUID) -> 
     lead = _lead(db, organization_id, lead_id)
     _archive(lead, True)
     db.commit()
+
+
+def convert_lead(
+    db: Session, organization_id: uuid.UUID, lead_id: uuid.UUID
+) -> tuple[Opportunity, bool]:
+    lead = _lead(db, organization_id, lead_id, lock=True)
+    if lead.archived_at is not None:
+        raise AppError(409, "lead_archived", "Restore this lead before adding it to the pipeline.")
+    if lead.status in {LeadStatus.lost, LeadStatus.unqualified}:
+        raise AppError(
+            409, "lead_not_convertible", "Qualify this lead before adding it to the pipeline."
+        )
+    existing = db.scalar(
+        select(Opportunity).where(
+            Opportunity.organization_id == organization_id,
+            Opportunity.lead_id == lead.id,
+            Opportunity.archived_at.is_(None),
+        )
+    )
+    if existing is not None:
+        return existing, False
+    stage = db.scalar(
+        select(PipelineStage)
+        .where(PipelineStage.organization_id == organization_id, PipelineStage.active.is_(True))
+        .order_by(PipelineStage.position.asc())
+    )
+    row = Opportunity(
+        organization_id=organization_id,
+        title=lead.title,
+        owner_user_id=lead.owner_user_id,
+        company_id=lead.company_id,
+        contact_id=lead.contact_id,
+        lead_id=lead.id,
+        stage=stage.key if stage is not None else "new",
+        currency="USD",
+    )
+    db.add(row)
+    if lead.status in {LeadStatus.new, LeadStatus.contacted}:
+        lead.status = LeadStatus.qualified
+    db.flush()
+    return row, True
 
 
 def restore_lead(db: Session, organization_id: uuid.UUID, lead_id: uuid.UUID) -> Lead:

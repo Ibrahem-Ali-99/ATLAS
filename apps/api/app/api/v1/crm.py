@@ -1,12 +1,13 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.core.errors import AppError
-from app.domains.crm import service
+from app.domains.crm import profile, service
 from app.domains.crm.models import Company, Contact, Lead, LeadStatus, Opportunity, PipelineStage
 from app.domains.crm.schemas import (
     CompanyCreate,
@@ -348,6 +349,7 @@ def list_companies(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     include_archived: bool = False,
+    sort: Literal["name", "updated"] = "name",
 ) -> CompanyPage:
     items, total = service.list_companies(
         db,
@@ -356,6 +358,7 @@ def list_companies(
         page=page,
         page_size=page_size,
         include_archived=include_archived,
+        sort=sort,
     )
     return CompanyPage(
         items=[CompanyOut.model_validate(item) for item in items], **_page(page, page_size, total)
@@ -405,6 +408,7 @@ def list_contacts(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     include_archived: bool = False,
+    sort: Literal["name", "updated"] = "name",
 ) -> ContactPage:
     items, total = service.list_contacts(
         db,
@@ -414,6 +418,7 @@ def list_contacts(
         page=page,
         page_size=page_size,
         include_archived=include_archived,
+        sort=sort,
     )
     return ContactPage(
         items=[ContactOut.model_validate(item) for item in items], **_page(page, page_size, total)
@@ -466,6 +471,7 @@ def list_leads(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     include_archived: bool = False,
+    sort: Literal["updated", "title"] = "updated",
 ) -> LeadPage:
     items, total = service.list_leads(
         db,
@@ -478,6 +484,7 @@ def list_leads(
         page=page,
         page_size=page_size,
         include_archived=include_archived,
+        sort=sort,
     )
     return LeadPage(
         items=[LeadOut.model_validate(item) for item in items], **_page(page, page_size, total)
@@ -526,6 +533,46 @@ def update_lead(lead_id: uuid.UUID, body: LeadUpdate, member: CsrfMember, db: Db
 def delete_lead(lead_id: uuid.UUID, member: CsrfMember, db: DbSession) -> Response:
     service.delete_lead(db, member.organization.id, lead_id)
     return Response(status_code=204)
+
+
+@router.get("/customer-profile")
+def get_customer_profile(
+    member: Member,
+    db: DbSession,
+    company_id: uuid.UUID | None = None,
+    contact_id: uuid.UUID | None = None,
+    lead_id: uuid.UUID | None = None,
+) -> dict[str, object]:
+    return profile.customer_profile(
+        db,
+        member.organization.id,
+        company_id=company_id,
+        contact_id=contact_id,
+        lead_id=lead_id,
+    )
+
+
+@router.post("/leads/{lead_id}/convert")
+def convert_lead(lead_id: uuid.UUID, member: CsrfMember, db: DbSession) -> dict[str, object]:
+    before = service.get_lead(db, member.organization.id, lead_id, lock=True)
+    previous = before.status.value
+    opportunity, created = service.convert_lead(db, member.organization.id, lead_id)
+    if created and previous != before.status.value:
+        from app.domains.automation.workflows import dispatch_pending, stage_lead_status_changed
+
+        stage_lead_status_changed(
+            db, member.organization.id, before.id, previous, before.status.value
+        )
+        db.commit()
+        dispatch_pending(db, member.organization.id)
+    else:
+        db.commit()
+    return {
+        "id": opportunity.id,
+        "title": opportunity.title,
+        "stage": opportunity.stage,
+        "created": created,
+    }
 
 
 @router.post("/leads/{lead_id}/restore", response_model=LeadOut)

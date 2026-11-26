@@ -2,6 +2,7 @@
 
 import { Fragment, useDeferredValue, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ArrowLeft, ExternalLink, Inbox, Mail, MessageCircle, PanelRight, Search, Send, Settings2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { archiveInboxConversation, assignInbox, draftInboxWithAi, getInbox, linkInboxLead, listInbox, listInboxAssignees, markInboxUnread, resolveInboxHandoff, restoreInboxConversation, resumeInboxAi, saveInboxDraft, sendStaffMessage, submitInboxApproval, takeOverInbox, updateInboxStatus } from "@/lib/inbox";
@@ -68,7 +69,12 @@ export function InboxScreen() {
 }
 
 function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
-  const [selected, setSelected] = useState<string | null>(null);
+  const params = useSearchParams();
+  const requested = params.get("conversation");
+  const [selected, setSelected] = useState<string | null>(requested);
+  useEffect(() => {
+    if (requested) setSelected(requested);
+  }, [requested]);
   const [q, setQ] = useState("");
   const deferredQuery = useDeferredValue(q);
   const [statusFilter, setStatusFilter] = useState("");

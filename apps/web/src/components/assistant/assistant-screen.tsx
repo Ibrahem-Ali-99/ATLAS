@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, FileText, MessageSquare, PanelLeft, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ConfirmButton } from "@/components/confirm-button";
 import { ProviderNotice } from "@/components/provider-notice";
@@ -60,6 +60,14 @@ function AssistantWorkspace({
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const seededPrompt = useRef(false);
+  useEffect(() => {
+    const prompt = params.get("prompt");
+    if (!seededPrompt.current && prompt && !conversationId) {
+      seededPrompt.current = true;
+      setDraft(prompt.slice(0, 4000));
+    }
+  }, [params, conversationId]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [sourcesDialog, setSourcesDialog] = useState(false);
   const [focusSource, setFocusSource] = useState<string | null>(null);

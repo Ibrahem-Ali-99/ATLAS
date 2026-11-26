@@ -76,6 +76,7 @@ export type LeadInput = {
   status?: LeadStatus;
   company_id?: string | null;
   contact_id?: string | null;
+  owner_user_id?: string | null;
   source?: string | null;
   notes?: string | null;
 };

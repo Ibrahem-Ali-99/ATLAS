@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { CustomerProfile } from "@/components/crm/customer-profile";
 import { ConfirmButton } from "@/components/confirm-button";
 import { AppointmentDialog } from "@/components/calendar/appointment-dialog";
 import { Pager } from "@/components/pager";
@@ -20,10 +21,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
+import { listTeam } from "@/lib/organization";
+import { useWorkspace } from "@/lib/use-workspace";
 import { startAgentRun } from "@/lib/agent-api";
 import { getLeadPrediction, scoreLead } from "@/lib/intelligence";
 import {
   addInteraction,
+  convertLead,
   createLead, getLead,
   deleteLead,
   listCompanies,
@@ -54,20 +58,23 @@ const noteSchema = z.object({
 
 type NoteValues = z.infer<typeof noteSchema>;
 
-type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string | null }) => void;
+type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries" | "opportunities"; id: string | null }) => void;
 
 export function LeadsPanel({ organizationId, selectedId: requestedId, initialStatus = "", onNavigate }: { organizationId: string; selectedId?: string | null; initialStatus?: LeadStatus | ""; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
+  const { userId } = useWorkspace();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<LeadStatus | "">(initialStatus);
+  const [owner, setOwner] = useState("");
+  const [sort, setSort] = useState("updated");
   const [page, setPage] = useState(1);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState(false);
   const selectedId = requestedId ?? null;
   const leads = useQuery({
-    queryKey: ["leads", organizationId, query, status, page, includeArchived],
-    queryFn: () => listLeads(organizationId, { q: query, status, page, includeArchived }),
+    queryKey: ["leads", organizationId, query, status, owner, sort, page, includeArchived],
+    queryFn: () => listLeads(organizationId, { q: query, status, page, includeArchived, sort, ownerUserId: owner === "mine" ? userId ?? undefined : undefined }),
   });
   const companies = useQuery({
     queryKey: ["companies", organizationId, "options"],
@@ -118,6 +125,14 @@ export function LeadsPanel({ organizationId, selectedId: requestedId, initialSta
             {leadStatuses.map((item) => (
               <option key={item} value={item}>{item}</option>
             ))}
+          </select>
+          <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={owner} aria-label="Filter by owner" onChange={(event) => { setOwner(event.target.value); setPage(1); }}>
+            <option value="">All owners</option>
+            <option value="mine">Assigned to me</option>
+          </select>
+          <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={sort} aria-label="Sort leads" onChange={(event) => { setSort(event.target.value); setPage(1); }}>
+            <option value="updated">Recently updated</option>
+            <option value="title">Title</option>
           </select>
           <Button type="button" onClick={() => setOpen(true)}>New lead</Button>
         </div>
@@ -314,17 +329,20 @@ function LeadDetail({
         {lead.contact_id ? <button className="text-left text-primary underline" onClick={() => onNavigate({ tab: "contacts", id: lead.contact_id! })}>{contacts.find((item) => item.id === lead.contact_id)?.full_name ?? "Contact"}</button> : null}
         {inquiries.filter((item) => item.lead_id === lead.id).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
       </div></div>
+      <LeadOwner organizationId={organizationId} lead={lead} onChanged={onChanged} />
       <LeadFields form={form} formId="lead-edit" companies={companies} contacts={contacts} onSubmit={(values) => save.mutate(values)} />
       {save.isSuccess ? <p className="text-sm text-muted-foreground">Saved.</p> : null}
       {save.isError ? <RequestError error={save.error} /> : null}
       {remove.isError ? <RequestError error={remove.error} /> : null}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button type="submit" form="lead-edit" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
         <Button type="button" variant="outline" disabled={!linkedInquiry || !lead.contact_id || followUp.isPending} onClick={() => followUp.mutate()} title={!linkedInquiry ? "Add an inquiry to this lead before drafting a follow-up" : undefined}>
           {followUp.isPending ? "Drafting…" : "Draft follow-up"}
         </Button>
         {lead.archived_at ? <Button type="button" variant="outline" disabled={restore.isPending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button> : <ConfirmButton label="Archive" confirmLabel="Confirm archive" pendingLabel="Archiving…" pending={remove.isPending} onConfirm={() => remove.mutate()} />}
+        {!lead.archived_at && lead.status !== "lost" && lead.status !== "unqualified" ? <ConvertLead organizationId={organizationId} leadId={lead.id} onChanged={onChanged} onOpen={(id) => onNavigate({ tab: "opportunities", id })} /> : null}
       </div>
+      <CustomerProfile organizationId={organizationId} leadId={lead.id} onNavigate={onNavigate} hideNotes />
       {linkedInquiry && !lead.archived_at ? <AppointmentDialog key={lead.id} leadId={lead.id} organizationId={organizationId} /> : null}
       {followUp.isError ? <RequestError error={followUp.error} /> : null}
       <LeadScore organizationId={organizationId} leadId={lead.id} />
@@ -357,6 +375,66 @@ function LeadDetail({
         </form>
       </div>
     </aside>
+  );
+}
+
+function LeadOwner({ organizationId, lead, onChanged }: { organizationId: string; lead: Lead; onChanged: () => void }) {
+  const team = useQuery({ queryKey: ["team", organizationId], queryFn: () => listTeam(organizationId) });
+  const assign = useMutation({
+    mutationFn: (ownerId: string) => updateLead(organizationId, lead.id, { owner_user_id: ownerId }),
+    onSuccess: onChanged,
+  });
+  return (
+    <label className="grid gap-1.5 text-sm">
+      Owner
+      <select
+        aria-label="Lead owner"
+        className="h-10 rounded-md border border-input bg-background px-3"
+        value={lead.owner_user_id}
+        disabled={assign.isPending}
+        onChange={(event) => assign.mutate(event.target.value)}
+      >
+        {(team.data ?? []).some((item) => item.user_id === lead.owner_user_id) ? null : <option value={lead.owner_user_id}>Current owner</option>}
+        {(team.data ?? []).filter((item) => item.is_active).map((item) => (
+          <option key={item.user_id} value={item.user_id}>{item.full_name}</option>
+        ))}
+      </select>
+      {assign.isError ? <RequestError error={assign.error} /> : null}
+    </label>
+  );
+}
+
+function ConvertLead({
+  organizationId,
+  leadId,
+  onChanged,
+  onOpen,
+}: {
+  organizationId: string;
+  leadId: string;
+  onChanged: () => void;
+  onOpen: (id: string) => void;
+}) {
+  const client = useQueryClient();
+  const convert = useMutation({
+    mutationFn: () => convertLead(organizationId, leadId),
+    onSuccess: (result) => {
+      onChanged();
+      void client.invalidateQueries({ queryKey: ["customer-profile", organizationId] });
+      void client.invalidateQueries({ queryKey: ["opportunities", organizationId] });
+      if (!result.created) onOpen(result.id);
+    },
+  });
+  return (
+    <>
+      <Button type="button" variant="outline" disabled={convert.isPending} onClick={() => convert.mutate()}>
+        {convert.isPending ? "Adding…" : "Add to pipeline"}
+      </Button>
+      {convert.data?.created ? (
+        <Button type="button" variant="outline" onClick={() => onOpen(convert.data.id)}>Open opportunity</Button>
+      ) : null}
+      {convert.isError ? <RequestError error={convert.error} /> : null}
+    </>
   );
 }
 

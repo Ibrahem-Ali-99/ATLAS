@@ -28,6 +28,21 @@ type ListParams = {
   page?: number;
   pageSize?: number;
   includeArchived?: boolean;
+  sort?: string;
+  ownerUserId?: string;
+};
+
+export type CustomerProfileData = {
+  subject: { kind: string; id: string; title: string; archived: boolean };
+  companies: { id: string; title: string; detail: string | null }[];
+  contacts: { id: string; title: string; detail: string | null }[];
+  leads: { id: string; title: string; detail: string | null }[];
+  inquiries: { id: string; title: string; detail: string | null }[];
+  opportunities: { id: string; title: string; stage: string; value: number | null }[];
+  conversations: { id: string; subject: string; channel: string; status: string; updated_at: string }[];
+  appointments: { id: string; lead_id: string; status: string; starts_at: string; ends_at: string }[];
+  tasks: { id: string; title: string; status: string; priority: string; due_at: string | null; created_at: string; assignee: string | null }[];
+  activity: { at: string; kind: string; title: string; detail: string; record_kind: string; record_id: string }[];
 };
 
 function organizationPath(organizationId: string, path: string): string {
@@ -46,7 +61,31 @@ function queryString(params: Record<string, string | number | null | undefined>)
 }
 
 function listQuery(params: ListParams): string {
-  return queryString({ q: params.q, page: params.page ?? 1, page_size: params.pageSize ?? 20, include_archived: params.includeArchived ? "true" : undefined });
+  return queryString({
+    q: params.q,
+    page: params.page ?? 1,
+    page_size: params.pageSize ?? 20,
+    include_archived: params.includeArchived ? "true" : undefined,
+    sort: params.sort,
+  });
+}
+
+export function getCustomerProfile(
+  organizationId: string,
+  target: { companyId?: string; contactId?: string; leadId?: string },
+): Promise<CustomerProfileData> {
+  return apiFetch(organizationPath(organizationId, `/customer-profile${queryString({
+    company_id: target.companyId,
+    contact_id: target.contactId,
+    lead_id: target.leadId,
+  })}`));
+}
+
+export function convertLead(
+  organizationId: string,
+  leadId: string,
+): Promise<{ id: string; title: string; stage: string; created: boolean }> {
+  return apiFetch(organizationPath(organizationId, `/leads/${leadId}/convert`), { method: "POST" });
 }
 
 export function listCompanies(organizationId: string, params: ListParams = {}): Promise<PageResult<Company>> {
@@ -127,6 +166,8 @@ export function listLeads(
     page: params.page ?? 1,
     page_size: params.pageSize ?? 20,
     include_archived: params.includeArchived ? "true" : undefined,
+    sort: params.sort,
+    owner_user_id: params.ownerUserId,
   });
   return apiFetch(organizationPath(organizationId, `/leads${search}`));
 }

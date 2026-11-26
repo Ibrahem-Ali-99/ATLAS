@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { CustomerProfile } from "@/components/crm/customer-profile";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Pager } from "@/components/pager";
 import { RequestError } from "@/components/request-error";
@@ -39,7 +40,7 @@ function payload(values: FormValues) {
   };
 }
 
-type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string | null }) => void;
+type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries" | "opportunities"; id: string | null }) => void;
 
 export function ContactsPanel({ organizationId, selectedId: requestedId, onNavigate }: { organizationId: string; selectedId?: string | null; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
@@ -47,11 +48,12 @@ export function ContactsPanel({ organizationId, selectedId: requestedId, onNavig
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [sort, setSort] = useState("name");
   const [open, setOpen] = useState(false);
   const selectedId = requestedId ?? null;
   const contacts = useQuery({
-    queryKey: ["contacts", organizationId, query, page, includeArchived],
-    queryFn: () => listContacts(organizationId, { q: query, page, includeArchived }),
+    queryKey: ["contacts", organizationId, query, page, includeArchived, sort],
+    queryFn: () => listContacts(organizationId, { q: query, page, includeArchived, sort }),
   });
   const companies = useQuery({
     queryKey: ["companies", organizationId, "options"],
@@ -87,6 +89,10 @@ export function ContactsPanel({ organizationId, selectedId: requestedId, onNavig
         <div className="flex flex-col gap-3 border-b border-border/80 bg-card/80 p-4 sm:flex-row">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search contacts" aria-label="Search contacts" />
           <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} /> Show archived</label>
+          <select aria-label="Sort contacts" className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }}>
+            <option value="name">Name</option>
+            <option value="updated">Recently updated</option>
+          </select>
           <Button type="button" onClick={() => setOpen(true)}>New contact</Button>
         </div>
         {contacts.isPending ? <div className="space-y-2 px-4 pb-4"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div> : null}
@@ -237,6 +243,7 @@ function ContactEditor({
         {related?.[0].items.filter((item) => item.contact_id === contact.id).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "leads", id: item.id })}>{item.title}</button>)}
         {related?.[1].items.filter((item) => item.lead_id && related[0].items.some((lead) => lead.id === item.lead_id && lead.contact_id === contact.id)).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
       </div></div>
+      <CustomerProfile organizationId={organizationId} contactId={contact.id} onNavigate={onNavigate} />
       <div className="mt-4">
         <ContactFields form={form} formId="contact-edit" companies={companies} onSubmit={(values) => save.mutate(values)} />
       </div>

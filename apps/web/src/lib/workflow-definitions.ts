@@ -27,7 +27,10 @@ export const reviewWorkflowRun = (id: string, workflowId: string, runId: string,
   apiFetch<WorkflowRunDetail>(`${path(id)}/${workflowId}/runs/${runId}/review`, { method: "POST", body: JSON.stringify({ decision }) });
 export type WorkflowTask = { id: string; workflow_run_id: string | null; lead_id: string | null; contact_id: string | null; opportunity_id: string | null; assignee_user_id: string | null; title: string; description: string | null; status: string; priority: string; source: string; due_at: string | null; created_at: string; updated_at: string };
 export const listWorkflowTasks = (id: string) => apiFetch<WorkflowTask[]>(`/api/v1/organizations/${id}/workflow-tasks`);
-export const createWorkflowTask = (id: string, body: { title: string; description?: string; priority?: string; due_at?: string }) => apiFetch<WorkflowTask>(`/api/v1/organizations/${id}/workflow-tasks`, { method: "POST", body: JSON.stringify(body) });
+export const createWorkflowTask = (id: string, body: { title: string; description?: string; priority?: string; due_at?: string; lead_id?: string; contact_id?: string; assignee_user_id?: string }) => apiFetch<WorkflowTask>(`/api/v1/organizations/${id}/workflow-tasks`, { method: "POST", body: JSON.stringify(body) });
 export const updateWorkflowTask = (id: string, taskId: string, status: string) => apiFetch<{ id: string; status: string }>(`/api/v1/organizations/${id}/workflow-tasks/${taskId}`, { method: "PATCH", body: JSON.stringify({ status }) });
 export const listOpportunityTasks = (id: string, opportunityId: string) => apiFetch<WorkflowTask[]>(`/api/v1/organizations/${id}/workflow-tasks?opportunity_id=${encodeURIComponent(opportunityId)}`);
-export const createOpportunityTask = (id: string, opportunityId: string, title: string) => apiFetch<WorkflowTask>(`/api/v1/organizations/${id}/workflow-tasks`, { method: "POST", body: JSON.stringify({ opportunity_id: opportunityId, title }) });
+export const createOpportunityTask = (id: string, opportunityId: string, input: string | { title: string; priority?: string; due_at?: string | null }) => {
+  const body = typeof input === "string" ? { title: input } : input;
+  return apiFetch<WorkflowTask>(`/api/v1/organizations/${id}/workflow-tasks`, { method: "POST", body: JSON.stringify({ opportunity_id: opportunityId, ...body }) });
+};

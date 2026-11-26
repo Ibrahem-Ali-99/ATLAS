@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { CustomerProfile } from "@/components/crm/customer-profile";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Pager } from "@/components/pager";
 import { RequestError } from "@/components/request-error";
@@ -46,7 +47,7 @@ function payload(values: FormValues) {
   };
 }
 
-type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries"; id: string | null }) => void;
+type Navigate = (target: { tab: "companies" | "contacts" | "leads" | "inquiries" | "opportunities"; id: string | null }) => void;
 
 export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavigate }: { organizationId: string; selectedId?: string | null; onNavigate: Navigate }) {
   const queryClient = useQueryClient();
@@ -54,11 +55,12 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [sort, setSort] = useState("name");
   const [open, setOpen] = useState(false);
   const selectedId = requestedId ?? null;
   const companies = useQuery({
-    queryKey: ["companies", organizationId, query, page, includeArchived],
-    queryFn: () => listCompanies(organizationId, { q: query, page, includeArchived }),
+    queryKey: ["companies", organizationId, query, page, includeArchived, sort],
+    queryFn: () => listCompanies(organizationId, { q: query, page, includeArchived, sort }),
   });
   const related = useQuery({
     queryKey: ["company-relations", organizationId, selectedId],
@@ -93,6 +95,10 @@ export function CompaniesPanel({ organizationId, selectedId: requestedId, onNavi
             aria-label="Search companies"
           />
           <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} /> Show archived</label>
+          <select aria-label="Sort companies" className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }}>
+            <option value="name">Name</option>
+            <option value="updated">Recently updated</option>
+          </select>
           <Button type="button" onClick={() => setOpen(true)}>
             New company
           </Button>
@@ -282,6 +288,7 @@ function CompanyEditorForm({
           {related && related.every((page) => page.items.every((item) => item.company_id !== company.id)) ? <p className="text-muted-foreground">No linked records yet.</p> : null}
         </div>
       </div>
+      <CustomerProfile organizationId={organizationId} companyId={company.id} onNavigate={onNavigate} />
       <div className="mt-4">
         <CompanyFields form={form} formId="company-edit" onSubmit={(values) => save.mutate(values)} />
       </div>
