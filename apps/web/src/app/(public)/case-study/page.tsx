@@ -9,12 +9,12 @@ export const metadata: Metadata = {
 
 export default function CaseStudyPage() {
   return (
-    <article className="mx-auto max-w-3xl px-4 py-14 sm:px-6">
-      <p className="text-sm font-medium uppercase tracking-[0.16em] text-primary">Technical case study</p>
-      <h1 className="mt-3 text-4xl font-semibold tracking-tight text-balance">
+    <article className="mx-auto max-w-3xl px-5 py-16 sm:px-8 lg:py-24">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Technical case study</p>
+      <h1 className="mt-4 text-4xl font-semibold tracking-[-0.03em] text-balance sm:text-5xl sm:leading-[1.08]">
         A workspace where the model can read, and a person still decides.
       </h1>
-      <p className="mt-4 text-lg leading-8 text-muted-foreground">
+      <p className="mt-6 text-lg leading-8 text-muted-foreground">
         Harbor & Co. is fictional. The operational problem is not. A team keeps inquiries in a mailbox, company facts in a shared drive, and follow-up in a CRM that people update differently. A draft is useful when it is tied to the right customer and when a person still chooses what gets written, booked, or changed.
       </p>
 
@@ -128,9 +128,9 @@ export default function CaseStudyPage() {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   const id = title.toLowerCase().replaceAll(" ", "-");
   return (
-    <section className="mt-10" aria-labelledby={id}>
-      <h2 id={id} className="text-2xl font-semibold tracking-tight">{title}</h2>
-      <div className="mt-3 grid gap-3 text-[15px] leading-7 text-muted-foreground">{children}</div>
+    <section className="mt-14 border-t border-border pt-8" aria-labelledby={id}>
+      <h2 id={id} className="text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h2>
+      <div className="mt-4 grid gap-4 text-base leading-7 text-muted-foreground">{children}</div>
     </section>
   );
 }
@@ -141,7 +141,7 @@ function Flow({ steps, note }: { steps: string[]; note: string }) {
       <ol className="flex flex-wrap items-center gap-2">
         {steps.map((step, index) => (
           <li key={step} className="flex items-center gap-2">
-            <span className="rounded-full border border-border bg-card px-3 py-1 text-sm text-foreground">{step}</span>
+            <span className="rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground">{step}</span>
             {index < steps.length - 1 ? <span aria-hidden="true" className="text-muted-foreground">→</span> : null}
           </li>
         ))}

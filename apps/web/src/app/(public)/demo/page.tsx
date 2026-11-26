@@ -30,44 +30,45 @@ const guards = [
 
 export default function DemoPage() {
   return (
-    <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
-      <p className="text-sm font-medium uppercase tracking-[0.16em] text-primary">Interactive demo</p>
-      <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-balance">
+    <div className="mx-auto max-w-7xl px-5 py-16 sm:px-8 lg:py-20">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Interactive demo</p>
+      <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.03em] text-balance sm:text-5xl sm:leading-[1.08]">
         Explore Harbor & Co. in the application.
       </h1>
-      <p className="mt-4 max-w-3xl text-lg leading-8 text-muted-foreground">
+      <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">
         The tour below uses captures of Atlas Demo. Mina Patel asks about bonded warehousing. Northwind is a second organization used to show that its records stay hidden. Launch interactive demo opens a separate Harbor & Co. workspace in the application. That session expires, restart replaces it, and it does not publish a password.
       </p>
       <div className="mt-8">
         <LaunchDemoButton size="lg" />
       </div>
-      <section className="mt-10" aria-labelledby="session-title">
-        <h2 id="session-title" className="text-2xl font-semibold tracking-tight">What the launched session can do</h2>
-        <ul className="mt-4 grid gap-3 md:grid-cols-2">
+      <section className="mt-14" aria-labelledby="session-title">
+        <h2 id="session-title" className="text-2xl font-semibold tracking-tight sm:text-3xl">What the launched session can do</h2>
+        <ul className="mt-6 grid gap-3 md:grid-cols-2">
           {sessionRules.map((item) => (
-            <li key={item} className="rounded-xl border border-border bg-card p-4 text-sm leading-6">
+            <li key={item} className="rounded-2xl border border-border bg-card p-5 text-sm leading-6">
               {item}
             </li>
           ))}
         </ul>
       </section>
-      <section className="mt-10" aria-labelledby="sandbox-title">
-        <h2 id="sandbox-title" className="text-2xl font-semibold tracking-tight">Separate portfolio database</h2>
-        <ul className="mt-4 grid gap-3 md:grid-cols-2">
+      <section className="mt-14" aria-labelledby="sandbox-title">
+        <h2 id="sandbox-title" className="text-2xl font-semibold tracking-tight sm:text-3xl">Separate portfolio database</h2>
+        <ul className="mt-6 grid gap-3 md:grid-cols-2">
           {guards.map((item) => (
-            <li key={item} className="rounded-xl border border-border bg-card p-4 text-sm leading-6">
+            <li key={item} className="rounded-2xl border border-border bg-card p-5 text-sm leading-6">
               {item}
             </li>
           ))}
         </ul>
       </section>
-      <section className="mt-12" aria-labelledby="tour-title">
-        <h2 id="tour-title" className="text-2xl font-semibold tracking-tight">Product tour</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+      <section className="mt-16" aria-labelledby="tour-title">
+        <h2 id="tour-title" className="text-2xl font-semibold tracking-tight sm:text-3xl">Product tour</h2>
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">
           Choose a chapter. The pictures are screenshots of the workspace, not a separate interface.
           An operator prepares the underlying rows with the portfolio demo command, which uses the existing models and services.
+          Landscape captures sit in a 16:10 frame. Taller captures keep their own proportions and scroll inside the frame.
         </p>
-        <div className="mt-6">
+        <div className="mt-8">
           <DemoTour />
         </div>
       </section>

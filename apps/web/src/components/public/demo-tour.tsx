@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { LaunchDemoButton } from "@/components/public/launch-demo-button";
-import { ProductShot } from "@/components/public/product-shot";
+import { CaptureFrame } from "@/components/public/product-shot";
 import { Button } from "@/components/ui/button";
 import { demoSteps, workspaceRoutes } from "@/lib/public-site";
 
@@ -36,7 +36,7 @@ export function DemoTour() {
         tabIndex={0}
         className="min-w-0"
       >
-        <ProductShot src={step.src} alt={step.alt} caption={step.caption} />
+        <CaptureFrame capture={step} />
         <div className="mt-4 flex flex-wrap gap-2">
           <Button type="button" variant="outline" disabled={index === 0} onClick={() => setIndex((value) => value - 1)}>
             Previous

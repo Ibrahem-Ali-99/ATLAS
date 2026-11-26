@@ -27,7 +27,7 @@ export function SiteHeader() {
       >
         Skip to content
       </a>
-      <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6">
+      <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-5 sm:px-8">
         <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight" onClick={() => setOpen(false)}>
           <span className="grid size-8 place-items-center rounded-lg bg-primary text-sm text-primary-foreground">A</span>
           ATLAS
@@ -62,7 +62,7 @@ export function SiteHeader() {
         </div>
       </div>
       {open ? (
-        <nav id="public-menu" className="border-t border-border px-4 py-3 lg:hidden" aria-label="Mobile">
+        <nav id="public-menu" className="border-t border-border px-5 py-3 lg:hidden" aria-label="Mobile">
           <ul className="grid gap-1">
             {publicNav.map((item) => (
               <li key={item.href}>

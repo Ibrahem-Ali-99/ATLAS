@@ -6,7 +6,7 @@ import { PublicFrame } from "@/components/public/public-frame";
 export const metadata: Metadata = {
   title: "Operations workspace",
   description:
-    "ATLAS is an organization-scoped workspace for CRM, inbox, knowledge retrieval, approvals, and workflow automation.",
+    "ATLAS keeps CRM, inbox, documents, and automation in one organization. Answers cite retrieved records, and a person approves a message, booking, or CRM change.",
 };
 
 export default function PublicHomePage() {
