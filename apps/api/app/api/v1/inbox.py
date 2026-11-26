@@ -306,6 +306,7 @@ def get_inbox(conversation_id: uuid.UUID, member: Member, db: DbSession) -> dict
         "handoff_resolved_at": row.handoff_resolved_at,
         "ai_resumed": row.ai_resumed,
         "reply_unavailable": _whatsapp_reply_unavailable(db, row),
+        "whatsapp_reply_mode": _whatsapp_reply_mode(db, row),
         "reply_recipient": (
             contact.email
             if row.channel == "email"
@@ -472,6 +473,14 @@ def submit_for_approval(
     conversation_id: uuid.UUID, body: MessageBody, member: CsrfMember, db: DbSession
 ) -> dict[str, object]:
     row = _conversation(db, member.organization.id, conversation_id)
+    reply_mode = _whatsapp_reply_mode(db, row)
+    template = body.template_name.strip() if isinstance(body.template_name, str) else ""
+    if reply_mode == "test" and template:
+        raise AppError(
+            409,
+            "whatsapp_template_unavailable",
+            "A restricted test reply cannot use a WhatsApp template",
+        )
     if reason := _whatsapp_reply_unavailable(db, row):
         raise AppError(409, "whatsapp_reply_unavailable", reason)
     if row.lead_id is None:
@@ -540,8 +549,9 @@ def submit_for_approval(
             "channel": row.channel,
             "subject": body.subject or row.subject,
             "body": body.body,
-            "template_name": body.template_name,
+            "template_name": template or None,
             "template_language": body.template_language,
+            **({"whatsapp_delivery": reply_mode} if row.channel == "whatsapp" else {}),
             "last_inbound_at": latest_inbound.isoformat() if latest_inbound else None,
         },
         position=0,
@@ -853,24 +863,17 @@ def record_crm_intake(
 
 
 def _whatsapp_reply_unavailable(db: Session, row: InboxConversation) -> str | None:
-    if row.channel != "whatsapp":
-        return None
-    settings = get_settings()
-    if settings.email_mode != "live" or not settings.whatsapp_live_enabled:
-        return "WhatsApp replies are disabled for this environment. Incoming messages remain available."
-    verified = db.scalar(
-        select(IntegrationConfig.id).where(
-            IntegrationConfig.organization_id == row.organization_id,
-            IntegrationConfig.integration_type == IntegrationType.whatsapp,
-            IntegrationConfig.status == IntegrationStatus.configured,
-            IntegrationConfig.verified_at.is_not(None),
-        )
-    )
-    if verified is None:
-        return (
-            "Workspace administrators must verify the WhatsApp connection before sending replies."
-        )
-    return None
+    return _whatsapp_reply_state(db, row)[1]
+
+
+def _whatsapp_reply_mode(db: Session, row: InboxConversation) -> str | None:
+    return _whatsapp_reply_state(db, row)[0]
+
+
+def _whatsapp_reply_state(db: Session, row: InboxConversation) -> tuple[str | None, str | None]:
+    from app.domains.integrations.whatsapp_test import whatsapp_reply_availability
+
+    return whatsapp_reply_availability(db, row)
 
 
 @router.patch("/{conversation_id}/status")

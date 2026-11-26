@@ -30,6 +30,8 @@ from app.domains.integrations.schemas import (
     ResendTestStatus,
     VerificationResult,
     VersionUpdate,
+    WhatsAppTestRecipientUpdate,
+    WhatsAppTestStatus,
 )
 from app.domains.integrations.service import (
     disable_configuration,
@@ -41,6 +43,10 @@ from app.domains.integrations.service import (
     safe_metadata,
     update_metadata,
 )
+from app.domains.integrations.whatsapp_test import (
+    approve_test_recipient as approve_whatsapp_test_recipient,
+)
+from app.domains.integrations.whatsapp_test import test_status as whatsapp_test_status
 from app.integrations.language import get_chat_client, get_embedding_client
 from app.integrations.smtp_verification import verify_smtp
 
@@ -166,6 +172,24 @@ def put_resend_test_recipient(
 @router.post("/email/resend-test", response_model=ResendTestReceipt)
 def post_resend_test(body: ResendTestRequest, admin: CsrfAdmin, db: DbSession) -> ResendTestReceipt:
     return deliver_test(db, admin.organization.id, admin.user.id, body.recipient)
+
+
+@router.get("/whatsapp/test-reply", response_model=WhatsAppTestStatus)
+def get_whatsapp_test_reply(admin: Admin, db: DbSession) -> WhatsAppTestStatus:
+    return whatsapp_test_status(db, admin.organization.id)
+
+
+@router.put("/whatsapp/test-reply-recipient", response_model=WhatsAppTestStatus)
+def put_whatsapp_test_recipient(
+    body: WhatsAppTestRecipientUpdate, admin: CsrfAdmin, db: DbSession
+) -> WhatsAppTestStatus:
+    return approve_whatsapp_test_recipient(
+        db,
+        admin.organization.id,
+        admin.user.id,
+        body.phone,
+        expected_version=body.expected_version,
+    )
 
 
 @router.get("", response_model=list[IntegrationMetadata])

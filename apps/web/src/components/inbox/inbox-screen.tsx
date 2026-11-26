@@ -351,7 +351,8 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
                   <>
                     {savedDraft ? <Button className="justify-self-start" size="sm" variant="outline" onClick={() => { setSubject(thread.subject); setDraft(savedDraft.body); }}>Restore saved draft</Button> : null}
                     {thread.channel === "email" ? <input aria-label="Reply subject" className={fieldClass} placeholder="Reply subject" value={subject} onChange={(event) => setSubject(event.target.value)} /> : null}
-                    {thread.channel === "whatsapp" ? <input aria-label="WhatsApp template name" className={fieldClass} placeholder="Template name" value={templateName} onChange={(event) => setTemplateName(event.target.value)} /> : null}
+                    {thread.channel === "whatsapp" && thread.whatsapp_reply_mode === "test" ? <p className="text-xs text-muted-foreground">Restricted test reply. Approval can send one session message to the person who already wrote in. Templates stay unavailable, and customer messaging stays off.</p> : null}
+                    {thread.channel === "whatsapp" && thread.whatsapp_reply_mode !== "test" ? <input aria-label="WhatsApp template name" className={fieldClass} placeholder="Template name" value={templateName} onChange={(event) => setTemplateName(event.target.value)} /> : null}
                     <textarea aria-label="Reply draft" className={composerClass} placeholder="Write a reply draft" value={draft} onChange={(event) => setDraft(event.target.value)} />
                     <div className="flex flex-wrap gap-2">
                       <Button variant="outline" onClick={() => aiDraft.mutate()} disabled={aiDraft.isPending}>{aiDraft.isPending ? "Drafting…" : "Draft with AI"}</Button>

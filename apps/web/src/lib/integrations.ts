@@ -104,6 +104,30 @@ export function integrationAction(
   });
 }
 
+export type WhatsAppTestStatus = {
+  test_number_confirmed: boolean;
+  recipient_approved: boolean;
+  recipient_suffix: string | null;
+  test_reply_sent: boolean;
+  test_reply_pending: boolean;
+  production_messaging_enabled: boolean;
+};
+
+export function getWhatsAppTestStatus(organizationId: string) {
+  return apiFetch<WhatsAppTestStatus>(`${base(organizationId)}/whatsapp/test-reply`);
+}
+
+export function approveWhatsAppTestRecipient(
+  organizationId: string,
+  phone: string | null,
+  expectedVersion: number,
+) {
+  return apiFetch<WhatsAppTestStatus>(`${base(organizationId)}/whatsapp/test-reply-recipient`, {
+    method: "PUT",
+    body: JSON.stringify({ phone, expected_version: expectedVersion }),
+  });
+}
+
 export function verifyIntegration(organizationId: string, type: IntegrationType) {
   return apiFetch<VerificationResult>(`${base(organizationId)}/${type}/verify`, {
     method: "POST",

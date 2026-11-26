@@ -19,7 +19,7 @@ export type InboxConversation = {
   company_name?: string | null;
   preview?: string | null;
 };
-export type InboxDetail = InboxConversation & { ai_resumed?: boolean; reply_recipient?: string | null; reply_unavailable?: string | null; handoff_accepted_at?: string | null; handoff_resolved_at?: string | null; messages: { id: string; sender: string; recipient: string; body: string; direction: string; channel: string; delivery_status: string; created_at: string }[] };
+export type InboxDetail = InboxConversation & { ai_resumed?: boolean; reply_recipient?: string | null; reply_unavailable?: string | null; whatsapp_reply_mode?: "test" | "live" | null; handoff_accepted_at?: string | null; handoff_resolved_at?: string | null; messages: { id: string; sender: string; recipient: string; body: string; direction: string; channel: string; delivery_status: string; created_at: string }[] };
 const path = (id: string) => `/api/v1/organizations/${id}/inbox`;
 export type WidgetSettings = {
   allowed_domains: string[];

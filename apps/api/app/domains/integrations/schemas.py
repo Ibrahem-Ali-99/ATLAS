@@ -140,3 +140,17 @@ class ResendTestReceipt(BaseModel):
     sender: str
     provider_confirmation: str
     status: ResendTestStatus
+
+
+class WhatsAppTestStatus(BaseModel):
+    test_number_confirmed: bool
+    recipient_approved: bool
+    recipient_suffix: str | None = None
+    test_reply_sent: bool
+    test_reply_pending: bool
+    production_messaging_enabled: bool
+
+
+class WhatsAppTestRecipientUpdate(BaseModel):
+    phone: str | None = None
+    expected_version: int = Field(ge=1)

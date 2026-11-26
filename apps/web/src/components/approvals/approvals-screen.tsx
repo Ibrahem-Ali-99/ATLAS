@@ -389,6 +389,7 @@ function scopeLabel(approval: Approval): string {
     return "Internal CRM write";
   }
   if (actionType === "prepare_customer_response") {
+    if (payload.channel === "whatsapp" && payload.whatsapp_delivery === "test") return "Restricted WhatsApp test reply";
     if (payload.channel === "whatsapp") return "WhatsApp reply";
     if (payload.delivery_mode === "live") {
       return "External email";
@@ -407,6 +408,7 @@ function sideEffect(approval: Approval): string {
     return "The outcome could not be confirmed, so this was not marked successful. Check Workflows before running it again.";
   }
   if (actionType === "prepare_customer_response") {
+    if (payload.channel === "whatsapp" && payload.whatsapp_delivery === "test") return "Execute sends one session message to the approved test recipient. It does not enable customer messaging or a paid template.";
     if (payload.channel === "whatsapp") return "Execute sends the approved WhatsApp reply to the linked phone number.";
     if (payload.delivery_mode === "live") return "Execute submits the approved email to the verified SMTP relay.";
     return "Execute sends the approved email to the local SMTP sink.";

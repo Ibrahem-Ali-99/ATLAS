@@ -305,6 +305,8 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
         subject = payload.get("subject")
         if channel == "whatsapp":
             template_name = payload.get("template_name")
+            template = template_name.strip() if isinstance(template_name, str) else ""
+            test_reply = payload.get("whatsapp_delivery") == "test"
             latest = db.scalar(
                 select(InboxMessage)
                 .where(
@@ -318,9 +320,20 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
             )
             if latest is None or normalize_phone(latest.sender) != normalize_phone(recipient):
                 raise AppError(409, "whatsapp_recipient_mismatch", "The WhatsApp sender changed")
-            if datetime.now(UTC) - latest.created_at > timedelta(hours=24) and not (
-                isinstance(template_name, str) and template_name.strip()
-            ):
+            if test_reply and datetime.now(UTC) - latest.created_at > timedelta(hours=24):
+                raise AppError(
+                    409,
+                    "whatsapp_test_reply_expired",
+                    "The customer-service window has closed. "
+                    "A restricted test reply cannot use a paid template.",
+                )
+            if test_reply and template:
+                raise AppError(
+                    409,
+                    "whatsapp_template_unavailable",
+                    "A restricted test reply cannot use a WhatsApp template",
+                )
+            if datetime.now(UTC) - latest.created_at > timedelta(hours=24) and not template:
                 raise AppError(
                     409,
                     "whatsapp_template_required",
@@ -331,8 +344,9 @@ def _plan(db: Session, intent: ExecutionIntent) -> dict[str, Any]:
                 intent.organization_id,
                 recipient,
                 body.strip()[:4000],
-                template_name=template_name.strip() if isinstance(template_name, str) else None,
+                template_name=template or None,
                 template_language=str(payload.get("template_language", "en_US")),
+                test_reply=test_reply,
             )
             return {
                 "kind": "whatsapp",

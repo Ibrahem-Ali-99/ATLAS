@@ -42,6 +42,8 @@ import {
   getResendTestStatus,
   approveResendTestRecipient,
   sendResendTest,
+  getWhatsAppTestStatus,
+  approveWhatsAppTestRecipient,
   integrationAction,
   saveIntegration,
   verifyIntegration,
@@ -537,6 +539,46 @@ function MessagingConnectionControls({ organizationId, record, type, onChanged, 
   );
 }
 
+function WhatsAppTestReply({ organizationId, expectedVersion }: { organizationId: string; expectedVersion: number }) {
+  const queryClient = useQueryClient();
+  const [phone, setPhone] = useState("");
+  const status = useQuery({
+    queryKey: ["whatsapp-test-reply", organizationId],
+    queryFn: () => getWhatsAppTestStatus(organizationId),
+  });
+  const approve = useMutation({
+    mutationFn: (next: string | null) => approveWhatsAppTestRecipient(organizationId, next, expectedVersion),
+    onSuccess: () => {
+      setPhone("");
+      void queryClient.invalidateQueries({ queryKey: ["whatsapp-test-reply", organizationId] });
+    },
+  });
+  const current = status.data;
+  const locked = current?.test_reply_sent || current?.test_reply_pending;
+  return (
+    <section className="mt-4 grid gap-3 border-t border-border pt-3" aria-label="Restricted test reply">
+      <h4 className="text-sm font-medium">Restricted test reply</h4>
+      <div className="flex flex-wrap gap-2">
+        <Badge variant="secondary">Production messaging {current?.production_messaging_enabled ? "Enabled" : "Disabled"}</Badge>
+        <Badge variant="secondary">Test number {current?.test_number_confirmed ? "Confirmed" : "Not confirmed"}</Badge>
+        <Badge variant="secondary">{current?.recipient_approved ? `Recipient ····${current.recipient_suffix}` : "Recipient not approved"}</Badge>
+        <Badge variant="secondary">{current?.test_reply_sent ? "Test reply sent" : current?.test_reply_pending ? "Test reply in progress" : "Test reply not sent"}</Badge>
+      </div>
+      <p className="text-xs text-muted-foreground">One session message can be approved from Inbox for a number that already messaged this workspace. This does not enable customer messaging.</p>
+      {locked ? null : (
+        <form className="flex flex-wrap items-end gap-2" onSubmit={(event) => { event.preventDefault(); approve.mutate(phone.trim()); }}>
+          <label className="grid gap-1 text-sm">Approved test recipient
+            <Input required inputMode="tel" autoComplete="off" placeholder="Number with country code" value={phone} disabled={approve.isPending} onChange={(event) => setPhone(event.target.value)} />
+          </label>
+          <Button size="sm" type="submit" disabled={approve.isPending || !phone.trim()}>Approve recipient</Button>
+          {current?.recipient_approved ? <Button size="sm" type="button" variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(null)}>Clear recipient</Button> : null}
+        </form>
+      )}
+      {approve.error ? <RequestError error={approve.error} /> : null}
+    </section>
+  );
+}
+
 function WhatsAppSettingsCard({ organizationId, isAdmin, record, onChanged }: { organizationId: string; isAdmin: boolean; record?: IntegrationMetadata; onChanged: () => void }) {
   const [version, setVersion] = useState(record?.credential_version);
   const [account, setAccount] = useState(String(record?.config.business_account_id ?? ""));
@@ -556,7 +598,8 @@ function WhatsAppSettingsCard({ organizationId, isAdmin, record, onChanged }: { 
         <h3 className="font-medium">Meta Cloud API connection</h3>
         <Badge variant="secondary">{integrationConnection(record)}</Badge>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">Verified inbound text messages appear in Inbox. Outbound delivery requires a separate live messaging deployment and approval.</p>
+      <p className="mt-2 text-xs text-muted-foreground">Verified inbound text messages appear in Inbox. Customer messaging stays off until an operator enables it. A restricted test reply can send one session message to a number that already wrote in.</p>
+      {record && isAdmin ? <WhatsAppTestReply organizationId={organizationId} expectedVersion={version ?? record.credential_version} /> : null}
       <form className="mt-4 grid gap-3" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-1 text-sm">Business Account ID<Input required inputMode="numeric" pattern="[0-9]{1,32}" value={account} disabled={!isAdmin || save.isPending} onChange={(e) => setAccount(e.target.value)} /></label>
@@ -578,7 +621,7 @@ function WhatsAppSettingsCard({ organizationId, isAdmin, record, onChanged }: { 
           <li>Enter the Business Account ID, phone number ID, and access token from Meta, then save and test the connection.</li>
           <li>Give Meta this callback path on the public HTTPS address your operator provides.</li>
           <li>The verification token and app secret stay on the server. They are not entered here.</li>
-          <li>Replies stay in review until an operator enables live messaging and you approve one.</li>
+          <li>Approve one test recipient to send a single session reply. That does not enable customer messaging or paid templates.</li>
         </ol>
         <code className="mt-2 block break-all rounded-md bg-muted p-2">{callback}</code>
       </details>

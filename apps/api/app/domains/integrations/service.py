@@ -16,6 +16,7 @@ from app.domains.integrations.resend_credentials import (
     retain_test_recipient,
 )
 from app.domains.integrations.schemas import IntegrationInput, IntegrationMetadata
+from app.domains.integrations.whatsapp_test import public_config, whatsapp_config_for_storage
 from app.domains.knowledge.models import Chunk, Document, DocumentStatus
 from app.domains.knowledge.vectors import lock_embedding_index
 
@@ -77,7 +78,9 @@ def safe_metadata(
         organization_id=str(record.organization_id),
         integration_type=record.integration_type,
         provider=record.provider,
-        config=record.config,
+        config=public_config(record.config)
+        if record.integration_type == IntegrationType.whatsapp
+        else record.config,
         status=record.status,
         credential_version=record.credential_version,
         has_credentials=bool(record.encrypted_credentials),
@@ -163,6 +166,11 @@ def replace_configuration(
             raise AppError(422, "invalid_credential_update", "Supply email credentials to update")
     elif merge_email_credentials:
         raise AppError(422, "invalid_credential_update", "Supply email credentials to update")
+    if data.integration_type == IntegrationType.whatsapp:
+        current_config = None if existing is None else existing.config
+        data = data.model_copy(
+            update={"config": whatsapp_config_for_storage(current_config, data.config)}
+        )
     if existing is None:
         return create_configuration(
             db,
@@ -291,6 +299,8 @@ def update_metadata(
         raise AppError(404, "integration_not_found", "Integration configuration not found")
     if integration_type == IntegrationType.email:
         config = retain_test_recipient(record.config, config)
+    if integration_type == IntegrationType.whatsapp:
+        config = whatsapp_config_for_storage(record.config, config)
     data = IntegrationInput(integration_type=integration_type, provider=provider, config=config)
     data.validate_provider()
     _validate_embedding_config(data)
