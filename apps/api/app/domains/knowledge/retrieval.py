@@ -26,11 +26,10 @@ from app.integrations.resolver import resolve_settings
 # Full-text matches stay citable past this line, including an exact code at 0.47.
 VECTOR_ONLY_MAX_DISTANCE = 0.45
 
-# Development-split choice. Held-out scores must not change this name.
-# Development split, hash embeddings, frozen rule in choose_pipeline:
-# lexical abstained more often than the hybrid variants, so it is the default.
-# Do not switch this from a held-out score.
-PRODUCTION_PIPELINE = "lexical"
+# Candidate search stays broad. Answerability is a separate stage.
+# Tuned on the Feld development split only. The inspected held-out set and the
+# fresh final set must not change this name.
+PRODUCTION_PIPELINE = "answerable"
 
 PipelineName = Literal[
     "lexical",
@@ -40,6 +39,7 @@ PipelineName = Literal[
     "hybrid_meta",
     "hybrid_rerank",
     "hybrid_full",
+    "answerable",
 ]
 
 
@@ -81,6 +81,7 @@ def search_chunks(
         "hybrid_meta",
         "hybrid_rerank",
         "hybrid_full",
+        "answerable",
     ] = "hybrid",
 ) -> list[RetrievedChunk]:
     """Retrieve ready chunks for one organization.
@@ -90,6 +91,8 @@ def search_chunks(
     ``hybrid`` adds an OR full-text query. ``hybrid_meta`` adds title filtering.
     ``hybrid_rerank`` replaces reciprocal-rank order with the second-stage score.
     ``hybrid_full`` applies that score, title filtering, and near-duplicate removal.
+    ``answerable`` uses the hybrid candidate pool, then keeps passages that
+    contain the requested fact.
     """
 
     query = query_text.strip()
@@ -131,7 +134,7 @@ def search_chunks(
     tsquery = func.plainto_tsquery("english", query)
     rank = func.ts_rank_cd(Chunk.search_vector, tsquery)
     text_rows = _text_rows(db, organization_id, tsquery, rank)
-    use_or = pipeline in {"hybrid", "hybrid_meta", "hybrid_rerank", "hybrid_full"}
+    use_or = pipeline in {"hybrid", "hybrid_meta", "hybrid_rerank", "hybrid_full", "answerable"}
     partial_rows: Sequence[Any] = []
     strict_ids = {cast(Chunk, row[0]).id for row in text_rows} if use_or else set()
     if use_or:
@@ -157,7 +160,12 @@ def search_chunks(
             if candidate.chunk.id in strict_ids:
                 candidate.lexical_strict = True
                 candidate.lexical = True
-    evidence = _select_evidence(fused, pipeline, query_terms, settings.rag_vector_only_max_distance)
+    if pipeline == "answerable":
+        evidence = _answerable(query, fused, query_terms, limit)
+    else:
+        evidence = _select_evidence(
+            fused, pipeline, query_terms, settings.rag_vector_only_max_distance
+        )
     from app.domains.observability.tracing import record_operation
 
     record_operation(
@@ -195,6 +203,24 @@ _SHARED_TERM_STOP_WORDS = {
     "into",
     "only",
 }
+
+
+def _answerable(
+    query: str,
+    fused: dict[uuid.UUID, _Candidate],
+    query_terms: set[str],
+    limit: int,
+) -> list[_Candidate]:
+    from app.domains.knowledge.evidence import PassageView, select_answerable
+
+    ranked = sorted(fused.values(), key=lambda item: _hybrid_rank(item, query_terms), reverse=True)
+    views = [
+        PassageView(str(item.chunk.id), item.title, item.chunk.content, item.score)
+        for item in ranked
+    ]
+    by_key = {str(item.chunk.id): item for item in ranked}
+    chosen = select_answerable(query, views, limit=limit)
+    return [by_key[item.key] for item in chosen if item.key in by_key]
 
 
 def _select_evidence(

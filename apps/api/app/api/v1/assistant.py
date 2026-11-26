@@ -2,13 +2,20 @@ import json
 import time
 import uuid
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import StreamingResponse
 
+from app.core.config import get_settings
 from app.core.errors import AppError
 from app.domains.assistant import operations, service
+from app.domains.assistant.inference_guard import (
+    DETERMINISTIC_FALLBACK,
+    assess_public_inference,
+    finish_public_inference,
+)
 from app.domains.assistant.schemas import (
     ConversationCreate,
     ConversationDetail,
@@ -20,6 +27,7 @@ from app.domains.assistant.schemas import (
     ReplyOut,
 )
 from app.domains.billing.service import meter_assistant_request
+from app.domains.demo.access import is_visitor_slug
 from app.domains.demo.service import enforce_demo_assistant
 from app.domains.identity.dependencies import CsrfMember, DbSession, Member
 from app.domains.observability.tracing import record_operation
@@ -38,6 +46,38 @@ def organization_embedder(request: Request, member: Member, db: DbSession) -> Em
     if override is not None:
         return cast(EmbeddingClient, override())
     return get_embedding_client(db, member.organization.id)
+
+
+@dataclass
+class _VisitorSlot:
+    chat: ChatClient | None = None
+    held: bool = False
+    denied: str | None = None
+
+
+def _visitor_slot(db: DbSession, member: Member, text: str) -> _VisitorSlot:
+    """Apply the public budget to a visitor Assistant turn when the switch is on."""
+
+    if not is_visitor_slug(member.organization.slug):
+        return _VisitorSlot()
+    if not get_settings().public_inference_enabled:
+        return _VisitorSlot()
+    decision = assess_public_inference(
+        f"assistant:{member.organization.id}:{member.user.id}",
+        text,
+        hold_slot=True,
+    )
+    if not decision.allowed:
+        return _VisitorSlot(denied=decision.message)
+    return _VisitorSlot(
+        chat=get_chat_client(
+            db,
+            member.organization.id,
+            public_inference=True,
+            max_output_tokens=get_settings().public_inference_max_output_tokens,
+        ),
+        held=True,
+    )
 
 
 def organization_chat(request: Request, member: Member, db: DbSession) -> ChatClient:
@@ -164,18 +204,31 @@ def create_message(
     service.get_conversation(db, member.organization.id, member.user.id, conversation_id)
     enforce_demo_assistant(db, member.organization)
     meter_assistant_request(db, member.organization.id)
-    turn = service.prepare_turn(
-        db,
-        member.organization.id,
-        member.user.id,
-        conversation_id,
-        body.content,
-        embedder,
-        chat,
-    )
-    _require_model(db, turn, chat)
+    slot = _visitor_slot(db, member, body.content)
+    if slot.denied is not None:
+        return service.reject_public_turn(
+            db,
+            member.organization.id,
+            member.user.id,
+            conversation_id,
+            body.content,
+            slot.denied,
+        )
+    if slot.chat is not None:
+        chat = slot.chat
+    turn: service.PreparedTurn | None = None
     started = time.perf_counter()
     try:
+        turn = service.prepare_turn(
+            db,
+            member.organization.id,
+            member.user.id,
+            conversation_id,
+            body.content,
+            embedder,
+            chat,
+        )
+        _require_model(db, turn, chat)
         result = service.complete_turn(db, turn, chat)
         record_operation(
             operation="assistant_response",
@@ -192,7 +245,9 @@ def create_message(
         )
         return result
     except AppError as exc:
-        service.record_provider_failure(db, turn.conversation, exc.message)
+        failure = DETERMINISTIC_FALLBACK if slot.held else exc.message
+        if turn is not None:
+            service.record_provider_failure(db, turn.conversation, failure)
         record_operation(
             operation="assistant_response",
             status="failed",
@@ -203,7 +258,12 @@ def create_message(
             error_code=exc.code,
             detail={"grounding": "failed", "fallback_reason": exc.code},
         )
+        if slot.held:
+            raise AppError(exc.status_code, exc.code, failure) from exc
         raise
+    finally:
+        if slot.held:
+            finish_public_inference()
 
 
 @router.post("/conversations/{conversation_id}/messages/stream")
@@ -219,16 +279,48 @@ def stream_message(
     service.get_conversation(db, organization_id, member.user.id, conversation_id)
     enforce_demo_assistant(db, member.organization)
     meter_assistant_request(db, organization_id)
-    turn = service.prepare_turn(
-        db,
-        member.organization.id,
-        member.user.id,
-        conversation_id,
-        body.content,
-        embedder,
-        chat,
-    )
-    _require_model(db, turn, chat)
+    slot = _visitor_slot(db, member, body.content)
+    if slot.denied is not None:
+        reply = service.reject_public_turn(
+            db,
+            organization_id,
+            member.user.id,
+            conversation_id,
+            body.content,
+            slot.denied,
+        )
+
+        def denied_events() -> Iterator[str]:
+            yield _event("done", reply.model_dump(mode="json"))
+
+        return StreamingResponse(denied_events(), media_type="text/event-stream")
+    if slot.chat is not None:
+        chat = slot.chat
+    turn: service.PreparedTurn | None = None
+    try:
+        turn = service.prepare_turn(
+            db,
+            member.organization.id,
+            member.user.id,
+            conversation_id,
+            body.content,
+            embedder,
+            chat,
+        )
+        _require_model(db, turn, chat)
+    except AppError as exc:
+        failure = DETERMINISTIC_FALLBACK if slot.held else exc.message
+        if turn is not None:
+            service.record_provider_failure(db, turn.conversation, failure)
+        if slot.held:
+            finish_public_inference()
+        raise
+    except Exception:
+        if slot.held:
+            finish_public_inference()
+        raise
+
+    assert turn is not None
 
     def events() -> Iterator[str]:
         parts: list[str] = []
@@ -266,7 +358,8 @@ def stream_message(
                 yield _event("token", {"text": reply.message.content})
             yield _event("done", reply.model_dump(mode="json"))
         except AppError as exc:
-            service.record_provider_failure(db, turn.conversation, exc.message)
+            failure = DETERMINISTIC_FALLBACK if slot.held else exc.message
+            service.record_provider_failure(db, turn.conversation, failure)
             record_operation(
                 operation="assistant_response",
                 organization_id=organization_id,
@@ -274,7 +367,10 @@ def stream_message(
                 latency_ms=round((time.perf_counter() - started) * 1000),
                 error_code=exc.code,
             )
-            yield _event("error", {"code": exc.code, "message": exc.message})
+            yield _event("error", {"code": exc.code, "message": failure})
+        finally:
+            if slot.held:
+                finish_public_inference()
 
     return StreamingResponse(events(), media_type="text/event-stream")
 
@@ -286,11 +382,7 @@ def _require_model(
 ) -> None:
     if not turn.needs_model:
         return
-    try:
-        chat.ensure_configured()
-    except AppError as exc:
-        service.record_provider_failure(db, turn.conversation, exc.message)
-        raise
+    chat.ensure_configured()
 
 
 def _event(name: str, payload: object) -> str:

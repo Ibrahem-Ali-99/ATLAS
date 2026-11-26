@@ -190,8 +190,18 @@ def _sentences(answer: str) -> list[str]:
 
 def _contains(passage: str, fact: str) -> bool:
     if fact.isdigit() or _NUMBER.fullmatch(fact):
-        return re.search(rf"(?<!\d){re.escape(fact)}(?!\d)", passage) is not None
+        target = _canonical_number(fact)
+        return any(_canonical_number(found) == target for found in _NUMBER.findall(passage))
     return fact in passage
+
+
+def _canonical_number(value: str) -> str:
+    """Drop thousands separators and leading zeros without merging 9 and 19."""
+
+    if "." in value:
+        whole, fraction = value.split(".", 1)
+        return f"{whole.lstrip('0') or '0'}.{fraction}"
+    return value.lstrip("0") or "0"
 
 
 def _content_words(text: str) -> set[str]:
@@ -199,7 +209,16 @@ def _content_words(text: str) -> set[str]:
 
 
 def _normalize(text: str) -> str:
-    lowered = text.lower().replace("–", "-")
+    lowered = (
+        text.lower()
+        .replace("\u00a0", " ")
+        .replace("\u202f", " ")
+        .replace("\u2010", "-")
+        .replace("\u2011", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+    )
+    lowered = re.sub(r"(?<=\d),(?=\d)", "", lowered)
     return _NUMBER_WORDS.sub(_number_word, lowered)
 
 

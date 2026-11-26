@@ -1,51 +1,41 @@
 # Assistant retrieval and generation
 
-The workspace Assistant answers from one organization's documents and CRM. The retrieval default is `PRODUCTION_PIPELINE = "lexical"` in `apps/api/app/domains/knowledge/retrieval.py`. That choice comes from the development half of the Feld and Quay set in `docs/assistant-rag-evaluation.md`. The held-out half was not used to change it.
+The workspace Assistant answers from one organization's documents and CRM. The retrieval default is `PRODUCTION_PIPELINE = "answerable"` in `apps/api/app/domains/knowledge/retrieval.py`.
 
-## Selected path
+Candidate search stays broad. A second stage decides whether a passage actually contains the requested fact. The choice was checked on the Feld development split. The older held-out Feld questions stay a historical benchmark. The fresh Plover Dock set in `app/domains/evaluation/rag_final.py` was scored after the stage was frozen.
 
-Lexical search is an English `plainto_tsquery` that requires every content word. A chunk is evidence only when that query matches. There is no vector neighbor and no OR query on this path.
+## Two stages
 
-The other paths remain callable for the benchmark:
+1. **Candidates.** The hybrid pool is an AND full-text query, an OR full-text query, and vector neighbors inside the existing cosine cutoff, fused by reciprocal rank `1 / (60 + rank)`. This pool is allowed to include topical neighbors.
+2. **Answerability.** `select_answerable` keeps a passage only when the question's rare constraints occur together as positive mentions and the passage has the kind of fact the question asks for: a number, a date, a time, a code, an email, or an address. A negated mention ("is not Feld") does not count. A question joined by "and" plus a following part is searched as separate clauses, and each clause keeps its own current or superseded card. When the question asks for the current fact and both cards are in the pool, the superseded card is dropped. A salary, telephone, mobile, or home-address question is answered only by a passage that states that fact. "No home address is stored" does not answer any of those questions. A clause with no supporting passage is named in the prompt so the model can answer the supported parts and say which part was not found.
 
-| Name | What it searches |
-|---|---|
-| `lexical` | AND full-text only. This is the Assistant default. |
-| `dense` | Vector neighbors only, citable at cosine distance 0.45 or closer. |
-| `baseline` | Vector neighbors inside the 0.55 cutoff, AND full-text, reciprocal-rank fusion `1 / (60 + rank)`, evidence when the chunk is lexical, shares a content word, or is at distance 0.45 or closer. |
-| `hybrid` | Baseline plus an OR `to_tsquery`. A partial-only hit needs two shared content words, or half of them. |
-| `hybrid_meta` | Hybrid, then a title filter when exactly one title shares a distinctive question word. |
-| `hybrid_rerank` | Hybrid, reordered by overlap, similarity, title overlap, and an AND-match bonus. Not a cross-encoder. |
-| `hybrid_full` | Rerank, title filter, and same-document dedup at Jaccard 0.85. |
+The other pipeline names remain callable for comparison: `lexical`, `dense`, `baseline`, `hybrid`, `hybrid_meta`, `hybrid_rerank`, and `hybrid_full`. `search_chunks` still defaults its argument to `hybrid` so older evidence tests keep exercising that path. The Assistant passes `answerable`.
 
-`search_chunks` still defaults its argument to `hybrid` so older evidence tests keep exercising that experiment. The Assistant passes `PRODUCTION_PIPELINE` explicitly.
+Chunk size stays 800 with overlap 100. The 0.45 and 0.55 distance gates were not moved. A cross-encoder package is not installed, so that comparison was not run. A learned reranker was not added.
 
-## What stayed
+## Why dense neighbors are not answers
 
-- Organization scope, the ready-document filter, and the pgvector column for the active embedding width.
-- The vector-only gate of cosine distance 0.45 and the candidate cutoff of 0.55. Neither cutoff was moved after the qualification run.
-- Chunk size 800 and overlap 100. Development scoring at 400, 800, and 1600 was a tie, so the constants did not change.
-- Grounded prompts that treat excerpts and CRM rows as untrusted data.
-- Citation selection in `attribute_answer`. A number, code, or email in the answer must appear in a retrieved passage, or the stored answer says the fact could not be confirmed.
-- Follow-up drafts and appointment requests still become approvals. A task is created only after the member confirms it. Nothing is sent or booked from the chat turn itself.
+On local Ollama `nomic-embed-text:v1.5`, development hard negatives landed between cosine distance 0.1973 and 0.3773, inside the 0.45 gate. The Manchester rate question's nearest document was the Feld rate card, because the company name and the words "cold storage" dominate the place name. The home-address question's nearest document was the staff directory, because it names the person. Dense retrieval therefore abstained on none of those questions. The answerability stage abstained on all four.
 
 ## Turn order
 
-1. A prompt-injection phrase returns a refusal and does not search. The refusal does not repeat the payload.
-2. Weather, jokes, recipes, sports scores, and similar unrelated questions return a short boundary. They are not retrieval abstentions.
-3. A greeting or a capability question returns the stored reply for that intent. Capability replies name CRM, knowledge, approvals, and the rule that a person approves and then executes a send.
-4. A bare topic such as "rates" or "yard" asks which company or document the member means.
+1. A prompt-injection phrase returns a refusal and does not search.
+2. Weather, jokes, and similar unrelated questions return a short boundary.
+3. A greeting or a capability question returns the stored reply for that intent.
+4. A bare topic asks which company or document the member means.
 5. Summary, follow-up, appointment, and task turns read one stored lead and, when needed, store a proposal. A delete or other mutation is refused as read-only.
-6. A follow-up pronoun is rewritten from the previous user question and cited titles. The rewrite does not call a model. On the development follow-ups it did not raise lexical recall, and it did not lower it. The Assistant still applies it.
-7. Document search uses the lexical path. CRM search still adds leads and contacts of a named company, because a lead title does not always repeat the company name.
-8. When nothing qualifies, the reply asks for the company, document, or lead. It does not invent a fact.
-9. A grounded model call sees only the retrieved rows. `attribute_answer` then drops citations the answer does not use.
+6. A follow-up pronoun is rewritten from the previous user question. The rewrite does not call a model.
+7. Document search uses the answerable pipeline. CRM search still adds leads and contacts of a named company.
+8. When nothing qualifies, the reply asks for the company, document, or lead.
+9. A grounded model call sees only the passages that survived answerability. The prompt tells the model to copy prices, codes, dates, temperatures, units, and opening hours as written, and to answer every supported part. `attribute_answer` then drops a citation whose text does not contain the number, code, or email in the answer. `80000` and `80,000` are the same figure. `9` and `09` are the same clock component. `19` is not accepted as `9`.
 
-## Public website chat
+## Public website chat and visitor Assistant sessions
 
-Anonymous website auto-reply does not call Groq or Ollama unless `ATLAS_PUBLIC_INFERENCE_ENABLED` is true. The default is false, and this work leaves it false. While it is false, the widget stores the visitor message and marks the thread for a person. It does not add an outbound model message.
+Anonymous website auto-reply and a visitor Assistant session do not call Groq or Ollama unless `ATLAS_PUBLIC_INFERENCE_ENABLED` is true. The default is false, and this work leaves it false.
 
-When the switch is on, `assess_public_inference` runs before the model call. The session key is the organization id plus the widget session id, so one tenant cannot spend another's budget. The guard enforces, per API process:
+While the switch is false, a visitor Assistant session keeps the deterministic stand-in. The website widget stores the visitor message and marks the thread for a person.
+
+When the switch is on, both paths call `assess_public_inference` before the model. The Assistant session key is `assistant:{organization_id}:{user_id}`. The widget key is the organization id plus the widget session id. The guard enforces, per API process:
 
 - input length, default 4000 characters
 - a minimum gap between messages in one session, default 2 seconds
@@ -54,16 +44,25 @@ When the switch is on, `assess_public_inference` runs before the model call. The
 - rejection of a prompt-injection phrase, a null byte, a long single-character message, or more than three URLs
 - an output-token cap, default 400
 
-A provider failure stores the handoff reason `Deterministic fallback: the live model did not answer. A person should review this chat. This sentence was not produced by the model.` The widget does not invent a visitor-facing answer in that case. Visitor demo organizations still receive the deterministic stand-in from `get_chat_client` before this path. Signed-in workspace turns are not counted against the public budget. The counters live in the API process.
+The visitor model client uses the deployment's server-side chat settings, not a key stored on the visitor organization. A provider failure is stored as: `Deterministic fallback: the live model did not answer. A person should review this chat. This sentence was not produced by the model.`
+
+Signed-in workspace turns that are not visitor sessions are not counted against the public budget. Visitor embeddings stay on the deterministic embedder.
 
 ## Reproduce
 
 ```powershell
 cd apps/api
-uv run pytest tests/test_rag_qualification.py tests/test_rag_pipeline.py tests/test_inference_guard.py tests/test_assistant_routing.py -q
+uv run pytest tests/test_evidence_answerability.py tests/test_inference_guard.py tests/test_assistant.py -q
 $env:ATLAS_LIVE_RAG = "yes"
-uv run python -m app.scripts.verify_rag_live
-uv run python -m app.scripts.verify_feld_generation
+uv run python -m app.scripts.evaluate_retrieval_experiments
+$env:ATLAS_FINAL_EVAL = "yes"
+uv run python -m app.scripts.evaluate_final_generation
+$env:ATLAS_ACCEPTANCE_EVAL = "yes"
+uv run python -m app.scripts.evaluate_acceptance
 ```
 
-The live scripts send fictional sentences only, write no database rows, and refuse to run without `ATLAS_LIVE_RAG=yes`. The qualification corpus is `app/domains/evaluation/rag_dataset.py`. The smaller Marrow corpus in `rag_corpus_v1.json` is the earlier experiment, not the selection set.
+The acceptance command calls Groq through the visitor Assistant. It enables public inference only inside that process. The setting default stays false. Do not set `ATLAS_PUBLIC_INFERENCE_ENABLED` in `.env` for this check.
+
+The measured Orry Beacon results, the remaining misses, and the conversations that stayed factual are in `docs/assistant-rag-evaluation.md`. Retrieval optimization stops at that set. The Assistant is ready for personal product acceptance with those limits recorded.
+
+The live commands send fictional text only. The final command writes Plover rows only inside a transaction on `atlas_test` and rolls them back. Both refuse to run without the environment flags.

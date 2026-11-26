@@ -275,8 +275,7 @@ def test_held_out_reports_the_selected_pipeline(
         pipeline: _retrieval_score(db, organization_id, retrieve, abstain, pipeline, False)
         for pipeline in PIPELINES
     }
-    chosen = scores[PRODUCTION_PIPELINE]
-    generation = _generation_score(db, organization_id, retrieve, PRODUCTION_PIPELINE)
+    print("HELD_PIPELINE", PRODUCTION_PIPELINE, "not part of this historical comparison")
     intents = [
         case for case in held_out if case["task"] == "intent" and case.get("intent")
     ]
@@ -284,22 +283,21 @@ def test_held_out_reports_the_selected_pipeline(
     for case in intents:
         routed = route_question(case["question"], has_history=bool(case.get("history")))
         intent_hits.append(routed.value == case["intent"])
-    print("HELD_PIPELINE", PRODUCTION_PIPELINE, chosen)
     for pipeline, score in scores.items():
         print(
             "HELD_COMPARE "
             f"{pipeline} recall={score['recall_at_5']} abstain={score['abstention_accuracy']} "
             f"ndcg={score['ndcg_at_5']}"
         )
-    print("HELD_GENERATION", generation)
     print("HELD_INTENT", round(mean([1.0 if hit else 0.0 for hit in intent_hits]), 4))
+    historical = "lexical" if "lexical" in scores else PIPELINES[0]
     for case in held_out:
         if not case.get("live_sample"):
             continue
-        rows = _search(db, organization_id, case, PRODUCTION_PIPELINE, case["task"] == "follow_up")
+        rows = _search(db, organization_id, case, historical, case["task"] == "follow_up")
         excerpt = " ".join(row.content for row in rows)[:240]
         print("LIVE_CONTEXT", case["id"], case["task"], excerpt)
-    assert chosen["recall_at_5"] >= 0.0
+    assert scores["lexical"]["recall_at_5"] >= 0.0
 
 
 def _generation_score(

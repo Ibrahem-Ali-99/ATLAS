@@ -1,8 +1,9 @@
-"""Budgets for anonymous website-chat model calls.
+"""Budgets for public model calls.
 
 The switch is off unless ATLAS_PUBLIC_INFERENCE_ENABLED is set. A signed-in
-workspace turn does not use this guard. Visitor organizations stay on the
-deterministic stand-in inside the language client.
+workspace that is not a visitor organization does not use this guard. A visitor
+Assistant session uses the same budgets as the website widget, and only after
+the switch is on. Until then the visitor stays on the deterministic stand-in.
 """
 
 from __future__ import annotations

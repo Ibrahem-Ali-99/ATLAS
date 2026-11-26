@@ -353,15 +353,24 @@ def get_chat_client(
     *,
     for_verification: bool = False,
     max_output_tokens: int | None = None,
+    public_inference: bool = False,
 ) -> ChatClient:
     settings = get_settings()
     if db is not None and organization_id is not None:
         from app.domains.demo.access import organization_is_visitor
 
         if organization_is_visitor(db, organization_id):
-            from app.integrations.doubles import DeterministicChatClient
+            if not (public_inference and settings.public_inference_enabled):
+                from app.integrations.doubles import DeterministicChatClient
 
-            return DeterministicChatClient()
+                return DeterministicChatClient()
+            client = OpenAICompatibleChatClient(settings)
+            client.limit_output(
+                max_output_tokens
+                if max_output_tokens is not None
+                else settings.public_inference_max_output_tokens
+            )
+            return client
         from app.integrations.resolver import resolve_settings
 
         settings = resolve_settings(db, organization_id, "chat", for_verification=for_verification)

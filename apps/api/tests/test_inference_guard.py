@@ -1,7 +1,11 @@
 """Public model replies stay off, and an enabled switch still spends a budget."""
 
-import pytest
+import uuid
 
+import pytest
+from sqlalchemy.orm import Session
+
+from app.api.v1.assistant import _visitor_slot
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.domains.assistant.inference_guard import (
@@ -10,6 +14,9 @@ from app.domains.assistant.inference_guard import (
     require_public_inference,
     reset_public_inference,
 )
+from app.domains.identity.models import Organization
+from app.integrations.doubles import DeterministicChatClient
+from app.integrations.language import OpenAICompatibleChatClient, get_chat_client
 
 
 @pytest.fixture(autouse=True)
@@ -82,3 +89,53 @@ def test_public_inference_holds_one_slot_at_a_time(monkeypatch: pytest.MonkeyPat
     assert busy.code == "public_inference_busy"
     finish_public_inference()
     assert assess_public_inference("two", "Where is the yard?", now=3, hold_slot=True).allowed
+
+
+def test_visitor_assistant_uses_the_public_budget(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slug = f"harbor-visitor-{uuid.uuid4().hex[:8]}"
+    organization = Organization(name="Harbor visitor", slug=slug)
+    db.add(organization)
+    db.commit()
+    member = type(
+        "Member",
+        (),
+        {"organization": organization, "user": type("User", (), {"id": uuid.uuid4()})()},
+    )()
+    closed = get_chat_client(db, organization.id, public_inference=True)
+    assert isinstance(closed, DeterministicChatClient)
+    enabled = get_settings().model_copy(
+        update={
+            "public_inference_enabled": True,
+            "public_inference_min_interval_seconds": 0,
+            "public_inference_session_limit": 2,
+            "public_inference_global_limit": 10,
+        }
+    )
+    for target in (
+        "app.domains.assistant.inference_guard.get_settings",
+        "app.api.v1.assistant.get_settings",
+        "app.integrations.language.get_settings",
+    ):
+        monkeypatch.setattr(target, lambda enabled=enabled: enabled)
+    opened = _visitor_slot(db, member, "What is the quay fee?")
+    assert opened.held is True
+    assert isinstance(opened.chat, OpenAICompatibleChatClient)
+    finish_public_inference()
+    blocked = get_settings().model_copy(
+        update={
+            "public_inference_enabled": True,
+            "public_inference_min_interval_seconds": 0,
+            "public_inference_session_limit": 0,
+        }
+    )
+    for target in (
+        "app.domains.assistant.inference_guard.get_settings",
+        "app.api.v1.assistant.get_settings",
+    ):
+        monkeypatch.setattr(target, lambda blocked=blocked: blocked)
+    denied = _visitor_slot(db, member, "What is the quay fee?")
+    assert denied.chat is None
+    assert denied.held is False
+    assert denied.denied is not None

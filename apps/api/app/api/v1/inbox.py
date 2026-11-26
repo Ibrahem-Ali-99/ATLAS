@@ -1550,6 +1550,7 @@ def widget_message(
                     db,
                     widget.organization_id,
                     max_output_tokens=get_settings().public_inference_max_output_tokens,
+                    public_inference=True,
                 ),
             )
             if result["grounding"] == "grounded":

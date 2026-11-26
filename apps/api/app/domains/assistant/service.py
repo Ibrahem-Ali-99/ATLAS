@@ -305,6 +305,30 @@ def record_provider_failure(db: Session, conversation: Conversation, message: st
     _save_answer(db, conversation, message, [], [])
 
 
+def reject_public_turn(
+    db: Session,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    content: str,
+    message: str,
+) -> ReplyOut:
+    """Store a visitor message and a budget refusal without calling a model."""
+
+    conversation = get_conversation(db, organization_id, user_id, conversation_id)
+    db.add(
+        Message(
+            conversation_id=conversation.id,
+            organization_id=organization_id,
+            role=MessageRole.user,
+            content=content.strip(),
+        )
+    )
+    db.commit()
+    turn = _stored_reply(db, conversation, message, _phases())
+    return save_completed_turn(db, turn, message)
+
+
 def complete_turn(db: Session, turn: PreparedTurn, client: ChatClient) -> ReplyOut:
     if turn.needs_model:
         answer = client.complete(turn.system_prompt, turn.user_prompt).strip()
