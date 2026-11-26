@@ -134,6 +134,7 @@ export type KnowledgeDocument = {
   byte_size: number;
   status: DocumentStatus;
   error_message: string | null;
+  archived_at?: string | null;
   origin: DocumentOrigin;
   created_at: string;
   updated_at: string;

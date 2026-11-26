@@ -83,6 +83,7 @@ def search_chunks(
             .where(
                 Chunk.organization_id == organization_id,
                 Document.status == "ready",
+                Document.archived_at.is_(None),
                 column.is_not(None),
                 model_clause(settings),
             )
@@ -100,6 +101,7 @@ def search_chunks(
         .where(
             Chunk.organization_id == organization_id,
             Document.status == "ready",
+            Document.archived_at.is_(None),
             Chunk.search_vector.op("@@")(tsquery),
         )
         .order_by(rank.desc())

@@ -2,9 +2,11 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, FileText, FolderOpen, Search, UploadCloud } from "lucide-react";
-import { useDeferredValue, useState } from "react";
+import Link from "next/link";
+import { useDeferredValue, useRef, useState } from "react";
 
 import { ConfirmButton } from "@/components/confirm-button";
+import { getProviderStatus } from "@/components/provider-notice";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,12 +16,18 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  archiveDocument,
   deleteDocument,
   createKnowledgeEvaluation,
   compareKnowledgeEvaluations,
   documentChunks,
+  getDocument,
   listDocuments,
+  previewDocument,
   reindexDocument,
+  replaceDocument,
+  restoreDocument,
+  retryDocumentJob,
   searchDocuments,
   runKnowledgeEvaluation,
   uploadDocument,
@@ -51,19 +59,21 @@ function statusCopy(status: DocumentStatus): string {
 }
 
 export function KnowledgeScreen() {
-  const { organizationId, organizationName } = useWorkspace();
+  const { organizationId, organizationName, role } = useWorkspace();
   if (!organizationId) {
     return null;
   }
-  return <KnowledgeWorkspace key={organizationId} organizationId={organizationId} organizationName={organizationName ?? "this organization"} />;
+  return <KnowledgeWorkspace key={organizationId} organizationId={organizationId} organizationName={organizationName ?? "this organization"} isAdmin={role === "admin"} />;
 }
 
 function KnowledgeWorkspace({
   organizationId,
   organizationName,
+  isAdmin,
 }: {
   organizationId: string;
   organizationName: string;
+  isAdmin: boolean;
 }) {
   const queryClient = useQueryClient();
   const [view, setView] = useState<"library" | "search" | "evaluation">("library");
@@ -73,7 +83,9 @@ function KnowledgeWorkspace({
   const deferredName = useDeferredValue(documentName);
   const [statusFilter, setStatusFilter] = useState<DocumentStatus | "">("");
   const [typeFilter, setTypeFilter] = useState<"pdf" | "txt" | "">("");
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [page, setPage] = useState(1);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
   const clearFilters = () => {
     setDocumentName("");
     setStatusFilter("");
@@ -89,9 +101,10 @@ function KnowledgeWorkspace({
   const [evaluationMode, setEvaluationMode] = useState("grounded");
   const [evaluation, setEvaluation] = useState<{ evidence_match: boolean; answer_grounded: boolean | null; case_result: Record<string, unknown>; retrieved_sources: { document_title: string; score: number }[]; failure_reason: string | null } | null>(null);
   const documents = useQuery({
-    queryKey: ["documents", organizationId, deferredName, statusFilter, typeFilter, page],
+    queryKey: ["documents", organizationId, deferredName, statusFilter, typeFilter, includeArchived, page],
     queryFn: () => listDocuments(organizationId, {
-      q: deferredName.trim(), status: statusFilter || undefined, fileType: typeFilter || undefined, page,
+      q: deferredName.trim(), status: statusFilter || undefined, fileType: typeFilter || undefined,
+      includeArchived, page,
     }),
     refetchInterval: (query) => {
       const items = query.state.data?.items ?? [];
@@ -106,11 +119,27 @@ function KnowledgeWorkspace({
       setUploadOpen(false);
       setFile(null);
       clearFilters();
+      setIncludeArchived(false);
       setView("library");
       void queryClient.invalidateQueries({ queryKey: ["documents", organizationId] });
     },
   });
-  const selected = documents.data?.items.find((item) => item.id === selectedId) ?? null;
+  const listed = documents.data?.items.find((item) => item.id === selectedId) ?? null;
+  const detail = useQuery({
+    queryKey: ["document", organizationId, selectedId],
+    queryFn: () => getDocument(organizationId, selectedId ?? ""),
+    enabled: Boolean(selectedId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "pending" || status === "processing" ? 2000 : false;
+    },
+  });
+  const selected = listed ?? detail.data ?? null;
+  const embeddings = useQuery({
+    queryKey: ["provider-status", organizationId],
+    queryFn: () => getProviderStatus(organizationId),
+    retry: false,
+  });
   const hits = useQuery({
     queryKey: ["document-search", organizationId, submitted],
     queryFn: () => searchDocuments(organizationId, submitted),
@@ -131,6 +160,7 @@ function KnowledgeWorkspace({
         <Button variant={view === "search" ? "secondary" : "ghost"} aria-pressed={view === "search"} onClick={() => setView("search")}><Search size={16} /> Semantic search</Button>
         <Button variant={view === "evaluation" ? "secondary" : "ghost"} aria-pressed={view === "evaluation"} onClick={() => setView("evaluation")}>Retrieval evaluation</Button>
       </div>
+      <EmbeddingGuide status={embeddings.data} />
       <Dialog open={uploadOpen} onOpenChange={(open) => {
         if (upload.isPending) return;
         setUploadOpen(open);
@@ -187,17 +217,22 @@ function KnowledgeWorkspace({
                 <option value="pdf">PDF</option>
                 <option value="txt">TXT</option>
               </select>
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input type="checkbox" checked={includeArchived} onChange={(event) => { setIncludeArchived(event.target.checked); setPage(1); }} />
+                Show archived
+              </label>
             </div>
         {documents.isPending ? <div className="space-y-2 p-4"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div> : null}
         {documents.isError ? <div className="p-4"><RequestError error={documents.error} /></div> : null}
         {documents.data && documents.data.items.length === 0 ? (
           <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
             <BookOpen className="text-muted-foreground" size={24} />
-            <p className="font-medium">{documentName || statusFilter || typeFilter ? "No matching documents" : "No documents uploaded yet"}</p>
-            {documentName || statusFilter || typeFilter ? <Button variant="outline" size="sm" onClick={clearFilters}>Clear filters</Button> : null}
+            <p className="font-medium">{documentName || statusFilter || typeFilter || includeArchived ? "No matching documents" : "No documents uploaded yet"}</p>
+            {documentName || statusFilter || typeFilter || includeArchived ? <Button variant="outline" size="sm" onClick={() => { clearFilters(); setIncludeArchived(false); }}>Clear filters</Button> : null}
           </div>
         ) : null}
         {documents.data && documents.data.items.length > 0 ? (
+          <div className="overflow-x-auto">
           <Table aria-label="Knowledge documents">
             <TableHeader>
               <TableRow>
@@ -215,12 +250,17 @@ function KnowledgeWorkspace({
                   organizationId={organizationId}
                   document={document}
                   selected={document.id === selectedId}
-                  onSelect={() => setSelectedId(document.id)}
+                  isAdmin={isAdmin}
+                  onSelect={() => { setHighlightId(null); setSelectedId(document.id); }}
                   onUpdated={(updated) => {
+                    queryClient.setQueryData(["document", organizationId, updated.id], updated);
                     queryClient.setQueriesData<PageResult<KnowledgeDocument>>({ queryKey: ["documents", organizationId] }, (cached) =>
                       cached && { ...cached, items: cached.items.map((item) => item.id === updated.id ? updated : item) },
                     );
                     void queryClient.invalidateQueries({ queryKey: ["documents", organizationId] });
+                    void queryClient.invalidateQueries({ queryKey: ["document-search", organizationId] });
+                    void queryClient.invalidateQueries({ queryKey: ["document-preview", organizationId, updated.id] });
+                    void queryClient.invalidateQueries({ queryKey: ["document-chunks", organizationId, updated.id] });
                   }}
                   onDeleted={() => {
                     if (document.id === selectedId) {
@@ -234,6 +274,7 @@ function KnowledgeWorkspace({
               ))}
             </TableBody>
           </Table>
+          </div>
         ) : null}
             {documents.data && (documents.data.total > documents.data.page_size || page > 1) ? (
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-sm text-muted-foreground">
@@ -245,7 +286,7 @@ function KnowledgeWorkspace({
               </div>
             ) : null}
           </section>
-          {selected ? <ChunkList organizationId={organizationId} document={selected} /> : (
+          {selected ? <ChunkList organizationId={organizationId} document={selected} highlightId={highlightId} /> : (
             <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Select a document to inspect its metadata and indexed passages.</div>
           )}
         </div>
@@ -287,6 +328,7 @@ function KnowledgeWorkspace({
                 <span className="ml-2 text-xs text-muted-foreground">score {hit.score.toFixed(4)}</span>
               </p>
               <p className="mt-2 whitespace-pre-wrap leading-6 text-muted-foreground">{hit.content}</p>
+              <Button type="button" size="sm" variant="outline" className="mt-3" onClick={() => { setSelectedId(hit.document_id); setHighlightId(hit.id); setView("library"); }}>Open source</Button>
             </li>
           ))}
         </ul>
@@ -320,6 +362,7 @@ function DocumentRow({
   organizationId,
   document,
   selected,
+  isAdmin,
   onSelect,
   onUpdated,
   onDeleted,
@@ -327,18 +370,31 @@ function DocumentRow({
   organizationId: string;
   document: KnowledgeDocument;
   selected: boolean;
+  isAdmin: boolean;
   onSelect: () => void;
   onUpdated: (document: KnowledgeDocument) => void;
   onDeleted: () => void;
 }) {
+  const replaceInput = useRef<HTMLInputElement>(null);
+  const archived = Boolean(document.archived_at);
+  const indexing = document.status === "pending" || document.status === "processing";
   const reindex = useMutation({
-    mutationFn: () => reindexDocument(organizationId, document.id),
+    mutationFn: () => document.status === "failed" && isAdmin
+      ? retryDocumentJob(organizationId, document.id)
+      : reindexDocument(organizationId, document.id),
+    onSuccess: onUpdated,
+  });
+  const archive = useMutation({ mutationFn: () => archiveDocument(organizationId, document.id), onSuccess: onUpdated });
+  const restore = useMutation({ mutationFn: () => restoreDocument(organizationId, document.id), onSuccess: onUpdated });
+  const replace = useMutation({
+    mutationFn: (file: File) => replaceDocument(organizationId, document.id, file),
     onSuccess: onUpdated,
   });
   const remove = useMutation({
     mutationFn: () => deleteDocument(organizationId, document.id),
     onSuccess: onDeleted,
   });
+  const pending = reindex.isPending || archive.isPending || restore.isPending || replace.isPending || remove.isPending;
   return (
     <TableRow className={selected ? "bg-accent/40" : undefined}>
       <TableCell>
@@ -348,10 +404,13 @@ function DocumentRow({
         <p className="mt-1 pl-6 text-xs text-muted-foreground">{Math.ceil(document.byte_size / 1024)} KB</p>
         {document.error_message ? <p className="mt-1 text-xs text-destructive">{document.error_message}</p> : null}
         {reindex.isError ? <RequestError error={reindex.error} /> : null}
+        {archive.isError ? <RequestError error={archive.error} /> : null}
+        {restore.isError ? <RequestError error={restore.error} /> : null}
+        {replace.isError ? <RequestError error={replace.error} /> : null}
         {remove.isError ? <RequestError error={remove.error} /> : null}
       </TableCell>
       <TableCell>
-        <Badge variant="secondary" className={statusClass(document.status)}>{document.status}</Badge>
+        <Badge variant="secondary" className={statusClass(document.status)}>{archived ? "archived" : document.status}</Badge>
       </TableCell>
       <TableCell className={document.origin === "demo" ? "text-primary" : "text-muted-foreground"}>
         {documentOriginLabel(document.origin)}
@@ -359,17 +418,25 @@ function DocumentRow({
       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{new Date(document.updated_at).toLocaleDateString()}</TableCell>
       <TableCell>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" variant="outline" disabled={reindex.isPending} onClick={() => reindex.mutate()}>
-            {reindex.isPending ? "Reindexing…" : "Reindex"}
-          </Button>
-          <ConfirmButton
-            label="Delete"
-            confirmLabel="Confirm delete"
-            pendingLabel="Deleting…"
-            pending={remove.isPending}
-            size="sm"
-            onConfirm={() => remove.mutate()}
-          />
+          {archived ? (
+            <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => restore.mutate()}>{restore.isPending ? "Restoring…" : "Restore"}</Button>
+          ) : (
+            <Button type="button" size="sm" variant="outline" disabled={pending || indexing} onClick={() => reindex.mutate()}>
+              {reindex.isPending ? "Queuing…" : document.status === "failed" ? "Retry indexing" : "Reindex"}
+            </Button>
+          )}
+          {!archived ? (
+            <>
+              <input ref={replaceInput} type="file" accept=".pdf,.txt,application/pdf,text/plain" className="sr-only" aria-label={`Replace ${document.title}`} disabled={pending || indexing} onChange={(event) => {
+                const next = event.target.files?.[0];
+                event.target.value = "";
+                if (next) replace.mutate(next);
+              }} />
+              <Button type="button" size="sm" variant="outline" disabled={pending || indexing} onClick={() => replaceInput.current?.click()}>{replace.isPending ? "Replacing…" : "Replace file"}</Button>
+              <ConfirmButton label="Archive" confirmLabel="Confirm archive" pendingLabel="Archiving…" pending={archive.isPending} size="sm" onConfirm={() => { if (!pending && !indexing) archive.mutate(); }} />
+            </>
+          ) : null}
+          <ConfirmButton label="Delete" confirmLabel="Confirm delete" pendingLabel="Deleting…" pending={remove.isPending} size="sm" onConfirm={() => { if (!pending) remove.mutate(); }} />
         </div>
       </TableCell>
     </TableRow>
@@ -379,20 +446,27 @@ function DocumentRow({
 function ChunkList({
   organizationId,
   document,
+  highlightId,
 }: {
   organizationId: string;
   document: KnowledgeDocument;
+  highlightId: string | null;
 }) {
   const status = document.status;
+  const archived = Boolean(document.archived_at);
   const chunks = useQuery({
-    queryKey: ["document-chunks", organizationId, document.id, status],
+    queryKey: ["document-chunks", organizationId, document.id, status, document.archived_at, document.updated_at],
     queryFn: () => documentChunks(organizationId, document.id),
     refetchInterval: status === "pending" || status === "processing" ? 2000 : false,
+  });
+  const preview = useQuery({
+    queryKey: ["document-preview", organizationId, document.id, document.updated_at],
+    queryFn: () => previewDocument(organizationId, document.id),
   });
   return (
     <section className="min-w-0 rounded-xl border border-border bg-card p-4">
       <h2 className="break-all text-base font-medium text-foreground">{document.title}</h2>
-      <p className={`mt-2 text-xs uppercase tracking-[0.12em] ${statusClass(status)}`}>{statusCopy(status)}</p>
+      <p className={`mt-2 text-xs uppercase tracking-[0.12em] ${statusClass(status)}`}>{archived ? "Archived. Search and assistant answers skip this document until it is restored." : statusCopy(status)}</p>
       <dl className="mt-4 space-y-2 text-xs text-muted-foreground">
         <div><dt className="text-subtle">File</dt><dd>{document.filename}</dd></div>
         <div><dt className="text-subtle">Type</dt><dd>{document.media_type}</dd></div>
@@ -401,6 +475,13 @@ function ChunkList({
         <div><dt className="text-subtle">Updated</dt><dd>{new Date(document.updated_at).toLocaleString()}</dd></div>
       </dl>
       {document.error_message ? <p className="mt-4 text-sm leading-6 text-destructive">{document.error_message}</p> : null}
+      <div className="mt-4">
+        <h3 className="text-sm font-medium">File preview</h3>
+        {preview.isPending ? <Skeleton className="mt-2 h-16 w-full" /> : null}
+        {preview.isError ? <div className="mt-2"><RequestError error={preview.error} /></div> : null}
+        {preview.data ? <p className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{preview.data.excerpt || "This file has no readable text."}{preview.data.truncated ? "…" : ""}</p> : null}
+      </div>
+      <h3 className="mt-4 text-sm font-medium">Indexed passages</h3>
       {chunks.isPending ? <Skeleton className="mt-3 h-16 w-full" /> : null}
       {chunks.isError ? <div className="mt-3"><RequestError error={chunks.error} /></div> : null}
       {chunks.data && chunks.data.items.length === 0 ? (
@@ -412,7 +493,7 @@ function ChunkList({
       ) : null}
       <ul className="mt-3 space-y-3">
         {chunks.data?.items.map((chunk) => (
-          <li key={chunk.id} className="rounded-[10px] bg-secondary p-3 text-sm">
+          <li key={chunk.id} className={`rounded-[10px] p-3 text-sm ${chunk.id === highlightId ? "bg-primary/10 ring-1 ring-primary" : "bg-secondary"}`}>
             <p className="text-xs text-muted-foreground">
               Chunk {chunk.chunk_index + 1}
               {chunk.page_number !== null ? ` · page ${chunk.page_number}` : ""}
@@ -421,6 +502,31 @@ function ChunkList({
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+function EmbeddingGuide({ status }: { status?: { embedding_ready: boolean; embedding_provider: string; embedding_model: string; embedding_detail: string; incompatible_documents: number } }) {
+  return (
+    <section className="rounded-xl border border-border bg-card p-4" aria-label="How document search works">
+      <h2 className="text-sm font-medium">How search uses your documents</h2>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        ATLAS keeps the file, splits it into passages, and stores a searchable fingerprint for each passage. A document is Queued, then Processing, then Ready. Failed indexing keeps the file and can be retried. Replacing a file removes the old passages before the new ones are indexed. Archiving removes it from search and from assistant answers until you restore it.
+      </p>
+      {status ? (
+        <p className="mt-2 text-sm leading-6">
+          {status.embedding_ready
+            ? `This workspace fingerprints passages with ${status.embedding_provider} (${status.embedding_model}). ${status.embedding_detail}`
+            : `An administrator needs to connect an embedding model before new documents can be indexed. ${status.embedding_detail}`}
+          {" "}
+          <Link href="/integrations" className="font-medium text-primary underline">Open Integrations</Link>
+        </p>
+      ) : <p className="mt-2 text-sm text-muted-foreground">Checking the embedding setup…</p>}
+      {status && status.incompatible_documents > 0 ? (
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          {status.incompatible_documents} ready {status.incompatible_documents === 1 ? "document was" : "documents were"} indexed with a different model. Reindex {status.incompatible_documents === 1 ? "it" : "them"} so search uses the current model. The files stay in place.
+        </p>
+      ) : null}
     </section>
   );
 }

@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -40,11 +41,14 @@ def list_documents(
     page_size: int,
     status: DocumentStatus | None = None,
     file_type: str | None = None,
+    include_archived: bool = False,
 ) -> tuple[list[Document], int]:
     from app.domains.crm.service import page_bounds
 
     safe_page, safe_size = page_bounds(page, page_size)
     query = select(Document).where(Document.organization_id == organization_id)
+    if not include_archived:
+        query = query.where(Document.archived_at.is_(None))
     if q and q.strip():
         term = q.strip()
         query = query.where(
@@ -89,20 +93,15 @@ def store_upload(
     payload: bytes,
     origin: Origin = Origin.operational,
 ) -> Document:
-    settings = get_settings()
-    safe_name = Path(filename).name.strip()
-    if not safe_name or not (
-        safe_name.lower().endswith(".pdf") or safe_name.lower().endswith(".txt")
-    ):
-        raise AppError(415, "unsupported_media", "Only PDF and TXT documents can be uploaded")
-    normalized_type = media_type.split(";", 1)[0].strip().lower()
-    if normalized_type not in ALLOWED_TYPES:
-        raise AppError(415, "unsupported_media", "Only PDF and TXT documents can be uploaded")
-    if not payload:
-        raise AppError(422, "invalid_document", "The document is empty")
-    if len(payload) > settings.max_upload_bytes:
-        raise AppError(413, "document_too_large", "The document exceeds the upload size limit")
-    extract_text(safe_name, payload)
+    safe_name = _accepted_upload(filename, media_type, payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    duplicate = _duplicate_document(db, organization_id, digest)
+    if duplicate is not None:
+        raise AppError(
+            409,
+            "duplicate_document",
+            f"This file is already in the library as {duplicate.title}",
+        )
     document = Document(
         organization_id=organization_id,
         uploaded_by=user_id,
@@ -113,6 +112,7 @@ def store_upload(
         storage_path="",
         status=DocumentStatus.pending,
         origin=origin,
+        content_sha256=digest,
     )
     db.add(document)
     db.flush()
@@ -142,26 +142,100 @@ def delete_document(db: Session, organization_id: uuid.UUID, document_id: uuid.U
     _unlink_stored(path)
 
 
+def archive_document(db: Session, organization_id: uuid.UUID, document_id: uuid.UUID) -> Document:
+    document = get_document(db, organization_id, document_id)
+    if document.archived_at is not None:
+        return document
+    _require_idle(document)
+    lock_embedding_index(db, organization_id)
+    db.execute(delete(Chunk).where(Chunk.document_id == document.id))
+    document.archived_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(document)
+    return document
+
+
+def restore_document(db: Session, organization_id: uuid.UUID, document_id: uuid.UUID) -> Document:
+    document = get_document(db, organization_id, document_id)
+    if document.archived_at is None:
+        raise AppError(409, "document_active", "This document is already in the library")
+    digest = _known_digest(document)
+    if digest is not None:
+        document.content_sha256 = digest
+        duplicate = _duplicate_document(db, organization_id, digest, ignore_id=document.id)
+        if duplicate is not None:
+            raise AppError(
+                409,
+                "duplicate_document",
+                f"The library already has this file as {duplicate.title}",
+            )
+    document.archived_at = None
+    return mark_reindex(db, organization_id, document.id)
+
+
+def replace_document(
+    db: Session,
+    organization_id: uuid.UUID,
+    document_id: uuid.UUID,
+    *,
+    filename: str,
+    media_type: str,
+    payload: bytes,
+) -> Document:
+    document = get_document(db, organization_id, document_id)
+    if document.archived_at is not None:
+        raise AppError(409, "document_archived", "Restore this document before replacing the file")
+    _require_idle(document)
+    safe_name = _accepted_upload(filename, media_type, payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    if _known_digest(document) == digest:
+        document.content_sha256 = digest
+        db.commit()
+        db.refresh(document)
+        return document
+    duplicate = _duplicate_document(db, organization_id, digest, ignore_id=document.id)
+    if duplicate is not None:
+        raise AppError(
+            409,
+            "duplicate_document",
+            f"This file is already in the library as {duplicate.title}",
+        )
+    path = Path(document.storage_path) if document.storage_path else _storage_path(
+        organization_id, document.id
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    document.filename = safe_name[:255]
+    document.media_type = "application/pdf" if safe_name.lower().endswith(".pdf") else "text/plain"
+    document.byte_size = len(payload)
+    document.storage_path = str(path)
+    document.content_sha256 = digest
+    lock_embedding_index(db, organization_id)
+    db.execute(delete(Chunk).where(Chunk.document_id == document.id))
+    _queue_ingestion(db, document)
+    db.commit()
+    db.refresh(document)
+    return document
+
+
+def document_preview(
+    db: Session, organization_id: uuid.UUID, document_id: uuid.UUID
+) -> tuple[str, str, bool]:
+    document = get_document(db, organization_id, document_id)
+    stored = _stored_file(document.storage_path)
+    if stored is None:
+        raise AppError(404, "document_file_missing", "The stored file could not be read")
+    pages = extract_text(document.filename, stored.read_bytes())
+    text = "\n\n".join(page.strip() for _, page in pages if page.strip())
+    limit = 4000
+    return document.filename, text[:limit], len(text) > limit
+
+
 def mark_reindex(db: Session, organization_id: uuid.UUID, document_id: uuid.UUID) -> Document:
     document = get_document(db, organization_id, document_id)
-    document.status = DocumentStatus.pending
-    document.error_message = None
-    existing = db.scalar(select(IngestionJob).where(IngestionJob.document_id == document.id))
-    if existing is None:
-        db.add(
-            IngestionJob(
-                organization_id=organization_id,
-                document_id=document.id,
-                idempotency_key=f"document:{document.id}:v1",
-            )
-        )
-    else:
-        existing.status = IngestionJobStatus.queued
-        existing.attempts = 0
-        existing.next_attempt_at = datetime.now(UTC)
-        existing.error_message = None
-        existing.lease_owner = None
-        existing.lease_expires_at = None
+    if document.archived_at is not None:
+        raise AppError(409, "document_archived", "Restore this document before indexing it again")
+    _queue_ingestion(db, document)
     db.commit()
     db.refresh(document)
     return document
@@ -276,6 +350,8 @@ def retry_ingestion_job(
     db: Session, organization_id: uuid.UUID, document_id: uuid.UUID
 ) -> Document:
     document = get_document(db, organization_id, document_id)
+    if document.archived_at is not None:
+        raise AppError(409, "document_archived", "Restore this document before indexing it again")
     job = db.scalar(
         select(IngestionJob)
         .where(
@@ -457,6 +533,85 @@ def _fail_existing(db: Session, document_id: uuid.UUID, message: str) -> None:
     if document is None:
         return
     _record_failure(db, document, message)
+
+
+def _accepted_upload(filename: str, media_type: str, payload: bytes) -> str:
+    settings = get_settings()
+    safe_name = Path(filename).name.strip()
+    if not safe_name or not (
+        safe_name.lower().endswith(".pdf") or safe_name.lower().endswith(".txt")
+    ):
+        raise AppError(415, "unsupported_media", "Only PDF and TXT documents can be uploaded")
+    normalized_type = media_type.split(";", 1)[0].strip().lower()
+    if normalized_type not in ALLOWED_TYPES:
+        raise AppError(415, "unsupported_media", "Only PDF and TXT documents can be uploaded")
+    if not payload:
+        raise AppError(422, "invalid_document", "The document is empty")
+    if len(payload) > settings.max_upload_bytes:
+        raise AppError(413, "document_too_large", "The document exceeds the upload size limit")
+    extract_text(safe_name, payload)
+    return safe_name
+
+
+def _known_digest(document: Document) -> str | None:
+    if document.content_sha256:
+        return document.content_sha256
+    stored = _stored_file(document.storage_path)
+    if stored is None:
+        return None
+    return hashlib.sha256(stored.read_bytes()).hexdigest()
+
+
+def _duplicate_document(
+    db: Session,
+    organization_id: uuid.UUID,
+    digest: str,
+    *,
+    ignore_id: uuid.UUID | None = None,
+) -> Document | None:
+    query = select(Document).where(
+        Document.organization_id == organization_id,
+        Document.archived_at.is_(None),
+    )
+    if ignore_id is not None:
+        query = query.where(Document.id != ignore_id)
+    for document in db.scalars(query):
+        current = _known_digest(document)
+        if current is not None and document.content_sha256 is None:
+            document.content_sha256 = current
+        if current == digest:
+            return document
+    return None
+
+
+def _require_idle(document: Document) -> None:
+    if document.status in {DocumentStatus.pending, DocumentStatus.processing}:
+        raise AppError(
+            409,
+            "document_busy",
+            "Wait until indexing finishes before changing this document",
+        )
+
+
+def _queue_ingestion(db: Session, document: Document) -> None:
+    document.status = DocumentStatus.pending
+    document.error_message = None
+    existing = db.scalar(select(IngestionJob).where(IngestionJob.document_id == document.id))
+    if existing is None:
+        db.add(
+            IngestionJob(
+                organization_id=document.organization_id,
+                document_id=document.id,
+                idempotency_key=f"document:{document.id}:v1",
+            )
+        )
+        return
+    existing.status = IngestionJobStatus.queued
+    existing.attempts = 0
+    existing.next_attempt_at = datetime.now(UTC)
+    existing.error_message = None
+    existing.lease_owner = None
+    existing.lease_expires_at = None
 
 
 def _storage_path(organization_id: uuid.UUID, document_id: uuid.UUID) -> Path:

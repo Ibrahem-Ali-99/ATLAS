@@ -407,6 +407,34 @@ class ManualRun(BaseModel):
     request_id: uuid.UUID
     lead_id: uuid.UUID | None = None
     opportunity_id: uuid.UUID | None = None
+    dry_run: bool = False
+    confirm_repeat: bool = False
+
+
+_CONSEQUENTIAL = {"update_lead", "prepare_follow_up", "create_task"}
+
+
+def _effect_recorded(db: DbSession, row: WorkflowDefinition, body: ManualRun) -> bool:
+    runs = db.scalars(_run_query(row).order_by(WorkflowRun.created_at.desc()).limit(40)).all()
+    opportunity_id = str(body.opportunity_id) if body.opportunity_id else None
+    for run in runs:
+        if run.payload.get("dry_run"):
+            continue
+        if body.lead_id is not None and run.lead_id != body.lead_id:
+            continue
+        if opportunity_id is not None and run.payload.get("opportunity_id") != opportunity_id:
+            continue
+        if body.lead_id is None and opportunity_id is None and run.lead_id is not None:
+            continue
+        steps = run.payload.get("steps") or []
+        if any(
+            isinstance(step, dict)
+            and step.get("type") in _CONSEQUENTIAL
+            and step.get("status") == "completed"
+            for step in steps
+        ):
+            return True
+    return False
 
 
 def _run_out(run: WorkflowRun) -> dict[str, object]:
@@ -414,6 +442,8 @@ def _run_out(run: WorkflowRun) -> dict[str, object]:
         "id": run.id,
         "status": run.payload.get("outcome", run.status.value),
         "manual": run.payload.get("manual", False),
+        "dry_run": bool(run.payload.get("dry_run")),
+        "branch": run.payload.get("branch"),
         "lead_id": run.lead_id,
         "opportunity_id": run.payload.get("opportunity_id"),
         "error": run.last_error,
@@ -483,7 +513,8 @@ def manual_run(
     workflow_id: uuid.UUID, body: ManualRun, admin: CsrfAdmin, db: DbSession
 ) -> dict[str, object]:
     row = _get_definition(workflow_id, admin, db, lock=True)
-    key = hashlib.sha256(f"manual:{row.id}:{body.request_id}".encode()).hexdigest()
+    mode = "preview" if body.dry_run else "apply"
+    key = hashlib.sha256(f"manual:{row.id}:{body.request_id}:{mode}".encode()).hexdigest()
     existing = db.scalar(_run_query(row).where(WorkflowRun.idempotency_key == key))
     if existing is not None:
         opportunity_id = str(body.opportunity_id) if body.opportunity_id else None
@@ -497,6 +528,12 @@ def manual_run(
         return _run_out(existing)
     if row.archived_at is not None:
         raise AppError(409, "workflow_archived", "Archived workflows cannot run")
+    if not body.dry_run and not body.confirm_repeat and _effect_recorded(db, row, body):
+        raise AppError(
+            409,
+            "workflow_effect_already_recorded",
+            "This workflow already changed this record. Confirm to run the actions again.",
+        )
     _validate_workspace(row.definition, admin, db)
     trigger = row.definition["trigger"]
     if (trigger in _LEAD_TRIGGERS) != bool(body.lead_id) or (
@@ -505,7 +542,12 @@ def manual_run(
         raise AppError(
             422, "workflow_context_required", "Select the CRM record required by this trigger"
         )
-    payload = {"workflow_definition_id": str(row.id), "definition": row.definition, "manual": True}
+    payload = {
+        "workflow_definition_id": str(row.id),
+        "definition": row.definition,
+        "manual": True,
+        "dry_run": body.dry_run,
+    }
     origin = Origin.operational
     if body.lead_id:
         lead = db.scalar(
@@ -549,6 +591,33 @@ def manual_run(
         {"run_id": str(run.id), "workflow_id": str(row.id)},
         actor_id=admin.user.id,
     )
+    db.commit()
+    return _run_out(run)
+
+
+@router.post("/{workflow_id}/runs/{run_id}/retry")
+def retry_run(
+    workflow_id: uuid.UUID, run_id: uuid.UUID, admin: CsrfAdmin, db: DbSession
+) -> dict[str, object]:
+    row = _get_definition(workflow_id, admin, db, lock=True)
+    run = db.scalar(_run_query(row).where(WorkflowRun.id == run_id).with_for_update())
+    if run is None:
+        raise AppError(404, "workflow_run_not_found", "Workflow run not found")
+    steps = run.payload.get("steps") or []
+    local_failure = any(isinstance(step, dict) and step.get("status") == "failed" for step in steps)
+    if run.status != WorkflowStatus.failed or not local_failure:
+        raise AppError(
+            409,
+            "workflow_retry_unavailable",
+            "This run cannot be repeated safely. Start a new test instead.",
+        )
+    payload = dict(run.payload)
+    payload.pop("steps", None)
+    payload.pop("outcome", None)
+    payload.pop("approval_id", None)
+    run.payload = payload
+    run.status = WorkflowStatus.pending
+    run.last_error = None
     db.commit()
     return _run_out(run)
 

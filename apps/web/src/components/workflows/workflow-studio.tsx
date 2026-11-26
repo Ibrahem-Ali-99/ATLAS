@@ -29,7 +29,7 @@ export const triggerLabels: Record<WorkflowTrigger, string> = {
 export const stepLabels: Record<string, string> = {
   create_task: "Create task", update_lead: "Update lead status", require_approval: "Require approval",
   prepare_follow_up: "Draft follow-up for approval", condition: "Condition", load_context: "Load CRM record",
-  branch: "Execution path",
+  branch: "Execution path", external_dispatch: "External dispatch",
 };
 const leadStatuses = ["new", "contacted", "qualified", "unqualified", "won", "lost"];
 const controlClass = "h-9 w-full min-w-0 rounded-md border border-input bg-card px-2 text-sm";
@@ -182,6 +182,7 @@ function WorkflowEditor({ item, organizationId, saved, onArchived, requestedRun 
           <Button size="sm" variant={view === "runs" ? "secondary" : "ghost"} aria-pressed={view === "runs"} onClick={() => setView("runs")}><Clock3 className="size-4" />Runs and approvals</Button>
           {view === "builder" ? <Button size="sm" variant="ghost" disabled={busy || !name.trim()} onClick={() => validate.mutate()}><Check className="size-4" />Validate</Button> : null}
         </div>
+        {!item.archived_at && !item.active ? <p className="text-xs text-muted-foreground">Activation checks the trigger, conditions, and actions before this workflow can run. Pause it before editing.</p> : null}
         {notice ? <p role="status" className="text-sm text-success">{notice}</p> : null}
         {dirty ? <p className="text-xs text-warning">Unsaved changes</p> : null}
         {error ? <RequestError error={error} /> : null}
@@ -252,11 +253,12 @@ function WorkflowCanvas({ graph, selection, select }: { graph: WorkflowGraph; se
     <div className="min-w-0 bg-background p-4 [background-image:radial-gradient(var(--border-strong)_1px,transparent_1px)] [background-size:18px_18px] sm:p-6" aria-label="Workflow canvas">
       {conditions.length ? <>
         {column(triggerNodes)}
-        <div aria-hidden="true" className="relative mx-auto h-8 max-w-[44rem] text-primary/60">
+        <div aria-hidden="true" className="relative mx-auto hidden h-8 max-w-[44rem] text-primary/60 sm:block">
           <div className="absolute left-1/2 top-0 h-4 border-l border-current" />
           <div className="absolute inset-x-1/4 top-4 h-4 rounded-t border-x border-t border-current" />
         </div>
-        <div className="mx-auto grid max-w-[44rem] grid-cols-2">
+        <p className="mb-3 text-center text-xs text-muted-foreground sm:hidden">Matching records use the first path. Other records use the second.</p>
+        <div className="mx-auto grid max-w-[44rem] grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-0">
           {(["actions", "otherwise_actions"] as const).map((path) => <section key={path} aria-label={path === "actions" ? "Conditions match" : "Otherwise"} className="min-w-0 px-1.5">
             <div className="mb-2 rounded-md border border-border bg-card px-2 py-1.5 text-center text-xs font-medium">{path === "actions" ? "Conditions match" : "Otherwise"}</div>
             {actionNodes(path).length ? column(actionNodes(path)) : <p className="rounded-md border border-dashed border-border bg-card p-2 text-center text-xs text-muted-foreground">End workflow</p>}
@@ -326,6 +328,10 @@ function NodeSettings({ organizationId, graph, update, selection, select, readOn
     <>
       <h3 className="text-sm font-semibold">Node configuration</h3>
       {readOnly ? <p className="mt-1 text-xs text-muted-foreground">Pause an active workflow to edit it.</p> : null}
+      {selection.kind === "trigger" ? <p className="mt-2 text-xs leading-5 text-muted-foreground">Choose when this workflow starts. A schedule repeats on its own. The other triggers start from a CRM change or from a test on this page.</p> : null}
+      {condition ? <p className="mt-2 text-xs leading-5 text-muted-foreground">All or any of these checks decide the path. Matching records follow Conditions match. Everything else follows Otherwise.</p> : null}
+      {action?.type === "require_approval" ? <p className="mt-2 text-xs leading-5 text-muted-foreground">The run waits here until an administrator decides. Later actions do not run before that decision. A preview does not request approval.</p> : null}
+      {action?.type === "create_task" ? <p className="mt-2 text-xs leading-5 text-muted-foreground">Saves a task on the selected record. A preview shows this step without saving the task.</p> : null}
       <fieldset disabled={readOnly} className="mt-3 grid min-w-0 gap-3">
         {selection.kind === "trigger" ? <>
           <label className="grid gap-1 text-sm">Trigger<TriggerSelect trigger={graph.trigger} onChange={(trigger) => {

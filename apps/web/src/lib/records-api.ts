@@ -253,7 +253,7 @@ export function restoreInquiry(organizationId: string, inquiryId: string): Promi
 
 export function listDocuments(
   organizationId: string,
-  params: ListParams & { status?: DocumentStatus; fileType?: "pdf" | "txt" } = {},
+  params: ListParams & { status?: DocumentStatus; fileType?: "pdf" | "txt"; includeArchived?: boolean } = {},
 ): Promise<PageResult<KnowledgeDocument>> {
   const query = queryString({
     q: params.q,
@@ -261,8 +261,13 @@ export function listDocuments(
     page_size: params.pageSize,
     status: params.status,
     file_type: params.fileType,
+    include_archived: params.includeArchived ? "true" : undefined,
   });
   return apiFetch(organizationPath(organizationId, `/documents${query}`));
+}
+
+export function getDocument(organizationId: string, documentId: string): Promise<KnowledgeDocument> {
+  return apiFetch(organizationPath(organizationId, `/documents/${documentId}`));
 }
 
 export function uploadDocument(organizationId: string, file: File, origin: DocumentOrigin = "operational"): Promise<KnowledgeDocument> {
@@ -297,6 +302,28 @@ export function compareKnowledgeEvaluations(organizationId: string) {
 
 export function reindexDocument(organizationId: string, documentId: string): Promise<KnowledgeDocument> {
   return apiFetch(organizationPath(organizationId, `/documents/${documentId}/reindex`), { method: "POST" });
+}
+
+export function retryDocumentJob(organizationId: string, documentId: string): Promise<KnowledgeDocument> {
+  return apiFetch(organizationPath(organizationId, `/documents/${documentId}/job/retry`), { method: "POST" });
+}
+
+export function previewDocument(organizationId: string, documentId: string): Promise<{ filename: string; excerpt: string; truncated: boolean }> {
+  return apiFetch(organizationPath(organizationId, `/documents/${documentId}/preview`));
+}
+
+export function archiveDocument(organizationId: string, documentId: string): Promise<KnowledgeDocument> {
+  return apiFetch(organizationPath(organizationId, `/documents/${documentId}/archive`), { method: "POST" });
+}
+
+export function restoreDocument(organizationId: string, documentId: string): Promise<KnowledgeDocument> {
+  return apiFetch(organizationPath(organizationId, `/documents/${documentId}/restore`), { method: "POST" });
+}
+
+export function replaceDocument(organizationId: string, documentId: string, file: File): Promise<KnowledgeDocument> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiFetch(organizationPath(organizationId, `/documents/${documentId}/content`), { method: "POST", body });
 }
 
 export function deleteDocument(organizationId: string, documentId: string): Promise<void> {

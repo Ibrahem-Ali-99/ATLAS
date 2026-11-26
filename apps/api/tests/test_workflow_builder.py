@@ -200,3 +200,58 @@ def test_any_conditions_choose_one_path_and_keep_reordered_steps(
         "knowledge": False,
         "assistant": False,
     }
+
+
+def test_preview_does_not_save_and_a_repeat_needs_confirmation(
+    client: TestClient, db: Session
+) -> None:
+    org = make_organization(db, "Workflow Preview", "workflow-preview")
+    admin = make_user(db, "workflow-preview@example.com")
+    make_membership(db, admin, org, MembershipRole.admin)
+    lead = create_lead(db, org.id, admin.id, {"title": "Preview lead", "status": "new"})
+    headers = _csrf(login(client, admin.email, PASSWORD))
+    path = f"/api/v1/organizations/{org.id}/workflow-definitions"
+    created = client.post(
+        path,
+        headers=headers,
+        json={
+            "name": "Task preview",
+            "slug": "task-preview",
+            "definition": {
+                "trigger": "lead_created",
+                "actions": [{"type": "create_task", "title": "Preview follow-up"}],
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    url = f"{path}/{created.json()['id']}"
+
+    def queue(**extra: object):
+        return client.post(
+            f"{url}/runs",
+            headers=headers,
+            json={"request_id": str(uuid.uuid4()), "lead_id": str(lead.id), **extra},
+        )
+
+    preview = queue(dry_run=True)
+    assert preview.status_code == 202, preview.text
+    dispatch_workflow(db, org.id, uuid.UUID(preview.json()["id"]))
+    inspected = client.get(f"{url}/runs").json()[0]
+    assert inspected["status"] == "simulated"
+    assert inspected["dry_run"] is True
+    assert db.scalar(select(WorkflowTask).where(WorkflowTask.lead_id == lead.id)) is None
+    applied = queue()
+    assert applied.status_code == 202, applied.text
+    dispatch_workflow(db, org.id, uuid.UUID(applied.json()["id"]))
+    tasks = db.scalars(select(WorkflowTask).where(WorkflowTask.lead_id == lead.id)).all()
+    assert len(tasks) == 1
+    repeated = queue()
+    assert repeated.status_code == 409
+    assert repeated.json()["error"]["code"] == "workflow_effect_already_recorded"
+    confirmed = queue(confirm_repeat=True)
+    assert confirmed.status_code == 202, confirmed.text
+    dispatch_workflow(db, org.id, uuid.UUID(confirmed.json()["id"]))
+    tasks = db.scalars(select(WorkflowTask).where(WorkflowTask.lead_id == lead.id)).all()
+    assert len(tasks) == 2
+    refused = client.post(f"{url}/runs/{applied.json()['id']}/retry", headers=headers)
+    assert refused.status_code == 409

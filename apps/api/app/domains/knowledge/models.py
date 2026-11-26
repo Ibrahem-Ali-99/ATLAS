@@ -63,6 +63,8 @@ class Document(Base):
     status: Mapped[DocumentStatus] = mapped_column(DOCUMENT_STATUS, nullable=False)
     origin: Mapped[Origin] = origin_column()
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

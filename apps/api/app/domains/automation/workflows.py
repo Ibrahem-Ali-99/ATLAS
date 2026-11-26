@@ -236,6 +236,16 @@ def dispatch_workflow(db: Session, organization_id: uuid.UUID, run_id: uuid.UUID
         return
     if _execute_local_actions(db, run):
         return
+    if run.payload.get("dry_run"):
+        run.status = WorkflowStatus.completed
+        run.last_error = None
+        run.payload = {
+            **run.payload,
+            "outcome": "simulated",
+            "steps": [{"type": "external_dispatch", "status": "simulated"}],
+        }
+        db.commit()
+        return
     settings = get_settings()
     key = db.scalar(
         select(WebhookKey).where(
@@ -293,6 +303,7 @@ def _execute_local_actions(db: Session, run: WorkflowRun) -> bool:
     run_id = run.id
     organization_id = run.organization_id
     steps: list[dict[str, str]] = []
+    simulated = bool(run.payload.get("dry_run"))
     current_action = "load_context"
     lead = (
         db.scalar(
@@ -375,6 +386,9 @@ def _execute_local_actions(db: Session, run: WorkflowRun) -> bool:
         action_type = action.get("type")
         current_action = str(action_type)
         if action_type == "require_approval":
+            if simulated:
+                steps.append({"type": "require_approval", "status": "simulated"})
+                continue
             if run.payload.get("review", {}).get("decision") != "approve":
                 steps.append({"type": "require_approval", "status": "awaiting_approval"})
                 run.payload = {
@@ -394,10 +408,14 @@ def _execute_local_actions(db: Session, run: WorkflowRun) -> bool:
                 return fail("workflow_lead_status_invalid")
             try:
                 status = LeadStatus(target_status)
-                previous = lead.status
-                update_lead(db, organization_id, lead.id, {"status": status}, commit=False)
             except ValueError:
                 return fail("workflow_lead_status_invalid")
+            if simulated:
+                steps.append({"type": "update_lead", "status": "simulated"})
+                continue
+            try:
+                previous = lead.status
+                update_lead(db, organization_id, lead.id, {"status": status}, commit=False)
             except AppError as exc:
                 return fail(exc.code)
             if previous != status:
@@ -422,6 +440,9 @@ def _execute_local_actions(db: Session, run: WorkflowRun) -> bool:
                 due_hours is not None and (type(due_hours) is not int or not 1 <= due_hours <= 8760)
             ):
                 return fail("workflow_task_configuration_invalid")
+            if simulated:
+                steps.append({"type": "create_task", "status": "simulated"})
+                continue
             db.add(
                 WorkflowTask(
                     organization_id=organization_id,
@@ -455,6 +476,9 @@ def _execute_local_actions(db: Session, run: WorkflowRun) -> bool:
             )
             if contact is None or not contact.email or inquiry is None:
                 return fail("follow_up_recipient_unavailable")
+            if simulated:
+                steps.append({"type": "prepare_follow_up", "status": "simulated"})
+                continue
             if approval_id is None:
                 try:
                     draft = get_chat_client(db, run.organization_id).complete(
@@ -508,7 +532,10 @@ def _execute_local_actions(db: Session, run: WorkflowRun) -> bool:
         else:
             return fail("invalid_workflow_action")
         steps.append({"type": current_action, "status": "completed"})
-    run.payload = {**run.payload, "steps": steps, "approval_id": approval_id}
+    payload = {**run.payload, "steps": steps, "approval_id": approval_id}
+    if simulated:
+        payload["outcome"] = "simulated"
+    run.payload = payload
     run.status = WorkflowStatus.completed
     run.last_error = None
     db.commit()

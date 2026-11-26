@@ -24,6 +24,7 @@ from app.domains.knowledge.schemas import (
     ChunkPage,
     DocumentOut,
     DocumentPage,
+    DocumentPreview,
     EvaluationQuestionCreate,
     EvaluationQuestionOut,
     EvaluationRunOut,
@@ -80,6 +81,7 @@ def list_documents(
     file_type: Literal["pdf", "txt"] | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    include_archived: bool = False,
 ) -> DocumentPage:
     items, total = service.list_documents(
         db,
@@ -89,6 +91,7 @@ def list_documents(
         page_size=page_size,
         status=status,
         file_type=file_type,
+        include_archived=include_archived,
     )
     safe_page, safe_size = page_bounds(page, page_size)
     return DocumentPage(
@@ -419,6 +422,55 @@ def document_chunks(document_id: uuid.UUID, member: Member, db: DbSession) -> Ch
             for chunk in chunks
         ]
     )
+
+
+@router.get("/documents/{document_id}/preview", response_model=DocumentPreview)
+def preview_document(
+    document_id: uuid.UUID, member: Member, db: DbSession
+) -> DocumentPreview:
+    filename, excerpt, truncated = service.document_preview(db, member.organization.id, document_id)
+    return DocumentPreview(filename=filename, excerpt=excerpt, truncated=truncated)
+
+
+@router.post("/documents/{document_id}/archive", response_model=DocumentOut)
+def archive_document(
+    document_id: uuid.UUID, member: CsrfMember, db: DbSession
+) -> DocumentOut:
+    return DocumentOut.model_validate(
+        service.archive_document(db, member.organization.id, document_id)
+    )
+
+
+@router.post("/documents/{document_id}/restore", response_model=DocumentOut)
+def restore_document(
+    document_id: uuid.UUID, member: CsrfMember, db: DbSession
+) -> DocumentOut:
+    return DocumentOut.model_validate(
+        service.restore_document(db, member.organization.id, document_id)
+    )
+
+
+@router.post("/documents/{document_id}/content", response_model=DocumentOut)
+def replace_document(
+    document_id: uuid.UUID,
+    member: CsrfMember,
+    db: DbSession,
+    file: UploadFile,
+) -> DocumentOut:
+    payload = file.file.read()
+    current = service.get_document(db, member.organization.id, document_id)
+    growth = max(0, len(payload) - current.byte_size)
+    if growth:
+        enforce_limit(db, member.organization.id, "knowledge_storage_bytes", growth)
+    document = service.replace_document(
+        db,
+        member.organization.id,
+        document_id,
+        filename=file.filename or "document.txt",
+        media_type=file.content_type or "application/octet-stream",
+        payload=payload,
+    )
+    return DocumentOut.model_validate(document)
 
 
 @router.post("/documents/{document_id}/reindex", response_model=DocumentOut)

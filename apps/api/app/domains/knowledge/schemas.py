@@ -21,8 +21,15 @@ class DocumentOut(BaseModel):
     status: DocumentStatus
     origin: Origin
     error_message: str | None
+    archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class DocumentPreview(BaseModel):
+    filename: str
+    excerpt: str
+    truncated: bool
 
 
 class DocumentPage(Page):

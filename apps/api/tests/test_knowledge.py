@@ -88,3 +88,96 @@ def test_upload_indexes_text_and_rejects_invalid_files(
     login(embedded_client, "outsider@example.org", PASSWORD)
     hidden = embedded_client.get(f"/api/v1/organizations/{org}/documents/{document_id}")
     assert hidden.status_code == 404
+
+
+def test_replace_archive_and_duplicate_keep_search_current(
+    embedded_client: TestClient, db: Session
+) -> None:
+    user = make_user(db, "librarian@example.com")
+    outsider = make_user(db, "library-out@example.org")
+    atlas = make_organization(db, "Knowledge Library", "knowledge-library")
+    other = make_organization(db, "Other Library", "other-library")
+    make_membership(db, user, atlas, MembershipRole.admin)
+    make_membership(db, outsider, other, MembershipRole.admin)
+    session = login(embedded_client, "librarian@example.com", PASSWORD)
+    headers = _csrf(session)
+    org = _org(session)
+    original = b"kelp-yard-7744 holds the spare tide chart."
+    uploaded = embedded_client.post(
+        f"/api/v1/organizations/{org}/documents",
+        files={"file": ("tide-chart.txt", original, "text/plain")},
+        headers=headers,
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    document_id = uploaded.json()["id"]
+    duplicate = embedded_client.post(
+        f"/api/v1/organizations/{org}/documents",
+        files={"file": ("tide-chart-copy.txt", original, "text/plain")},
+        headers=headers,
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "duplicate_document"
+    _process_one()
+    preview = embedded_client.get(f"/api/v1/organizations/{org}/documents/{document_id}/preview")
+    assert preview.status_code == 200
+    assert "spare tide chart" in preview.json()["excerpt"]
+    same = embedded_client.post(
+        f"/api/v1/organizations/{org}/documents/{document_id}/content",
+        files={"file": ("tide-chart.txt", original, "text/plain")},
+        headers=headers,
+    )
+    assert same.status_code == 200
+    assert same.json()["status"] == "ready"
+    replaced = embedded_client.post(
+        f"/api/v1/organizations/{org}/documents/{document_id}/content",
+        files={
+            "file": (
+                "tide-chart.txt",
+                b"kelp-yard-7744 moved the spare tide chart to locker nine.",
+                "text/plain",
+            )
+        },
+        headers=headers,
+    )
+    assert replaced.status_code == 200
+    assert replaced.json()["status"] == "pending"
+    _process_one()
+    stale = embedded_client.get(
+        f"/api/v1/organizations/{org}/documents/search", params={"q": "holds the spare"}
+    )
+    assert stale.json()["items"] == []
+    current = embedded_client.get(
+        f"/api/v1/organizations/{org}/documents/search", params={"q": "locker nine"}
+    )
+    assert current.json()["items"]
+    assert current.json()["items"][0]["document_id"] == document_id
+    archived = embedded_client.post(
+        f"/api/v1/organizations/{org}/documents/{document_id}/archive", headers=headers
+    )
+    assert archived.status_code == 200
+    assert archived.json()["archived_at"]
+    hidden = embedded_client.get(f"/api/v1/organizations/{org}/documents")
+    assert document_id not in [item["id"] for item in hidden.json()["items"]]
+    listed = embedded_client.get(
+        f"/api/v1/organizations/{org}/documents", params={"include_archived": True}
+    )
+    assert document_id in [item["id"] for item in listed.json()["items"]]
+    after_archive = embedded_client.get(
+        f"/api/v1/organizations/{org}/documents/search", params={"q": "locker nine"}
+    )
+    assert after_archive.json()["items"] == []
+    restored = embedded_client.post(
+        f"/api/v1/organizations/{org}/documents/{document_id}/restore", headers=headers
+    )
+    assert restored.status_code == 200
+    assert restored.json()["archived_at"] is None
+    assert restored.json()["status"] == "pending"
+    _process_one()
+    found = embedded_client.get(
+        f"/api/v1/organizations/{org}/documents/search", params={"q": "locker nine"}
+    )
+    assert found.json()["items"][0]["document_id"] == document_id
+    embedded_client.cookies.clear()
+    login(embedded_client, "library-out@example.org", PASSWORD)
+    hidden_document = embedded_client.get(f"/api/v1/organizations/{org}/documents/{document_id}")
+    assert hidden_document.status_code == 404
