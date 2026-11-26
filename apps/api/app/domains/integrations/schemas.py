@@ -89,7 +89,7 @@ class IntegrationMetadata(BaseModel):
 
 
 class VerificationResult(BaseModel):
-    integration: IntegrationMetadata
+    integration: IntegrationMetadata | None = None
     verified: bool
     detail: str
 

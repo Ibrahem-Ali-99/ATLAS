@@ -1,12 +1,12 @@
 ---
 name: engineering-review
-description: Reviews ATLAS changes for correctness, security, domain boundaries, and test evidence. Use when the user asks for an engineering review, a code review, a Day 2–7 implementation review, or explicitly invokes the engineering-review skill.
+description: Reviews ATLAS changes for correctness, security, domain boundaries, and test evidence. Use when the user asks for an engineering review, a code review, a product-completion implementation review, or explicitly invokes the engineering-review skill.
 disable-model-invocation: true
 ---
 
 # Engineering review
 
-Review the change for defects that affect correctness, security, or operability. Formatting and naming preferences are secondary. Do not implement Day 2–7 features during a review unless the user asked for the fixes.
+Review the change for defects that affect correctness, security, or operability. Formatting and naming preferences are secondary. Do not implement unrelated product work during a review unless the user asked for the fixes.
 
 ## Review steps
 

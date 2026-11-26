@@ -274,13 +274,34 @@ def revoke(
     return safe_metadata(db, admin.organization.id, record.integration_type)  # type: ignore[return-value]
 
 
+def _verify_deployment_provider(
+    db: DbSession, organization_id: uuid.UUID, integration_type: IntegrationType
+) -> VerificationResult:
+    try:
+        if integration_type == IntegrationType.chat:
+            get_chat_client(db, organization_id, for_verification=True).complete(
+                "Respond with one short word.", "verification"
+            )
+            detail = "The deployment language model accepted the connection test."
+        else:
+            get_embedding_client(db, organization_id, for_verification=True).embed(
+                ["ATLAS integration verification"]
+            )
+            detail = "The deployment embedding model accepted the connection test."
+    except AppError as exc:
+        return VerificationResult(verified=False, detail=exc.message)
+    return VerificationResult(verified=True, detail=detail)
+
+
 @router.post("/{integration_type}/verify", response_model=VerificationResult)
 def verify(
     integration_type: IntegrationType, admin: CsrfAdmin, db: DbSession
 ) -> VerificationResult:
     record = read_metadata(db, admin.organization.id, integration_type)
     if record is None:
-        raise AppError(404, "integration_not_found", "Integration configuration not found")
+        if integration_type not in {IntegrationType.chat, IntegrationType.embedding}:
+            raise AppError(404, "integration_not_found", "Integration configuration not found")
+        return _verify_deployment_provider(db, admin.organization.id, integration_type)
     if record.status == IntegrationStatus.disabled:
         raise AppError(409, "integration_disabled", "Enable this integration before testing it")
     if integration_type == IntegrationType.n8n:

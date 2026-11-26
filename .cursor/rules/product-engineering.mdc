@@ -1,0 +1,22 @@
+---
+description: Product completion priorities and engineering vocabulary for ATLAS
+alwaysApply: true
+---
+
+# Product engineering
+
+Continue the shipped implementation. Do not replace domains, routes, or schema history with a new design.
+
+Prioritize, in this order:
+
+1. Behavior a customer can complete: CRM, Inbox, knowledge, approvals, workflows, campaigns, and billing.
+2. Interface quality against `design-reference/ATLAS Workspace Overview.zip` and `docs/UI1_INTERFACE_RECONCILIATION.md`.
+3. Real provider activation in `docs/provider-activation.md`. A sandbox double is not a live connection.
+
+Use the vocabulary already in the code: `organization`, `membership`, `session`, `inquiry`, `approval`, `provider`, and `integration`. Describe capabilities and acceptance criteria. Do not name product work as a "Day N" milestone. Do not rename persisted slugs, migration identifiers, or fixture subjects to chase wording.
+
+```python
+# A live send stays behind an approval and a recorded provider result.
+if delivery.status != "accepted":
+    raise AppError(502, "delivery_failed", "The provider did not accept the message")
+```

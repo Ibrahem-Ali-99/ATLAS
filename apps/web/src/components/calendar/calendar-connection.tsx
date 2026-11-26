@@ -52,7 +52,7 @@ export function CalendarConnectionCard({ organizationId, isAdmin, connection, ca
       </div>
       <h2 className="mt-4 font-semibold">Google Calendar</h2>
       <p className="mb-4 mt-2 flex-1 break-words text-sm text-muted-foreground">
-        {connection?.connected ? connection.calendar_name : "Check availability and add approved customer appointments to a workspace calendar."}
+        {connection?.connected ? connection.calendar_name : !connection ? "Checking whether Google sign-in is available." : !connection.available ? "An operator registers Google sign-in for this deployment. After that, connect the calendar that should hold customer appointments." : "Connect the Google account that should hold customer appointments, then test availability."}
       </p>
       {callback === "failed" ? <p className="mb-3 text-sm text-destructive" role="alert">Connection failed. Reconnect and grant Calendar access.</p> : null}
       {callback === "cancelled" ? <p className="mb-3 text-sm text-muted-foreground" role="status">Google authorization was cancelled.</p> : null}

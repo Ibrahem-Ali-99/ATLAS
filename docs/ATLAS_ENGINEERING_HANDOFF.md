@@ -1,6 +1,6 @@
 # ATLAS engineering handoff
 
-Checkpoint date: 2026-11-26. The handoff branch is `feature/atlas-product-completion`, based on `4cdffa824878488cb6fe6e3457ec72b42b9a6132`. It has no remote upstream. The original checkout has read-only Git metadata, so the checkpoint is in a separate local checkout with the same parent history. A verified Git bundle makes the branch portable.
+Checkpoint date: 2026-11-26. The permanent development workspace is `D:\ATLAS` on `feature/atlas-product-completion` at `f0596326a966c9f55be099b6f8f23b113111ded6`, tracking `origin/feature/atlas-product-completion`. Continue from this checkout. Do not open a second worktree or restart the product from the parent revision `4cdffa824878488cb6fe6e3457ec72b42b9a6132`. Environment files, `var/` databases and uploads, and regenerated demo screenshots remain local state on top of the checkpoint.
 
 ## Architecture and repository
 
@@ -95,4 +95,4 @@ The approved archive is tracked byte-for-byte at `design-reference/ATLAS Workspa
 - The checkpoint tree and archive entries passed a redacted local scan for known token formats, high-entropy credential assignments, and exact matches to locally configured secrets. Gitleaks and independent advisory verification remain pending because the scanner binary was unavailable, registry DNS failed, and Docker daemon access was denied. The repository retains its connected scan job.
 - Browser production builds and acceptance runs are historical evidence for the corresponding modules. The latest focused browser run recorded four Inbox and Workflows passes, and the earlier full baseline recorded 213 API passes, one opt-in provider skip, and 32 browser passes. Neither run is a full suite against the final commit. Live provider accounts and staging HTTPS were outside frozen-source verification.
 
-The checkpoint excludes regenerated demo screenshots, local reviews, runtime artifacts and connector configuration. Baseline tracked demo images are retained. The original checkout still contains its local artifacts and accumulated working-tree changes.
+The checkpoint excludes regenerated demo screenshots, local reviews, runtime artifacts and connector configuration. Baseline tracked demo images remain in Git. This workspace keeps the regenerated screenshots, environment files, and `var/` databases and uploads as local state.

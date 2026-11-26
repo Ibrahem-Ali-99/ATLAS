@@ -1,6 +1,6 @@
 # Architecture
 
-ATLAS is a modular monolith. Day 1 is the platform shell. Day 2 adds CRM, document retrieval, and a read-only assistant. Day 3 adds an inquiry agent that pauses for a human approval before it writes CRM records. Day 4 adds n8n-triggered automation, signed webhooks, sandbox email, and a simulated calendar.
+ATLAS is a modular monolith. The platform provides the workspace shell, CRM, document retrieval, and a read-only assistant. An inquiry agent pauses for human approval before it writes CRM records. Automation uses n8n-triggered workflows, signed webhooks, sandbox email, and a calendar adapter.
 
 ## Backend
 

@@ -30,7 +30,7 @@ export function integrationConnection(record?: IntegrationMetadata) {
 }
 
 export type VerificationResult = {
-  integration: IntegrationMetadata;
+  integration: IntegrationMetadata | null;
   verified: boolean;
   detail: string;
 };

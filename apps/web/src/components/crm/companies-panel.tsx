@@ -276,9 +276,9 @@ function CompanyEditorForm({
       <div className="mt-4 border-t border-border pt-4">
         <h3 className="text-sm font-medium">Related records</h3>
         <div className="mt-2 grid gap-1 text-sm">
-          {related?.[0].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "contacts", id: item.id })}>{item.full_name}</button>)}
-          {related?.[1].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "leads", id: item.id })}>{item.title}</button>)}
-          {related?.[2].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
+          {related?.[0].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "contacts", id: item.id })}>{item.full_name}</button>)}
+          {related?.[1].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "leads", id: item.id })}>{item.title}</button>)}
+          {related?.[2].items.filter((item) => item.company_id === company.id).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
           {related && related.every((page) => page.items.every((item) => item.company_id !== company.id)) ? <p className="text-muted-foreground">No linked records yet.</p> : null}
         </div>
       </div>

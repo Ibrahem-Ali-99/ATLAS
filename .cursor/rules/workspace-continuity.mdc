@@ -1,0 +1,19 @@
+---
+description: Keep ATLAS development in the permanent D:\ATLAS checkout
+alwaysApply: true
+---
+
+# Workspace continuity
+
+`D:\ATLAS` is the only permanent development workspace. The branch is `feature/atlas-product-completion`. The committed baseline is `f0596326a966c9f55be099b6f8f23b113111ded6`. Continue from that tree.
+
+- Do not create a second checkout, worktree, or repository for the same product work.
+- Do not use `git reset --hard`, `git clean`, or any command that discards working-tree files.
+- Preserve `.env`, `apps/web/.env.local`, `infrastructure/staging/.env`, `var/` databases, uploaded documents, and local demo screenshots.
+- Read `docs/ATLAS_ENGINEERING_HANDOFF.md`, `docs/product-completion-backlog.md`, `docs/UI1_INTERFACE_RECONCILIATION.md`, and `docs/provider-activation.md` before changing product behavior.
+
+```powershell
+# Confirm the checkout before editing.
+git rev-parse --abbrev-ref HEAD
+git rev-parse HEAD
+```

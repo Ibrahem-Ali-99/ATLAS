@@ -5,6 +5,7 @@ import { WorkflowsScreen } from "@/components/workflows/workflows-screen";
 export const metadata: Metadata = {
   title: "Workflows",
 };
+export const instant = false;
 
 export default async function WorkflowsPage({ searchParams }: {
   searchParams: Promise<{ workflow?: string | string[]; run?: string | string[]; archived?: string | string[] }>;

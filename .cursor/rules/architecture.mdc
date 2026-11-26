@@ -11,7 +11,7 @@ ATLAS is one deployable API and one Next.js client. Add a domain under `apps/api
 - A client-supplied organization id is a lookup key. Load the membership for the authenticated user on the server.
 - Pass dependencies explicitly. Do not reach through import cycles between domains.
 - Prefer a direct function over a new repository, factory, or generic framework. Do not split a domain into a service while it is still one module.
-- Do not add microservices, message buses, or plugin systems for future Day 2–7 work. Those days add code inside the existing boundaries.
+- Do not add microservices, message buses, or plugin systems for later product work. New behavior belongs in the existing API and web client.
 
 ```python
 # Route owns HTTP. Service owns the rule.

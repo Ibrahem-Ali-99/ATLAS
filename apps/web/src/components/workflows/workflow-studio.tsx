@@ -315,7 +315,11 @@ function NodeSettings({ organizationId, graph, update, selection, select, readOn
     const current = graph[target] ?? [];
     const approval = type === "require_approval";
     const action: WorkflowAction = approval ? { type } : { type, title: "Workflow follow-up" };
-    update({ ...graph, [target]: approval ? [action, ...current] : [...current, action] });
+    const next = approval ? [action, ...current] : [...current, action];
+    const withTask = approval && !next.some((entry) => entry.type !== "require_approval")
+      ? [...next, { type: "create_task", title: "Workflow follow-up" }]
+      : next;
+    update({ ...graph, [target]: withTask });
     select({ kind: "action", path: target, index: approval ? 0 : current.length });
   }
   return (
@@ -385,7 +389,8 @@ function NodeSettings({ organizationId, graph, update, selection, select, readOn
         }}><GitBranch className="size-4" />Add condition</Button> : null}
         {actionCount < 20 ? <><Button size="sm" variant="outline" onClick={() => addAction("actions", "create_task")}><Plus className="size-4" />{conditions.length ? "Add matched action" : "Add action"}</Button>
         {conditions.length ? <Button size="sm" variant="outline" onClick={() => addAction("otherwise_actions", "create_task")}><Plus className="size-4" />Add otherwise action</Button> : null}
-        {!hasApproval ? <Button size="sm" variant="outline" onClick={() => addAction(path, "require_approval")}><ShieldCheck className="size-4" />{path === "otherwise_actions" ? "Add otherwise approval" : "Add approval"}</Button> : null}</> : null}
+        {!graph.actions.some((entry) => entry.type === "require_approval") ? <Button size="sm" variant="outline" onClick={() => addAction("actions", "require_approval")}><ShieldCheck className="size-4" />Add approval</Button> : null}
+        {conditions.length && !(graph.otherwise_actions ?? []).some((entry) => entry.type === "require_approval") ? <Button size="sm" variant="outline" onClick={() => addAction("otherwise_actions", "require_approval")}><ShieldCheck className="size-4" />Add otherwise approval</Button> : null}</> : null}
       </div> : null}
     </>
   );

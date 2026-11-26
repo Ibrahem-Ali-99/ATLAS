@@ -87,6 +87,12 @@ def test_handoff_takeover_staff_delivery_and_duplicate_protection(
         json={"message": "Are you available today?", "client_message_id": "visitor-2"},
     )
     assert second_message.status_code == 200, second_message.text
+    queue = api.get(f"/api/v1/organizations/{org_id}/inbox", headers=headers)
+    assert queue.status_code == 200, queue.text
+    queued = next(item for item in queue.json() if item["id"] == conversation_id)
+    assert queued["preview"] == "Are you available today?"
+    assert queued["customer_name"] is None
+    assert queued["company_name"] is None
     stale_read = api.patch(
         f"{thread_path}/read", json={"updated_at": thread.json()["updated_at"]}, headers=headers
     )

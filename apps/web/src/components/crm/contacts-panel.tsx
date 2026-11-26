@@ -233,9 +233,9 @@ function ContactEditor({
     <aside className="rounded-[10px] bg-muted p-6" data-testid="crm-detail-contacts" data-record-id={contact.id} data-archived={contact.archived_at ? "true" : "false"}>
       <h2 className="text-base font-semibold">{contact.full_name}</h2>
       <div className="mt-3 border-t border-border pt-3 text-sm"><h3 className="font-medium">Related records</h3><div className="mt-2 grid gap-1">
-        {contact.company_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "companies", id: contact.company_id! })}>{companies.find((item) => item.id === contact.company_id)?.name ?? "Company"}</button> : null}
-        {related?.[0].items.filter((item) => item.contact_id === contact.id).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "leads", id: item.id })}>{item.title}</button>)}
-        {related?.[1].items.filter((item) => item.lead_id && related[0].items.some((lead) => lead.id === item.lead_id && lead.contact_id === contact.id)).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
+        {contact.company_id ? <button className="text-left text-primary underline" onClick={() => onNavigate({ tab: "companies", id: contact.company_id! })}>{companies.find((item) => item.id === contact.company_id)?.name ?? "Company"}</button> : null}
+        {related?.[0].items.filter((item) => item.contact_id === contact.id).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "leads", id: item.id })}>{item.title}</button>)}
+        {related?.[1].items.filter((item) => item.lead_id && related[0].items.some((lead) => lead.id === item.lead_id && lead.contact_id === contact.id)).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
       </div></div>
       <div className="mt-4">
         <ContactFields form={form} formId="contact-edit" companies={companies} onSubmit={(values) => save.mutate(values)} />

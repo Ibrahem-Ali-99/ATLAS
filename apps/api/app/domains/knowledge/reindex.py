@@ -5,6 +5,7 @@ import math
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from pgvector.sqlalchemy import Vector
 from pydantic import BaseModel, Field, SecretStr
@@ -22,6 +23,22 @@ from app.domains.knowledge.vectors import index_identity, lock_embedding_index
 from app.integrations.language import OpenAICompatibleEmbeddingClient
 
 _BATCH_SIZE = 16
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _loopback_ollama(base_url: str) -> bool:
+    parsed = urlsplit(base_url)
+    host = (parsed.hostname or "").casefold()
+    if (
+        parsed.scheme != "http"
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or host not in _LOOPBACK_HOSTS
+    ):
+        return False
+    return parsed.path.rstrip("/") in {"", "/v1"}
 
 
 class ReindexRequest(BaseModel):
@@ -79,9 +96,13 @@ def start(
     trusted = {settings.embedding_base_url.rstrip("/"), "https://api.openai.com/v1"}
     if active and isinstance(active.config.get("base_url"), str):
         trusted.add(active.config["base_url"].strip().rstrip("/"))
+    if body.provider == "ollama" and _loopback_ollama(base_url):
+        trusted.add(base_url)
     if settings.public_demo or base_url not in trusted or not model:
         raise AppError(
-            422, "reindex_provider_invalid", "Use a trusted embedding endpoint and model"
+            422,
+            "reindex_provider_invalid",
+            "Use this deployment's embedding endpoint, OpenAI, or Ollama on this machine.",
         )
     supplied = body.credentials.get_secret_value().strip() if body.credentials else ""
     token = seal_integration_secret(supplied) if supplied else None

@@ -26,6 +26,16 @@ function displayDate(date: string) {
   return new Date(date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+function relativeTime(date: string) {
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(date).getTime()) / 60000));
+  if (minutes < 1) return "Now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(hours / 24);
+  return `${days}d`;
+}
+
 export function InboxScreen() {
   const { organizationId, role } = useWorkspace();
   return organizationId ? <InboxWorkspace key={organizationId} id={organizationId} isAdmin={role === "admin"} /> : null;
@@ -213,12 +223,12 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
         Manage customer conversations across connected channels.
       </PageHeader>
       {requestError ? <RequestError error={requestError} /> : null}
-      <div className="grid min-w-0 overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)] min-[1440px]:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)_minmax(13rem,16rem)]">
+      <div className="grid min-w-0 overflow-hidden rounded-xl border border-border bg-card lg:max-[1439px]:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)] min-[1440px]:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)_minmax(16rem,20rem)]">
         <section aria-label="Conversation queue" className={`min-w-0 lg:border-r lg:border-border ${selected ? "hidden lg:block" : ""}`}>
           <div className="space-y-3 border-b border-border p-4">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold">Conversations</h2>
-              {conversations.data ? <Badge variant="secondary">{conversations.data.length}</Badge> : null}
+              {conversations.data ? <Badge variant="secondary">{conversations.data.filter((item) => item.status === "open").length} open</Badge> : null}
             </div>
             <label className="relative block">
               <Search aria-hidden="true" size={15} className="pointer-events-none absolute top-3 left-3 text-muted-foreground" />
@@ -251,9 +261,13 @@ function InboxWorkspace({ id, isAdmin }: { id: string; isAdmin: boolean }) {
                     onClick={() => open(conversation)}>
                     <span className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary"><ChannelIcon aria-hidden="true" size={16} /></span>
                     <span className="grid min-w-0 flex-1 gap-1">
-                      <span className="break-words text-sm font-semibold">{conversation.subject}</span>
-                      <span className="text-xs text-muted-foreground">{channelNames[conversation.channel]} · <span className="capitalize">{conversation.status}</span></span>
-                      <time className="text-xs text-muted-foreground" dateTime={conversation.updated_at}>{displayDate(conversation.updated_at)}</time>
+                      <span className="flex items-baseline justify-between gap-2">
+                        <span className="truncate text-sm font-semibold">{conversation.customer_name ?? conversation.subject}</span>
+                        <time className="shrink-0 text-xs text-muted-foreground" dateTime={conversation.updated_at} title={displayDate(conversation.updated_at)}>{relativeTime(conversation.updated_at)}</time>
+                      </span>
+                      {conversation.customer_name ? <span className="truncate text-sm">{conversation.subject}</span> : null}
+                      {conversation.preview ? <span className="truncate text-xs text-muted-foreground">{conversation.preview}</span> : null}
+                      <span className="text-xs text-muted-foreground">{conversation.company_name ? `${conversation.company_name} · ` : null}{channelNames[conversation.channel]} · <span className="capitalize">{conversation.status}</span></span>
                       {conversation.handoff_requested ? <span className="text-xs font-medium text-primary">Handoff requested</span> : null}
                     </span>
                     {conversation.unread_count > 0 ? <Badge aria-label={`${conversation.unread_count} unread`}>{conversation.unread_count}</Badge> : null}

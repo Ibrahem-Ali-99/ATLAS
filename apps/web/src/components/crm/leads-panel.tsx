@@ -310,9 +310,9 @@ function LeadDetail({
         <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Lead detail</p><h2 className="mt-1 break-words text-lg font-semibold">{lead.title}</h2></div><Badge variant="secondary">{lead.status}</Badge></div>
       </div>
       <div className="border-t border-border pt-4 text-sm"><h3 className="font-medium">Related records</h3><div className="mt-2 grid min-w-0 gap-1">
-        {lead.company_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "companies", id: lead.company_id! })}>{companies.find((item) => item.id === lead.company_id)?.name ?? "Company"}</button> : null}
-        {lead.contact_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "contacts", id: lead.contact_id! })}>{contacts.find((item) => item.id === lead.contact_id)?.full_name ?? "Contact"}</button> : null}
-        {inquiries.filter((item) => item.lead_id === lead.id).map((item) => <button key={item.id} className="text-left text-accent underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
+        {lead.company_id ? <button className="text-left text-primary underline" onClick={() => onNavigate({ tab: "companies", id: lead.company_id! })}>{companies.find((item) => item.id === lead.company_id)?.name ?? "Company"}</button> : null}
+        {lead.contact_id ? <button className="text-left text-primary underline" onClick={() => onNavigate({ tab: "contacts", id: lead.contact_id! })}>{contacts.find((item) => item.id === lead.contact_id)?.full_name ?? "Contact"}</button> : null}
+        {inquiries.filter((item) => item.lead_id === lead.id).map((item) => <button key={item.id} className="text-left text-primary underline" onClick={() => onNavigate({ tab: "inquiries", id: item.id })}>{item.subject}</button>)}
       </div></div>
       <LeadFields form={form} formId="lead-edit" companies={companies} contacts={contacts} onSubmit={(values) => save.mutate(values)} />
       {save.isSuccess ? <p className="text-sm text-muted-foreground">Saved.</p> : null}

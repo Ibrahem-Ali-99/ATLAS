@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 export const metadata: Metadata = {
   title: "Approvals",
 };
+export const instant = false;
 
 export default function ApprovalsPage() {
   return (

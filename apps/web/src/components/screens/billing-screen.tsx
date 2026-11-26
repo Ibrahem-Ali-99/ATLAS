@@ -69,7 +69,7 @@ function BillingCard({ organizationId, isAdmin }: { organizationId: string; isAd
     <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3" role="note">
       <FlaskConical className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
       <div><p className="text-sm font-medium">{stripe ? "Stripe test mode" : "Sandbox billing"}</p>
-      <p className="mt-0.5 text-xs text-muted-foreground">{stripe ? "Checkout uses a Stripe test account." : "Plan changes update this workspace without a payment."}</p></div>
+      <p className="mt-0.5 text-xs text-muted-foreground">{stripe ? "Checkout uses a Stripe test account and does not create a live charge." : "Plan changes stay in this workspace. Stripe appears after an operator adds a test key, an approved test price, and a signed webhook."}</p></div>
     </div>
     <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[1.25fr_1fr]">
     <section className="min-w-0 rounded-xl border border-border bg-card p-5" aria-labelledby="billing-heading">

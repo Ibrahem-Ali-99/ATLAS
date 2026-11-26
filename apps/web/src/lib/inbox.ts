@@ -3,7 +3,22 @@ export const recordInboxInquiry = (id: string, conversationId: string, title: st
   apiFetch<{ lead_id: string; inquiry_id: string }>(`${path(id)}/${conversationId}/crm-intake`, {
     method: "POST", body: JSON.stringify({ title }),
   });
-export type InboxConversation = { id: string; subject: string; channel: "email" | "whatsapp" | "webchat"; status: string; unread_count: number; contact_id: string | null; lead_id: string | null; assigned_to: string | null; handoff_requested?: boolean; handoff_reason?: string | null; updated_at: string };
+export type InboxConversation = {
+  id: string;
+  subject: string;
+  channel: "email" | "whatsapp" | "webchat";
+  status: string;
+  unread_count: number;
+  contact_id: string | null;
+  lead_id: string | null;
+  assigned_to: string | null;
+  handoff_requested?: boolean;
+  handoff_reason?: string | null;
+  updated_at: string;
+  customer_name?: string | null;
+  company_name?: string | null;
+  preview?: string | null;
+};
 export type InboxDetail = InboxConversation & { ai_resumed?: boolean; reply_recipient?: string | null; reply_unavailable?: string | null; handoff_accepted_at?: string | null; handoff_resolved_at?: string | null; messages: { id: string; sender: string; recipient: string; body: string; direction: string; channel: string; delivery_status: string; created_at: string }[] };
 const path = (id: string) => `/api/v1/organizations/${id}/inbox`;
 export type WidgetSettings = {

@@ -11,7 +11,7 @@ from typing import Literal
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import AwareDatetime, BaseModel, EmailStr, Field, ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -24,7 +24,7 @@ from app.domains.assistant.service import _configured_system
 from app.domains.audit.service import record_event
 from app.domains.automation.workflows import stage_lead_created
 from app.domains.crm import service as crm
-from app.domains.crm.models import Contact, Inquiry, Lead, LeadStatus
+from app.domains.crm.models import Company, Contact, Inquiry, Lead, LeadStatus
 from app.domains.crm.schemas import ContactCreate
 from app.domains.identity.dependencies import CsrfAdmin, CsrfMember, DbSession, Member
 from app.domains.identity.models import Membership, Organization, User
@@ -157,6 +157,27 @@ def _conversation(
     return row
 
 
+def _message_preview(body: str | None) -> str | None:
+    if body is None:
+        return None
+    compact = " ".join(body.split())
+    if not compact:
+        return None
+    if len(compact) <= 140:
+        return compact
+    return f"{compact[:139].rstrip()}..."
+
+
+def _queue_customer_name(
+    contact_name: str | None, sender: str | None, direction: str | None
+) -> str | None:
+    if contact_name:
+        return contact_name
+    if direction == "inbound" and sender and sender.casefold() not in {"visitor", "atlas"}:
+        return sender
+    return None
+
+
 @router.get("")
 def list_inbox(
     member: Member,
@@ -166,9 +187,40 @@ def list_inbox(
     channel: Literal["all", "email", "whatsapp", "webchat"] = "all",
     status: InboxStatus | None = None,
 ) -> list[dict[str, object]]:
+    organization_id = member.organization.id
+    ranked_messages = (
+        select(
+            InboxMessage.conversation_id.label("conversation_id"),
+            InboxMessage.body.label("body"),
+            InboxMessage.sender.label("sender"),
+            InboxMessage.direction.label("direction"),
+            func.row_number()
+            .over(
+                partition_by=InboxMessage.conversation_id,
+                order_by=(InboxMessage.created_at.desc(), InboxMessage.id.desc()),
+            )
+            .label("rank"),
+        )
+        .where(
+            InboxMessage.organization_id == organization_id,
+            InboxMessage.delivery_status != "draft",
+        )
+        .subquery()
+    )
+    latest_message = select(ranked_messages).where(ranked_messages.c.rank == 1).subquery()
     query = (
-        select(InboxConversation)
-        .where(InboxConversation.organization_id == member.organization.id)
+        select(
+            InboxConversation,
+            Contact.full_name,
+            Company.name,
+            latest_message.c.body,
+            latest_message.c.sender,
+            latest_message.c.direction,
+        )
+        .outerjoin(Contact, Contact.id == InboxConversation.contact_id)
+        .outerjoin(Company, Company.id == Contact.company_id)
+        .outerjoin(latest_message, latest_message.c.conversation_id == InboxConversation.id)
+        .where(InboxConversation.organization_id == organization_id)
         .order_by(InboxConversation.updated_at.desc(), InboxConversation.id.desc())
     )
     if assigned == "assigned":
@@ -180,7 +232,23 @@ def list_inbox(
     if status is not None:
         query = query.where(InboxConversation.status == status)
     if q and q.strip():
-        query = query.where(InboxConversation.subject.icontains(q.strip(), autoescape=True))
+        term = q.strip()
+        message_match = (
+            select(InboxMessage.id)
+            .where(
+                InboxMessage.conversation_id == InboxConversation.id,
+                InboxMessage.organization_id == organization_id,
+                InboxMessage.body.icontains(term, autoescape=True),
+            )
+            .exists()
+        )
+        query = query.where(
+            or_(
+                InboxConversation.subject.icontains(term, autoescape=True),
+                Contact.full_name.icontains(term, autoescape=True),
+                message_match,
+            )
+        )
     return [
         {
             "id": row.id,
@@ -194,8 +262,11 @@ def list_inbox(
             "handoff_requested": row.handoff_requested,
             "handoff_reason": row.handoff_reason,
             "updated_at": row.updated_at,
+            "customer_name": _queue_customer_name(contact_name, sender, direction),
+            "company_name": company_name,
+            "preview": _message_preview(preview),
         }
-        for row in db.scalars(query)
+        for row, contact_name, company_name, preview, sender, direction in db.execute(query)
     ]
 
 

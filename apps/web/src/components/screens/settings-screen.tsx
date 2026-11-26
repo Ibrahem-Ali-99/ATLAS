@@ -289,6 +289,7 @@ function IntegrationSettings({
         </div>
         <Badge variant="secondary">{isAdmin ? "Administrator access" : "Read only"}</Badge>
       </div>
+      <ExternalActivationChecklist />
       <div className="mt-4 flex flex-wrap gap-3">
         <Input aria-label="Search integrations" className="max-w-sm" placeholder="Search providers" value={query} onChange={(event) => setQuery(event.target.value)} />
         <select aria-label="Filter integrations by category" className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={category} onChange={(event) => setCategory(event.target.value)}>
@@ -316,13 +317,56 @@ function IntegrationSettings({
   );
 }
 
+const externalActivation = [
+  {
+    name: "WhatsApp",
+    customer: "In WhatsApp Business, enter the Business Account ID, phone number ID, and access token. Save, then test the connection.",
+    operator: "Publish an HTTPS address for this API, set the verification token and app secret on the server, and leave live messaging off until a reply is approved.",
+  },
+  {
+    name: "Resend",
+    customer: "In Email, add the Resend key, register the sending domain, publish the DNS records, and run verification.",
+    operator: "Set the public campaign address, link secret, and Resend webhook secret. Live campaigns also require live email, which stays off until separately approved.",
+  },
+  {
+    name: "Google Calendar",
+    customer: "After Google sign-in is available, choose Connect Google, grant Calendar access, and run Test connection.",
+    operator: "Enable the Calendar API, create a web OAuth client, and set the client id, secret, web origin, and callback ending in /api/v1/calendar/google/callback.",
+  },
+  {
+    name: "Stripe",
+    customer: "On Billing, choose a plan after test mode is on. Checkout updates the subscription when Stripe confirms it.",
+    operator: "Provide a test secret key, an approved test price, and a signed webhook. Test mode does not create a live charge.",
+  },
+] as const;
+
+function ExternalActivationChecklist() {
+  return (
+    <section className="rounded-xl border border-border bg-card p-4" aria-label="External activation checklist">
+      <h2 className="text-base font-semibold">External accounts</h2>
+      <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+        WhatsApp, Resend, Google Calendar, and Stripe stay off until you have the provider account and an operator has prepared this deployment. Saving a key here does not send a message or charge a card.
+      </p>
+      <ol className="mt-4 grid gap-3">
+        {externalActivation.map((item) => (
+          <li key={item.name} className="rounded-md border border-border p-3">
+            <h3 className="text-sm font-medium">{item.name}</h3>
+            <p className="mt-2 text-sm leading-6"><span className="font-medium">You </span>{item.customer}</p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground"><span className="font-medium text-foreground">Operator </span>{item.operator}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 const marketplace = [
-  { type: "email", name: "Email", providers: "SMTP · Resend", category: "Messaging", benefit: "Test SMTP, manage sending domains, and review sandbox delivery settings.", icon: Mail },
-  { type: "whatsapp", name: "WhatsApp Business", providers: "Meta Cloud API", category: "Messaging", benefit: "Receive customer messages in Inbox once your Meta webhook is verified.", icon: MessageCircle },
-  { type: "n8n", name: "n8n", providers: "n8n", category: "Automation", benefit: "Run workflows and track callbacks from ATLAS.", icon: Workflow },
-  { type: "chat", name: "Language model", providers: "OpenAI · Groq", category: "Knowledge", benefit: "Power grounded answers and draft follow-ups.", icon: Bot },
-  { type: "embedding", name: "Embeddings", providers: "OpenAI · Ollama", category: "Knowledge", benefit: "Find relevant passages across your organization's documents.", icon: Search },
-] satisfies { type: IntegrationType; name: string; providers: string; category: string; benefit: string; icon: typeof Mail }[];
+  { type: "email", name: "Email", providers: "SMTP · Resend", category: "Messaging", benefit: "Test SMTP, manage sending domains, and review sandbox delivery settings.", activation: "Local Mailpit accepts sandbox mail. Resend and live replies need an external account and approval.", icon: Mail },
+  { type: "whatsapp", name: "WhatsApp Business", providers: "Meta Cloud API", category: "Messaging", benefit: "Receive customer messages in Inbox once your Meta webhook is verified.", activation: "Requires a Meta Business account. Saving settings does not send customer messages.", icon: MessageCircle },
+  { type: "n8n", name: "n8n", providers: "n8n", category: "Automation", benefit: "Run workflows and track callbacks from ATLAS.", activation: "Requires your own n8n instance. Issue a callback key here, then confirm the first signed callback.", icon: Workflow },
+  { type: "chat", name: "Language model", providers: "OpenAI · Groq", category: "Knowledge", benefit: "Power grounded answers and draft follow-ups.", activation: "Requires a Groq or OpenAI account. The workspace key stays on this deployment.", icon: Bot },
+  { type: "embedding", name: "Embeddings", providers: "OpenAI · Ollama", category: "Knowledge", benefit: "Find relevant passages across your organization's documents.", activation: "Ollama on this machine keeps passages local. OpenAI sends passages to an external account and needs approval.", icon: Search },
+] satisfies { type: IntegrationType; name: string; providers: string; category: string; benefit: string; activation: string; icon: typeof Mail }[];
 
 function IntegrationMarketplace({
   organizationId, isAdmin, integrations, isLoading, error, onChanged,
@@ -338,7 +382,7 @@ function IntegrationMarketplace({
   });
   const showCalendar = (category === "All categories" || category === "Automation") &&
     "google calendar scheduling appointment availability".includes(search.trim().toLowerCase()) &&
-    (view === "Discover" || Boolean(calendar.data?.connected));
+    (view === "Discover" || Boolean(calendar.data?.connected || calendar.data?.connection_error));
   const widget = useQuery({
     queryKey: ["inbox-widget", organizationId],
     queryFn: () => getInboxWidget(organizationId),
@@ -351,13 +395,10 @@ function IntegrationMarketplace({
   });
   const showWidget = (category === "All categories" || category === "Messaging") &&
     "website chat embed inbox".includes(search.trim().toLowerCase()) &&
-    (view === "Discover" || Boolean(widget.data?.enabled && widget.data.allowed_domains.length));
+    (view === "Discover" || Boolean(widget.data));
   const cards = marketplace.filter((item) => {
     const record = integrations.find((entry) => entry.integration_type === item.type);
-    const connected = item.type === "n8n" ? Boolean(n8n.data?.last_accepted_at && !n8n.data.revoked_at)
-      : record?.status === "configured" && Boolean(
-          item.type === "whatsapp" || item.type === "email" ? record.last_inbound_at : record.verified_at
-        );
+    const connected = item.type === "n8n" ? Boolean(n8n.data) : Boolean(record);
     return (view === "Discover" || connected) &&
       (category === "All categories" || category === item.category) &&
       `${item.name} ${item.providers} ${item.benefit}`.toLowerCase().includes(search.trim().toLowerCase());
@@ -365,6 +406,7 @@ function IntegrationMarketplace({
 
   return (
     <section className="space-y-5" aria-label="Integration marketplace">
+      <ExternalActivationChecklist />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div role="group" aria-label="Marketplace view" className="flex gap-1 rounded-lg border border-border bg-muted p-1">
           {(["Connected", "Discover"] as const).map((name) => (
@@ -406,10 +448,11 @@ function IntegrationMarketplace({
                   </div>
                   <h2 className="mt-4 font-semibold">{item.name}</h2>
                   <p className="mt-1 text-xs text-muted-foreground">{item.providers}</p>
-                  <p className="mb-5 mt-3 flex-1 text-sm leading-6 text-muted-foreground">{item.benefit}</p>
+                  <p className="mt-3 flex-1 text-sm leading-6 text-muted-foreground">{item.benefit}</p>
+                  <p className="mb-5 mt-2 text-xs leading-5 text-muted-foreground">{item.activation}</p>
                   <DialogTrigger asChild>
                     <Button variant="outline" size="sm" className="self-start" aria-label={`${item.name} settings`}>
-                      {isAdmin && item.type !== "n8n" ? "Configure" : "View details"}
+                      {isAdmin && (record?.status === "disabled" || record?.status === "verification_failed") ? "Recover connection" : isAdmin && item.type !== "n8n" ? "Configure" : "View details"}
                       <ChevronRight size={15} aria-hidden />
                     </Button>
                   </DialogTrigger>
@@ -518,8 +561,13 @@ function WhatsAppSettingsCard({ organizationId, isAdmin, record, onChanged }: { 
       {record?.last_inbound_at ? <p className="mt-3 text-xs text-muted-foreground">Last customer message {new Date(record.last_inbound_at).toLocaleString()}</p> : null}
       {record && isAdmin ? <MessagingConnectionControls organizationId={organizationId} type="whatsapp" record={record} onChanged={onChanged} onVersion={setVersion} /> : null}
       <details className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">
-        <summary className="cursor-pointer font-medium text-foreground">Webhook setup</summary>
-        <p className="mt-2">Use the deployment’s public API origin and this callback path in Meta. Ask your deployment operator for the verification token.</p>
+        <summary className="cursor-pointer font-medium text-foreground">Connection steps</summary>
+        <ol className="mt-2 list-decimal space-y-1 pl-4">
+          <li>Enter the Business Account ID, phone number ID, and access token from Meta, then save and test the connection.</li>
+          <li>Give Meta this callback path on the public HTTPS address your operator provides.</li>
+          <li>The verification token and app secret stay on the server. They are not entered here.</li>
+          <li>Replies stay in review until an operator enables live messaging and you approve one.</li>
+        </ol>
         <code className="mt-2 block break-all rounded-md bg-muted p-2">{callback}</code>
       </details>
     </section>
@@ -562,31 +610,38 @@ function EmailSettingsCard({
   const register = useMutation({ mutationFn: () => registerEmailDomain(organizationId, domain), onSuccess: () => { setDomain(""); setMessage("Domain registered. Publish the DNS records shown below."); void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }); }, onError: (error) => setMessage(error instanceof Error ? error.message : "Could not register domain.") });
   const check = useMutation({ mutationFn: (id: string) => checkEmailDomain(organizationId, id), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }), onError: (error) => setMessage(error instanceof Error ? error.message : "Verification check failed.") });
   const revoke = useMutation({ mutationFn: (id: string) => revokeEmailDomain(organizationId, id), onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["email-domains", organizationId] }), onError: (error) => setMessage(error instanceof Error ? error.message : "Could not revoke domain.") });
+  const emailRelayFields = <>
+    <div className="grid gap-3 md:grid-cols-3">
+      <label className="grid gap-1 text-sm"><span>SMTP host</span><Input value={host} onChange={(e) => setHost(e.target.value)} /></label>
+      <label className="grid gap-1 text-sm"><span>SMTP port</span><Input value={port} onChange={(e) => setPort(e.target.value)} /></label>
+      <label className="grid gap-1 text-sm"><span>Sender address</span><Input value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+    </div>
+    <label className="grid gap-1 text-sm">SMTP security
+      <select className="h-10 rounded-md border border-input bg-background px-2 text-sm" value={security} onChange={(e) => setSecurity(e.target.value)}>
+        <option value="local">Local SMTP without authentication</option><option value="starttls">STARTTLS</option><option value="tls">TLS</option>
+      </select>
+    </label>
+    {security !== "local" ? <div className="grid gap-3 sm:grid-cols-2">
+      <label className="grid gap-1 text-sm">SMTP username<Input value={smtpUser} onChange={(e) => setSmtpUser(e.target.value)} autoComplete="off" /></label>
+      <label className="grid gap-1 text-sm">SMTP password<Input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} autoComplete="new-password" /></label>
+    </div> : null}
+    <label className="grid min-w-0 gap-1 text-sm">Resend API key
+      <Input type="password" autoComplete="new-password" value={resendKey} onChange={(e) => setResendKey(e.target.value)} placeholder="Leave blank to keep the current key" />
+    </label>
+    {live ? <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={allowLiveReplies} onChange={(event) => setAllowLiveReplies(event.target.checked)} /> Enable approved live replies for this workspace</label> : null}
+    {!authenticationValid ? <p className="text-xs text-warning">Enter the SMTP username and password together and select TLS or STARTTLS.</p> : null}
+    <Button size="sm" className="justify-self-start" onClick={() => save.mutate()} disabled={!authenticationValid || save.isPending}>{save.isPending ? "Saving…" : "Save email settings"}</Button>
+  </>;
   return <div className="rounded-[10px] border border-border bg-background p-4 lg:col-span-3">
     <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-medium">Email delivery</h3><p className="mt-1 text-xs text-muted-foreground">SMTP for approved replies and Resend for campaign delivery.</p></div><Badge variant="secondary">{live ? "LIVE ENVIRONMENT" : delivery.data ? "MAILPIT SANDBOX" : "DELIVERY STATUS UNAVAILABLE"}</Badge></div>
-    <p className="mt-3 rounded-md border border-border bg-accent px-3 py-2 text-sm leading-6 text-foreground">{live ? "Live replies require a verified domain, a verified SMTP connection and workspace approval." : "Sandbox messages go to the local SMTP sink. The workspace can test provider setup without sending to customers."}</p>
-    <div className="mt-4 grid gap-3 md:grid-cols-3">
-      <label className="grid gap-1 text-sm"><span>SMTP host</span><Input disabled={!isAdmin} value={host} onChange={(e) => setHost(e.target.value)} /></label>
-      <label className="grid gap-1 text-sm"><span>SMTP port</span><Input disabled={!isAdmin} value={port} onChange={(e) => setPort(e.target.value)} /></label>
-      <label className="grid gap-1 text-sm"><span>Sender address</span><Input disabled={!isAdmin} value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-    </div>
-    {isAdmin ? <div className="mt-3 grid gap-3">
-      <label className="grid gap-1 text-sm">SMTP security
-        <select className="h-10 rounded-md border border-input bg-background px-2 text-sm" value={security} onChange={(e) => setSecurity(e.target.value)}>
-          <option value="local">Local SMTP without authentication</option><option value="starttls">STARTTLS</option><option value="tls">TLS</option>
-        </select>
-      </label>
-      {security !== "local" ? <div className="grid gap-3 sm:grid-cols-2">
-        <label className="grid gap-1 text-sm">SMTP username<Input value={smtpUser} onChange={(e) => setSmtpUser(e.target.value)} autoComplete="off" /></label>
-        <label className="grid gap-1 text-sm">SMTP password<Input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} autoComplete="new-password" /></label>
-      </div> : null}
-      <label className="grid min-w-0 gap-1 text-sm">Resend API key
-        <Input type="password" autoComplete="new-password" value={resendKey} onChange={(e) => setResendKey(e.target.value)} placeholder="Leave blank to keep current token" />
-      </label>
-      {live ? <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={allowLiveReplies} onChange={(event) => setAllowLiveReplies(event.target.checked)} /> Enable approved live replies for this workspace</label> : null}
-      {!authenticationValid ? <p className="text-xs text-warning">Enter the SMTP username and password together and select TLS or STARTTLS.</p> : null}
-      <Button size="sm" className="justify-self-start" onClick={() => save.mutate()} disabled={!authenticationValid || save.isPending}>{save.isPending ? "Saving…" : "Save email settings"}</Button>
-    </div> : null}
+    <p className="mt-3 rounded-md border border-border bg-accent px-3 py-2 text-sm leading-6 text-foreground">{live ? "Live replies require a verified domain, a verified SMTP connection and workspace approval." : "Approved sandbox replies already go to the mailbox on this machine. No SMTP change is required."}</p>
+    {live ? null : <p className="mt-3 text-sm leading-6 text-muted-foreground">Open the section below only when you are preparing Resend or a live relay. Those fields do not send customer mail while this workspace stays in sandbox.</p>}
+    {isAdmin ? (live ? <div className="mt-4 grid gap-3">{emailRelayFields}</div> : (
+      <details className="mt-4 border-t border-border pt-3">
+        <summary className="cursor-pointer text-sm font-medium">Prepare live SMTP and Resend</summary>
+        <div className="mt-3 grid gap-3">{emailRelayFields}</div>
+      </details>
+    )) : null}
     {record && isAdmin ? <MessagingConnectionControls organizationId={organizationId} type="email" record={record} onChanged={onChanged} onVersion={setVersion} /> : null}
     <details className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">
       <summary className="cursor-pointer font-medium text-foreground">Inbound email gateway</summary>
@@ -600,6 +655,14 @@ function EmailSettingsCard({
   </div>;
 }
 
+function reindexFailure(code: string) {
+  if (code === "embedding_configuration_changed") return "Provider settings changed during the build. Reload and try again.";
+  if (code === "embedding_unavailable") return "Ollama or the embedding endpoint could not be reached. The previous index is unchanged.";
+  if (code === "embedding_dimension_mismatch") return "The model returned a different vector width. Choose 768 or 1536 to match the model.";
+  if (code === "reindex_provider_invalid") return "Use Ollama on this machine, OpenAI, or this deployment's embedding endpoint.";
+  return "Check the target credentials, endpoint, and vector dimensions before retrying.";
+}
+
 function ProviderCard({
   organizationId, type, title, record, isAdmin, onChanged,
 }: { organizationId: string; type: Exclude<IntegrationType, "n8n">; title: string; record?: IntegrationMetadata; isAdmin: boolean; onChanged: () => void }) {
@@ -607,7 +670,7 @@ function ProviderCard({
   const [version, setVersion] = useState(record?.credential_version);
   const [provider, setProvider] = useState(record?.provider ?? (type === "chat" ? "groq" : "ollama"));
   const [model, setModel] = useState(String(record?.config.model ?? (type === "chat" ? "openai/gpt-oss-20b" : "nomic-embed-text:v1.5")));
-  const [baseUrl, setBaseUrl] = useState(String(record?.config.base_url ?? (type === "chat" ? "https://api.groq.com/openai/v1" : "http://ollama:11434/v1")));
+  const [baseUrl, setBaseUrl] = useState(String(record?.config.base_url ?? (type === "chat" ? "https://api.groq.com/openai/v1" : "http://127.0.0.1:11434/v1")));
   const [dimensions, setDimensions] = useState(String(record?.config.dimensions ?? (type === "embedding" ? "768" : "")));
   const [secret, setSecret] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -646,13 +709,28 @@ function ProviderCard({
   const fallback = !record;
   return (
     <section aria-label={title} className="min-w-0 rounded-[10px] border border-border bg-background p-4">
-      <div className="flex items-start justify-between gap-2"><div><h3 className="font-medium">{title}</h3><p className="mt-1 text-xs text-muted-foreground">{fallback ? "Using environment default" : `${record.status.replace("_", " ")} · version ${record.credential_version}`}</p></div><Badge variant="secondary">{fallback ? "Fallback" : record.has_credentials ? "Key installed" : "No key"}</Badge></div>
+      <div className="flex items-start justify-between gap-2"><div><h3 className="font-medium">{title}</h3><p className="mt-1 text-xs text-muted-foreground">{fallback ? "Using environment default" : `${record.status.replaceAll("_", " ")} · version ${record.credential_version}`}</p></div><Badge variant="secondary">{fallback ? "Fallback" : record.has_credentials ? "Key installed" : type === "embedding" && provider === "ollama" ? "Local" : "No key"}</Badge></div>
+      {type === "embedding" ? <ol className="mt-3 list-decimal space-y-1 pl-4 text-xs leading-5 text-muted-foreground"><li>Choose Ollama on this machine, or OpenAI when an external account is approved.</li><li>Save, then test the connection. Local Ollama does not need an API key.</li><li>When documents already exist, build a replacement index before switching models. Cancel leaves the current index in place.</li></ol> : null}
       <div className="mt-4 grid gap-3">
-        <label className="grid gap-1 text-sm"><span>Provider</span><select disabled={!isAdmin} value={provider} onChange={(event) => setProvider(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3"><option value={type === "chat" ? "groq" : "ollama"}>{type === "chat" ? "Groq" : "Ollama"}</option><option value="openai">OpenAI</option></select></label>
+        <label className="grid gap-1 text-sm"><span>Provider</span><select disabled={!isAdmin} value={provider} onChange={(event) => {
+          const next = event.target.value;
+          setProvider(next);
+          if (type !== "embedding") return;
+          if (next === "ollama") {
+            setBaseUrl("http://127.0.0.1:11434/v1");
+            setDimensions("768");
+            setModel((current) => current.trim() && current !== "text-embedding-3-small" ? current : "nomic-embed-text:v1.5");
+          } else {
+            setBaseUrl("https://api.openai.com/v1");
+            setDimensions("1536");
+            setModel((current) => current === "nomic-embed-text:v1.5" ? "text-embedding-3-small" : current);
+          }
+        }} className="h-10 rounded-md border border-input bg-background px-3"><option value={type === "chat" ? "groq" : "ollama"}>{type === "chat" ? "Groq" : "Ollama on this machine"}</option><option value="openai">OpenAI</option></select></label>
         <label className="grid gap-1 text-sm"><span>Model</span><Input disabled={!isAdmin} value={model} onChange={(event) => setModel(event.target.value)} /></label>
         <label className="grid gap-1 text-sm"><span>Base URL</span><Input disabled={!isAdmin} value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} /></label>
         {type === "embedding" ? <label className="grid gap-1 text-sm"><span>Vector dimensions</span><select disabled={!isAdmin} value={dimensions} onChange={(event) => setDimensions(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3"><option value="768">768 · Ollama</option><option value="1536">1536 · OpenAI-compatible</option></select></label> : null}
-        {isAdmin ? <label className="grid gap-1 text-sm"><span>{record?.has_credentials ? "Replace API key" : "API key"}</span><Input type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={record?.has_credentials ? "Leave blank to keep current key" : "Enter key"} /></label> : null}
+        {isAdmin && !(type === "embedding" && provider === "ollama") ? <label className="grid gap-1 text-sm"><span>{record?.has_credentials ? "Replace API key" : "API key"}</span><Input type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={record?.has_credentials ? "Leave blank to keep current key" : "Enter key"} /></label> : null}
+        {type === "embedding" && provider === "ollama" ? <p className="text-xs leading-5 text-muted-foreground">Local Ollama does not need an API key. Use port 11434 on this machine when the API runs here. A containerized API should use its Ollama service address instead.</p> : null}
       </div>
       {type === "embedding" && isAdmin ? <section aria-label="Embedding index migration" className="mt-4 space-y-2 rounded-lg border border-border p-3">
         <h4 className="text-sm font-semibold">Replace the knowledge index</h4>
@@ -662,14 +740,20 @@ function ProviderCard({
             reindexStatus === "completed" ? `${reindex.data.model} is active.` :
             reindexStatus === "failed" ? "Build failed. The previous index is still active." : "Build cancelled. The previous index is still active."}
         </p> : null}
-        {reindex.data?.error_code ? <p className="text-xs text-muted-foreground">{reindex.data.error_code === "embedding_configuration_changed" ? "Provider settings changed during the build. Reload and try again." : "Check the target credentials, endpoint, and vector dimensions before retrying."}</p> : null}
+        {reindex.data?.error_code ? <p className="text-xs text-muted-foreground">{reindexFailure(reindex.data.error_code)}</p> : null}
         {reindex.error || rebuild.error || cancelBuild.error ? <RequestError error={reindex.error ?? rebuild.error ?? cancelBuild.error} /> : null}
         {reindexStatus === "building" ?
           <Button size="sm" variant="outline" disabled={cancelBuild.isPending} onClick={() => cancelBuild.mutate()}>Cancel build</Button> :
-          <Button size="sm" variant="outline" disabled={reindex.isPending || rebuild.isPending || !model.trim() || !baseUrl.trim()} onClick={() => rebuild.mutate()}>Build replacement index</Button>}
+          <Button size="sm" variant="outline" disabled={reindex.isPending || rebuild.isPending || !model.trim() || !baseUrl.trim()} onClick={() => {
+            let host = "";
+            try { host = new URL(baseUrl.trim()).hostname; } catch { setMessage("Enter a valid embedding address before building an index."); return; }
+            const local = host === "127.0.0.1" || host === "localhost" || host === "::1";
+            if (!local && !window.confirm(`This build sends document passages to ${host}. Continue only when that provider is approved.`)) return;
+            rebuild.mutate();
+          }}>Build replacement index</Button>}
       </section> : null}
       {message ? <p className="mt-3 text-xs leading-5 text-muted-foreground" role="status">{message}</p> : null}
-  {isAdmin ? <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>{record ? <Button size="sm" variant="outline" onClick={() => verify.mutate()} disabled={verify.isPending || record.status === "disabled"}>{verify.isPending ? "Testing…" : "Test connection"}</Button> : null}{record ? <Button size="sm" variant="ghost" onClick={() => { const kind = record.status === "disabled" ? "enable" : "disable"; if (kind === "enable" || window.confirm("Change this integration state?")) action.mutate(kind); }} disabled={action.isPending}>{record.status === "disabled" ? "Enable" : "Disable"}</Button> : null}{record?.has_credentials ? <Button size="sm" variant="ghost" onClick={() => { if (window.confirm("Revoke this integration credential?")) action.mutate("revoke"); }} disabled={action.isPending}>Revoke key</Button> : null}</div> : null}
+  {isAdmin ? <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>{record || type === "chat" || type === "embedding" ? <Button size="sm" variant="outline" onClick={() => verify.mutate()} disabled={verify.isPending || record?.status === "disabled"}>{verify.isPending ? "Testing…" : record ? "Test connection" : "Test current connection"}</Button> : null}{record ? <Button size="sm" variant="ghost" onClick={() => { const kind = record.status === "disabled" ? "enable" : "disable"; if (kind === "enable" || window.confirm("Change this integration state?")) action.mutate(kind); }} disabled={action.isPending}>{record.status === "disabled" ? "Enable" : "Disable"}</Button> : null}{record?.has_credentials ? <Button size="sm" variant="ghost" onClick={() => { if (window.confirm("Revoke this integration credential?")) action.mutate("revoke"); }} disabled={action.isPending}>Revoke key</Button> : null}</div> : null}
     </section>
   );
 }

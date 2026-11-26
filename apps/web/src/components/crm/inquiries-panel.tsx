@@ -221,8 +221,8 @@ function InquiryEditor({
     <aside className="rounded-[10px] bg-muted p-6" data-testid="crm-detail-inquiries" data-record-id={inquiry.id} data-archived={inquiry.archived_at ? "true" : "false"}>
       <h2 className="text-base font-semibold">{inquiry.subject}</h2>
       <div className="mt-3 border-t border-border pt-3 text-sm"><h3 className="font-medium">Related records</h3><div className="mt-2 grid gap-1">
-        {inquiry.company_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "companies", id: inquiry.company_id! })}>{companies.find((item) => item.id === inquiry.company_id)?.name ?? "Company"}</button> : null}
-        {inquiry.lead_id ? <button className="text-left text-accent underline" onClick={() => onNavigate({ tab: "leads", id: inquiry.lead_id! })}>{leads.find((item) => item.id === inquiry.lead_id)?.title ?? "Lead"}</button> : null}
+        {inquiry.company_id ? <button className="text-left text-primary underline" onClick={() => onNavigate({ tab: "companies", id: inquiry.company_id! })}>{companies.find((item) => item.id === inquiry.company_id)?.name ?? "Company"}</button> : null}
+        {inquiry.lead_id ? <button className="text-left text-primary underline" onClick={() => onNavigate({ tab: "leads", id: inquiry.lead_id! })}>{leads.find((item) => item.id === inquiry.lead_id)?.title ?? "Lead"}</button> : null}
       </div></div>
       <div className="mt-4">
         <InquiryFields form={form} formId="inquiry-edit" companies={companies} leads={leads} onSubmit={(values) => save.mutate(values)} />
