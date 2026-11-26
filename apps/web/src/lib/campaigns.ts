@@ -2,7 +2,7 @@ import { apiFetch } from "@/lib/api";
 export type Segment = { id: string; name: string; definition: { logic: string; conditions: { field: string; operator: string; value: string }[] }; preview: { contacts: number; leads: number } };
 type DeliveryMode = "sandbox" | "live";
 export type Campaign = { id: string; name: string; status: string; channel: string; segment_id: string | null; subject: string | null; body: string | null; description: string | null; updated_at: string; scheduled_at: string | null; finished_at: string | null; delivery_mode: DeliveryMode };
-export type CampaignDeliveryStatus = "queued" | "sending" | "accepted" | "delivered" | "bounced" | "complained" | "skipped" | "failed" | "needs_attention" | "cancelled";
+export type CampaignDeliveryStatus = "queued" | "sending" | "accepted" | "delivered" | "bounced" | "complained" | "skipped" | "failed" | "needs_attention" | "cancelled" | "simulated";
 type CampaignDetail = Campaign & { deliveries: Partial<Record<CampaignDeliveryStatus, number>> };
 type CampaignRecipient = { id: string; email: string; status: CampaignDeliveryStatus };
 type CampaignSuppression = { email: string; reason: string; created_at: string };

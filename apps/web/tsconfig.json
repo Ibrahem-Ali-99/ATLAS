@@ -76,12 +76,17 @@
     ".next-release-check-browser/types/**/*.ts",
     ".next-release-check-browser/dev/types/**/*.ts",
     ".next-release-check-browser-2/types/**/*.ts",
-    ".next-release-check-browser-2/dev/types/**/*.ts"
+    ".next-release-check-browser-2/dev/types/**/*.ts",
+    ".next-portfolio/types/**/*.ts",
+    ".next-portfolio/dev/types/**/*.ts",
+    ".next-e2e-harbor/types/**/*.ts",
+    ".next-e2e-harbor/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     ".next-e2e",
     "src/lib/api-base.test.ts",
-    "src/lib/public-catalog.test.ts"
+    "src/lib/public-catalog.test.ts",
+    "src/lib/public-site.test.ts"
   ]
 }

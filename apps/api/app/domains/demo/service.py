@@ -7,14 +7,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import delete, exists, func, select, text
+from sqlalchemy import delete, exists, func, or_, select, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.security import hash_password
-from app.domains.assistant.models import Message, MessageRole
+from app.domains.assistant.models import Conversation, Message, MessageRole
 from app.domains.demo import access as demo_access
 from app.domains.demo.access import (
     MAX_ASSISTANT_REPLIES,
@@ -28,6 +28,11 @@ from app.domains.demo.access import (
     is_visitor_email,
     is_visitor_slug,
     launch_blocked_reason,
+)
+from app.domains.demo.harbor_catalog import (
+    SEEDED_ASSISTANT_CONTENT,
+    SEEDED_CONVERSATION_TITLE,
+    seeded_document_hashes,
 )
 from app.domains.demo.records import populate_visitor
 from app.domains.identity.models import Membership, MembershipRole, Organization, User, UserSession
@@ -131,15 +136,33 @@ def cleanup_expired(db: Session) -> int:
 def enforce_demo_assistant(db: Session, organization: Organization) -> None:
     if not is_visitor_slug(organization.slug):
         return
-    count = db.scalar(
-        select(func.count())
-        .select_from(Message)
-        .where(
-            Message.organization_id == organization.id,
-            Message.role == MessageRole.assistant,
+    total = int(
+        db.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(
+                Message.organization_id == organization.id,
+                Message.role == MessageRole.assistant,
+            )
         )
+        or 0
     )
-    if int(count or 0) >= MAX_ASSISTANT_REPLIES:
+    seeded = int(
+        db.scalar(
+            select(func.count())
+            .select_from(Message)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Message.organization_id == organization.id,
+                Message.role == MessageRole.assistant,
+                Conversation.title == SEEDED_CONVERSATION_TITLE,
+                Message.content == SEEDED_ASSISTANT_CONTENT,
+            )
+        )
+        or 0
+    )
+    # The prepared reply is not a visitor question. One matching row is ignored.
+    if total - min(seeded, 1) >= MAX_ASSISTANT_REPLIES:
         raise AppError(
             429,
             "demo_limited",
@@ -156,9 +179,11 @@ def enforce_demo_upload(db: Session, organization: Organization, extra_bytes: in
             "demo_limited",
             "Demo uploads are limited to 200 KB.",
         )
+    hashes = seeded_document_hashes()
     count, total = db.execute(
         select(func.count(), func.coalesce(func.sum(Document.byte_size), 0)).where(
-            Document.organization_id == organization.id
+            Document.organization_id == organization.id,
+            or_(Document.content_sha256.is_(None), Document.content_sha256.notin_(tuple(hashes))),
         )
     ).one()
     if int(count) >= MAX_DOCUMENTS:

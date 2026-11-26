@@ -117,7 +117,9 @@ def test_anonymous_launch_opens_harbor_and_blocks_credentials(client: TestClient
         headers=headers,
     )
     assert reply.status_code == 200, reply.text
-    assert "Bonded warehousing is available at the north pier yard." in reply.text
+    assert reply.json()["message"]["content"] == (
+        "Bonded warehousing is available at the north pier yard."
+    )
     status = client.get(f"/api/v1/organizations/{organization_id}/provider-status")
     assert status.status_code == 200, status.text
     payload = status.json()
@@ -319,7 +321,10 @@ def test_campaign_schedule_is_refused(client: TestClient, db) -> None:
     from app.domains.campaigns.models import Campaign
 
     campaign = db.scalar(
-        select(Campaign).where(Campaign.organization_id == uuid.UUID(organization_id))
+        select(Campaign).where(
+            Campaign.organization_id == uuid.UUID(organization_id),
+            Campaign.name == "Q3 cold-storage briefing",
+        )
     )
     assert campaign is not None
     campaign_id = campaign.id
