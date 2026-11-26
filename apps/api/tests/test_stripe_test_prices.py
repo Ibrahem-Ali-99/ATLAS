@@ -106,6 +106,23 @@ def test_catalog_creation_is_reused(tmp_path) -> None:
     assert text.index("ATLAS_WHATSAPP_LIVE_ENABLED") < text.index("ATLAS_BILLING_PROVIDER")
 
 
+def test_product_metadata_is_read_from_stripe_objects() -> None:
+    class _Metadata:
+        def __iter__(self):
+            raise TypeError("StripeObject is not iterable")
+
+        def to_dict(self) -> dict[str, str]:
+            return {"atlas_plan": "starter", "atlas_catalog": "test"}
+
+    catalog = _Catalog()
+    catalog._products.append(
+        SimpleNamespace(id="prod_existing", livemode=False, metadata=_Metadata())
+    )
+    mapping = ensure_test_catalog(catalog)
+    assert mapping["starter:monthly"].startswith("price_")
+    assert len(catalog.created_products) == 2
+
+
 def test_existing_price_with_a_different_amount_is_not_replaced() -> None:
     catalog = _Catalog()
     ensure_test_catalog(catalog)

@@ -129,3 +129,20 @@ Use a disposable organization and the test cards below. Do not use a live card.
 10. After cancellation, Billing shows Free limits and offers a new Checkout. The old subscription does not stay entitled.
 
 Record the workspace, the test-mode customer, the time, and the observed plan before and after each event. Leave the secret key, webhook secret, and price ids out of the evidence notes.
+
+## Acceptance record
+
+Observed on 2026-11-26 in Stripe test mode. The workspace was the disposable organization `northwind`. The shared API on port 8000 was left running for the other development session, so these checks used an isolated API and database.
+
+- Billing reported Stripe mode and Free limits, 2 seats, before payment.
+- Checkout for Starter monthly with `4242 4242 4242 4242` completed. Before the webhook was delivered, the plan and limits stayed Free.
+- The signed `checkout.session.completed` event made the workspace Starter, monthly, active, with 5 seats. Manage billing was available.
+- Sending that same event again returned `already_processed`. The plan did not change.
+- The billing portal showed invoice history and a return link to `/billing?portal=return`.
+- An upgrade to Pro applied after Stripe confirmed the invoice: active, 20 seats.
+- A downgrade scheduled for the end of the period left the Pro limits in place.
+- Cancellation at period end kept the paid limits and Billing reported `cancels_at_period_end`. After the subscription ended, limits returned to Free, 2 seats, and Checkout was available again.
+- Card `4000 0000 0000 9995` was declined. The paid plan was not granted.
+- A test-clock renewal with the charge-customer-fail token moved the subscription to past due. The recorded plan stayed Starter, entitled limits returned to Free, attention was `payment_failed`, and a second Checkout was not offered. Paying that open invoice with the Visa test token restored Starter, active, 5 seats.
+
+A second catalog run reused the same three test products and six prices.

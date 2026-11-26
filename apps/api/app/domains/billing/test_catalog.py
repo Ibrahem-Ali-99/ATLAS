@@ -163,9 +163,15 @@ def _metadata(row: Any) -> dict[str, str]:
     metadata = getattr(row, "metadata", None)
     if metadata is None:
         return {}
-    if isinstance(metadata, dict):
-        return {str(key): str(value) for key, value in metadata.items()}
-    return {str(key): str(value) for key, value in dict(metadata).items()}
+    if hasattr(metadata, "to_dict"):
+        raw = metadata.to_dict()
+    elif isinstance(metadata, dict):
+        raw = metadata
+    else:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): str(value) for key, value in raw.items()}
 
 
 def _identifier(row: Any) -> str | None:
