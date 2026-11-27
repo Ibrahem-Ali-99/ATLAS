@@ -128,9 +128,10 @@ function useInboxModel(onToast: (message: string) => void) {
   };
 }
 
-export function InboxWorkspace({ onToast, onOpenCrm }: { onToast: (message: string) => void; onOpenCrm?: (section: "Companies" | "Contacts" | "Leads", query: string) => void }) {
+export function InboxWorkspace({ onToast, onOpenCrm, focusQuery = "" }: { onToast: (message: string) => void; onOpenCrm?: (section: "Companies" | "Contacts" | "Leads", query: string) => void; focusQuery?: string }) {
   const model = useInboxModel(onToast);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  useEffect(() => { if (focusQuery) model.setSearch(focusQuery); }, [focusQuery, model.setSearch]);
   const openCount = model.conversations.filter((item) => item.status === "Open").length;
 
   return (

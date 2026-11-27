@@ -18,8 +18,15 @@ export function BillingWorkspace({ onToast }: { onToast: (message: string) => vo
   const sandbox = billing?.mode !== "stripe";
   const startCheckout = (planCode: string) => {
     if (billing?.mode === "stripe") {
-      setNotice("Checkout would open a payment provider. This screen does not start a charge.");
-      setUnavailable("checkout");
+      setWorking(true);
+      void checkoutBilling(planCode).then((result) => {
+        if (result.checkout_url?.startsWith("http")) {
+          window.location.assign(result.checkout_url);
+          return;
+        }
+        setNotice("Checkout did not return a provider address.");
+        setUnavailable("checkout");
+      }).catch((error: unknown) => { setNotice(failureMessage(error)); setUnavailable("checkout"); }).finally(() => setWorking(false));
       return;
     }
     setPendingPlan(planCode);
@@ -28,26 +35,28 @@ export function BillingWorkspace({ onToast }: { onToast: (message: string) => vo
     if (!pendingPlan) return;
     setWorking(true);
     void checkoutBilling(pendingPlan).then((result) => {
-      setNotice(result.mode === "sandbox" ? `Sandbox plan recorded as ${result.status}.` : "The provider returned a checkout session. This screen does not open it.");
+      setNotice(result.mode === "sandbox" ? `Sandbox plan recorded as ${result.status}.` : "Checkout returned a provider session.");
       setPendingPlan(null);
       setUnavailable(null);
       return refresh();
     }).catch((error: unknown) => setNotice(failureMessage(error))).finally(() => setWorking(false));
   };
   const openPortal = () => {
-    if (billing?.mode === "stripe") {
-      setNotice("The billing portal would open a payment provider. This screen does not open it.");
-      setUnavailable("portal");
-      return;
-    }
     setWorking(true);
-    void openBillingPortal().then(() => setNotice("The billing provider returned a portal session.")).catch((error: unknown) => { setNotice(failureMessage(error)); setUnavailable("portal"); }).finally(() => setWorking(false));
+    void openBillingPortal().then((result) => {
+      if (result.portal_url?.startsWith("http")) {
+        window.location.assign(result.portal_url);
+        return;
+      }
+      setNotice("The billing portal did not return an address.");
+      setUnavailable("portal");
+    }).catch((error: unknown) => { setNotice(failureMessage(error)); setUnavailable("portal"); }).finally(() => setWorking(false));
   };
   return <main className="module-main billing-main">
     <div className="module-heading"><div><div className="eyebrow"><span className="live-dot" /> Subscription management</div><h1>Billing</h1><p>Review the stored plan, usage, and whether a payment provider can be opened.</p></div><Badge tone={sandbox ? "amber" : "green"}><AlertCircle size={13} /> {billing?.mode || "Loading"}</Badge></div>
     <div className="billing-alert"><AlertCircle size={18} /><span><strong>{billing?.checkout_available ? "Checkout can be opened" : "Checkout cannot start a payment"}</strong><p>{notice || (billing ? `Plan ${billing.subscription.plan_code} is ${billing.subscription.status}. Billing mode is ${billing.mode}.` : "Loading billing status.")}</p></span></div>
     <section className="billing-grid">
-      <article className="settings-card current-plan"><div className="plan-heading"><span className="integration-icon badge-purple"><Sparkles size={18} /></span><span><small>Current plan</small><strong>{billing?.subscription.plan_code || "Unknown"}</strong></span><Badge tone={sandbox ? "amber" : "green"}>{billing?.subscription.status || "Unknown"}</Badge></div><p>{billing?.checkout_available ? "A sandbox plan change is recorded by the API. A card payment is not started from this screen." : "Checkout is unavailable, so no card is charged from this screen."}</p><div className="plan-actions"><Button variant="primary" disabled={!billing?.checkout_available} onClick={() => billing && startCheckout(billing.subscription.plan_code)}>Manage plan <ArrowRight size={14} /></Button><Button disabled={working} onClick={openPortal}>Billing portal <ExternalLink size={14} /></Button></div></article>
+      <article className="settings-card current-plan"><div className="plan-heading"><span className="integration-icon badge-purple"><Sparkles size={18} /></span><span><small>Current plan</small><strong>{billing?.subscription.plan_code || "Unknown"}</strong></span><Badge tone={sandbox ? "amber" : "green"}>{billing?.subscription.status || "Unknown"}</Badge></div><p>{billing?.mode === "stripe" ? "Checkout and the billing portal open the payment provider. Completing payment happens there." : "A sandbox plan change is recorded only after confirmation. It does not charge a card."}</p><div className="plan-actions"><Button variant="primary" disabled={!billing?.checkout_available} onClick={() => billing && startCheckout(billing.subscription.plan_code)}>Manage plan <ArrowRight size={14} /></Button><Button disabled={working} onClick={openPortal}>Billing portal <ExternalLink size={14} /></Button></div></article>
       <article className="settings-card payment-state"><CreditCard size={20} /><div><strong>{billing?.checkout_available ? "Checkout can be opened" : "Checkout is unavailable"}</strong><p>{billing?.portal_available ? "The billing portal can be opened." : "The billing portal is not available."} No payment is recorded from this screen.</p></div><Badge tone={billing?.checkout_available ? "blue" : "red"}>{billing?.checkout_available ? "Available" : "Unavailable"}</Badge></article>
     </section>
     <div className="billing-sections">

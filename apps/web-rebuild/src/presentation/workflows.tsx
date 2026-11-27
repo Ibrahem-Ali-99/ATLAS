@@ -30,7 +30,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { createWorkflowRow, failureMessage, listWorkflowRunRows, listWorkflows, relativeTime, startWorkflow, updateWorkflowRow, workflowCommand, type WorkflowRunDetail } from "@/data/resources";
+import { createWorkflowRow, failureMessage, listLeadChoices, listWorkflowRunRows, listWorkflows, relativeTime, reviewWorkflowRun, startWorkflow, updateWorkflowRow, workflowCommand, type WorkflowRunDetail } from "@/data/resources";
 import { Badge, Button, Modal, type Tone } from "./components";
 
 type WorkflowStatus = "Active" | "Paused" | "Draft" | "Error";
@@ -47,6 +47,8 @@ type WorkflowDefinition = {
   runs: number;
   owner: string;
   actions: { type: string; title?: string; note?: string }[];
+  conditions: { value: string }[];
+  otherwise: { type: string; title?: string; note?: string }[];
   interval?: number;
   integrationError?: boolean;
   restricted?: boolean;
@@ -71,6 +73,11 @@ export function WorkflowsWorkspace({ onToast }: { onToast: (message: string) => 
   const [name, setName] = useState("");
   const [editorTrigger, setEditorTrigger] = useState<Trigger>("Record created");
   const [schedule, setSchedule] = useState("Every day");
+  const [condition, setCondition] = useState("qualified");
+  const [otherwiseTitle, setOtherwiseTitle] = useState("");
+  const [runOpen, setRunOpen] = useState(false);
+  const [leads, setLeads] = useState<{ id: string; title: string }[]>([]);
+  const [runLead, setRunLead] = useState("");
   const [runDetail, setRunDetail] = useState(false);
   const [loading, setLoading] = useState(false);
   const filtered = useMemo(() => workflows.filter((workflow) =>
@@ -78,8 +85,8 @@ export function WorkflowsWorkspace({ onToast }: { onToast: (message: string) => 
     (status === "All statuses" || workflow.status === status) &&
     (trigger === "All triggers" || workflow.trigger === trigger),
   ), [workflows, search, status, trigger]);
-  const selected = workflows.find((workflow) => workflow.id === selectedId) || workflows[0] || { id: "", name: "No workflows", slug: "", version: 1, description: "This workspace has no workflow definitions.", status: "Draft" as WorkflowStatus, trigger: "Record created" as Trigger, updated: "", runs: 0, owner: "", actions: [] };
-  const mapWorkflow = (row: { id: string; name: string; slug: string; version: number; description: string | null; active: boolean; definition: { trigger: string; actions?: { type: string; title?: string; note?: string }[]; interval_seconds?: number }; updated_at: string; last_run_at: string | null }): WorkflowDefinition => ({
+  const selected = workflows.find((workflow) => workflow.id === selectedId) || workflows[0] || { id: "", name: "No workflows", slug: "", version: 1, description: "This workspace has no workflow definitions.", status: "Draft" as WorkflowStatus, trigger: "Record created" as Trigger, updated: "", runs: 0, owner: "", actions: [], conditions: [], otherwise: [] };
+  const mapWorkflow = (row: { id: string; name: string; slug: string; version: number; description: string | null; active: boolean; definition: { trigger: string; actions?: { type: string; title?: string; note?: string }[]; otherwise_actions?: { type: string; title?: string; note?: string }[]; conditions?: { value: string }[]; interval_seconds?: number }; updated_at: string; last_run_at: string | null }): WorkflowDefinition => ({
     id: row.id,
     name: row.name,
     slug: row.slug,
@@ -91,6 +98,8 @@ export function WorkflowsWorkspace({ onToast }: { onToast: (message: string) => 
     runs: 0,
     owner: row.last_run_at ? `Last run ${relativeTime(row.last_run_at)}` : "No runs recorded",
     actions: row.definition?.actions || [],
+    conditions: row.definition?.conditions || [],
+    otherwise: row.definition?.otherwise_actions || [],
     interval: row.definition?.interval_seconds,
   });
   const reload = () => listWorkflows().then((rows) => {
@@ -111,11 +120,14 @@ export function WorkflowsWorkspace({ onToast }: { onToast: (message: string) => 
     setName(workflow?.name || "");
     setEditorTrigger(workflow?.trigger || "Record created");
     setSchedule(intervalLabel(workflow?.interval) === "No interval stored" ? "Every day" : intervalLabel(workflow?.interval));
+    setCondition(workflow?.conditions[0]?.value || "qualified");
+    setOtherwiseTitle(workflow?.otherwise.find((action) => action.type === "create_task")?.title || "");
     setEditorOpen(true);
   };
   const save = () => {
     const interval = intervalSeconds(schedule);
-    const request = editing ? updateWorkflowRow(editing, name, editorTrigger, interval) : createWorkflowRow(name, editorTrigger, interval);
+    const branch = { condition, otherwiseTitle };
+    const request = editing ? updateWorkflowRow(editing, name, editorTrigger, interval, branch) : createWorkflowRow(name, editorTrigger, interval, branch);
     void request.then((saved) => {
       const next = mapWorkflow(saved);
       setWorkflows((current) => editing ? current.map((workflow) => workflow.id === saved.id ? next : workflow) : [next, ...current]);
@@ -137,10 +149,28 @@ export function WorkflowsWorkspace({ onToast }: { onToast: (message: string) => 
     if (!selected.id) return;
     void workflowCommand(selected.id, "duplicate").then(() => { onToast("Workflow duplicated"); return reload(); }).catch((error: unknown) => onToast(failureMessage(error)));
   };
+  const needsLead = selected.trigger === "Record created" || selected.trigger === "Status changed";
+  const executeRun = (dryRun: boolean) => {
+    if (!selected.id || (needsLead && !runLead)) return;
+    setLoading(true);
+    void startWorkflow(selected.id, dryRun, needsLead ? { leadId: runLead } : undefined).then(() => {
+      setRunOpen(false);
+      setRunDetail(true);
+      onToast(dryRun ? "Dry run recorded. No records were changed." : "Local run recorded.");
+      return listWorkflowRunRows(selected.id).then(setRuns);
+    }).catch((error: unknown) => onToast(failureMessage(error))).finally(() => setLoading(false));
+  };
   const testRun = () => {
     if (!selected.id) return;
-    setLoading(true);
-    void startWorkflow(selected.id, true).then(() => { setRunDetail(true); onToast("Dry run recorded. No records were changed."); return listWorkflowRunRows(selected.id).then(setRuns); }).catch((error: unknown) => onToast(failureMessage(error))).finally(() => setLoading(false));
+    if (!needsLead) {
+      setLoading(true);
+      void startWorkflow(selected.id, true).then(() => { setRunDetail(true); onToast("Dry run recorded. No records were changed."); return listWorkflowRunRows(selected.id).then(setRuns); }).catch((error: unknown) => onToast(failureMessage(error))).finally(() => setLoading(false));
+      return;
+    }
+    listLeadChoices().then((rows) => { setLeads(rows); setRunLead(rows[0]?.id || ""); setRunOpen(true); }).catch((error: unknown) => onToast(failureMessage(error)));
+  };
+  const review = (runId: string, decision: "approve" | "reject") => {
+    void reviewWorkflowRun(selected.id, runId, decision).then(() => { onToast(decision === "approve" ? "Internal step approved" : "Workflow run rejected"); return listWorkflowRunRows(selected.id).then(setRuns); }).catch((error: unknown) => onToast(failureMessage(error)));
   };
   return (
     <main className="module-main operations-main workflows-main">
@@ -158,7 +188,9 @@ export function WorkflowsWorkspace({ onToast }: { onToast: (message: string) => 
           {selected.integrationError && <div className="state-banner error"><Link2Off size={16} /><span><strong>Integration unavailable</strong><small>The external project channel is not connected. Live delivery cannot be configured.</small></span><Button size="sm" disabled>Configure</Button></div>}
           <div className="workflow-canvas">
             <WorkflowNode icon={Zap} kind="Trigger" title={selected.trigger} detail={selected.trigger === "Schedule" ? intervalLabel(selected.interval) : "Stored trigger"} />
-            {selected.actions.length ? selected.actions.map((action) => <span className="workflow-step" key={`${action.type}-${action.title || action.note || ""}`}><span className="workflow-connector" /><WorkflowNode icon={action.type === "require_approval" ? BadgeCheck : Sparkles} kind={action.type === "require_approval" ? "Approval" : "Action"} title={action.title || action.note || action.type.replaceAll("_", " ")} detail="Stored workflow step" approval={action.type === "require_approval"} /></span>) : null}
+            {selected.conditions.map((entry) => <span className="workflow-step" key={entry.value}><span className="workflow-connector" /><WorkflowNode icon={GitBranch} kind="Condition" title={`Lead status equals ${entry.value}`} detail="Matching records follow this path" /></span>)}
+            {selected.actions.length ? selected.actions.map((action) => <span className="workflow-step" key={`match-${action.type}-${action.title || action.note || ""}`}><span className="workflow-connector" /><WorkflowNode icon={action.type === "require_approval" ? BadgeCheck : Sparkles} kind={action.type === "require_approval" ? "Approval" : "Matched action"} title={action.title || action.note || action.type.replaceAll("_", " ")} detail="Stored workflow step" approval={action.type === "require_approval"} /></span>) : null}
+            {selected.otherwise.map((action) => <span className="workflow-step" key={`else-${action.type}-${action.title || action.note || ""}`}><span className="workflow-connector" /><WorkflowNode icon={GitBranch} kind="Otherwise" title={action.title || action.note || action.type.replaceAll("_", " ")} detail="Used when the condition does not match" /></span>)}
           </div>
           <div className="workflow-bottom-grid">
             <section><div className="section-title"><h3>Schedule</h3><CalendarClock size={15} /></div>{selected.trigger === "Schedule" ? <div className="schedule-card"><strong>{intervalLabel(selected.interval)}</strong><span>Stored repeat interval</span></div> : <div className="module-empty compact"><Clock3 size={20} /><strong>Event-triggered</strong><p>No recurring schedule is stored.</p></div>}</section>
@@ -168,11 +200,16 @@ export function WorkflowsWorkspace({ onToast }: { onToast: (message: string) => 
       </div>
 
       <Modal open={editorOpen} title={editing ? "Edit workflow" : "New workflow"} description="Configure a local workflow definition. Activation is a separate action." onClose={() => setEditorOpen(false)}>
-        <div className="dialog-body"><label className="field"><span>Workflow name</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Describe the workflow outcome" /></label><label className="field"><span>Trigger</span><select value={editorTrigger} onChange={(event) => setEditorTrigger(event.target.value as Trigger)}><option>Record created</option><option>Status changed</option><option>Schedule</option><option>Manual</option></select></label>{editorTrigger === "Schedule" && <label className="field"><span>Schedule</span><select value={schedule} onChange={(event) => setSchedule(event.target.value)}><option>Every day</option><option>Every week</option><option>Every 30 days</option></select></label>}<div className="validation-summary"><CheckCircle2 size={16} /><span><strong>Approval step included</strong><small>The saved definition requires review before the follow-up task.</small></span></div>{editing?.status === "Active" && <div className="state-banner error"><CircleAlert size={15} /><span><strong>Pause before editing</strong><small>An active workflow must be paused before its definition can change.</small></span></div>}{name && name.length < 4 && <div className="state-banner error"><CircleAlert size={15} /><span><strong>Configuration error</strong><small>Use at least four characters for the workflow name.</small></span></div>}</div>
+        <div className="dialog-body"><label className="field"><span>Workflow name</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Describe the workflow outcome" /></label><label className="field"><span>Trigger</span><select value={editorTrigger} onChange={(event) => setEditorTrigger(event.target.value as Trigger)}><option>Record created</option><option>Status changed</option><option>Schedule</option><option>Manual</option></select></label>{editorTrigger === "Schedule" && <label className="field"><span>Schedule</span><select value={schedule} onChange={(event) => setSchedule(event.target.value)}><option>Every day</option><option>Every week</option><option>Every 30 days</option></select></label>}{editorTrigger === "Status changed" && <><label className="field"><span>Matching lead status</span><select aria-label="Workflow condition" value={condition} onChange={(event) => setCondition(event.target.value)}><option value="new">New</option><option value="contacted">Contacted</option><option value="qualified">Qualified</option><option value="unqualified">Unqualified</option><option value="won">Won</option><option value="lost">Lost</option></select></label><label className="field"><span>Otherwise task</span><input aria-label="Otherwise task" value={otherwiseTitle} onChange={(event) => setOtherwiseTitle(event.target.value)} placeholder="Optional task when the status does not match" /></label></>}<div className="validation-summary"><CheckCircle2 size={16} /><span><strong>Approval step included</strong><small>Each path requires review before its follow-up task.</small></span></div>{editing?.status === "Active" && <div className="state-banner error"><CircleAlert size={15} /><span><strong>Pause before editing</strong><small>An active workflow must be paused before its definition can change.</small></span></div>}{name && name.length < 4 && <div className="state-banner error"><CircleAlert size={15} /><span><strong>Configuration error</strong><small>Use at least four characters for the workflow name.</small></span></div>}</div>
         <div className="dialog-footer"><Button onClick={() => setEditorOpen(false)}>Cancel</Button><Button variant="primary" disabled={name.trim().length < 4 || editing?.status === "Active"} onClick={save}><Save size={14} /> Save workflow</Button></div>
       </Modal>
 
-      {runDetail && <><button className="drawer-backdrop" aria-label="Close workflow run" onClick={() => setRunDetail(false)} /><aside className="drawer operations-drawer"><div className="drawer-header"><div><h2>Workflow run details</h2><p>{selected.name}</p></div><Button size="icon" variant="ghost" aria-label="Close workflow run" onClick={() => setRunDetail(false)}><X size={17} /></Button></div><div className="drawer-content">{runs.length ? runs.map((run) => <section className="run-section" key={run.id}><h3>{run.status}{run.dry_run ? " · dry run" : ""}</h3><p className="detail-copy">{run.created_at.slice(0, 16).replace("T", " ")}{run.error ? ` · ${run.error}` : ""}</p>{run.steps?.length ? <div className="run-timeline">{run.steps.map((step, index) => <div className={`run-step ${step.status === "failed" ? "failed" : "complete"}`} key={`${step.type}-${index}`}><span><Zap size={14} /></span><div><strong>{step.type}</strong><small>{step.status}</small></div>{step.status === "failed" ? <AlertTriangle size={14} /> : <Check size={14} />}</div>)}</div> : null}</section>) : <div className="module-empty"><Clock3 size={22} /><strong>No runs recorded</strong><p>A dry run records a preview and does not change customer records.</p></div>}</div></aside></>}
+      <Modal open={runOpen} title="Run workflow" description="Choose the lead this trigger requires. A preview does not change records." onClose={() => setRunOpen(false)}>
+        <div className="dialog-body"><label className="field"><span>Lead</span><select aria-label="Workflow lead" value={runLead} onChange={(event) => setRunLead(event.target.value)}>{leads.map((lead) => <option key={lead.id} value={lead.id}>{lead.title}</option>)}</select></label></div>
+        <div className="dialog-footer"><Button onClick={() => executeRun(true)} disabled={!runLead || loading}>Preview</Button><Button variant="primary" onClick={() => executeRun(false)} disabled={!runLead || loading}>Run locally</Button></div>
+      </Modal>
+
+      {runDetail && <><button className="drawer-backdrop" aria-label="Close workflow run" onClick={() => setRunDetail(false)} /><aside className="drawer operations-drawer"><div className="drawer-header"><div><h2>Workflow run details</h2><p>{selected.name}</p></div><Button size="icon" variant="ghost" aria-label="Close workflow run" onClick={() => setRunDetail(false)}><X size={17} /></Button></div><div className="drawer-content">{runs.length ? runs.map((run) => <section className="run-section" key={run.id}><h3>{run.status}{run.dry_run ? " · dry run" : ""}{run.branch ? ` · ${run.branch}` : ""}</h3><p className="detail-copy">{run.created_at.slice(0, 16).replace("T", " ")}{run.error ? ` · ${run.error}` : ""}</p>{run.steps?.length ? <div className="run-timeline">{run.steps.map((step, index) => <div className={`run-step ${step.status === "failed" ? "failed" : "complete"}`} key={`${step.type}-${index}`}><span><Zap size={14} /></span><div><strong>{step.type}</strong><small>{step.status}</small></div>{step.status === "failed" ? <AlertTriangle size={14} /> : <Check size={14} />}</div>)}</div> : null}{run.status === "awaiting_approval" && !run.dry_run ? <div className="plan-actions"><Button size="sm" onClick={() => review(run.id, "reject")}>Reject</Button><Button size="sm" variant="primary" onClick={() => review(run.id, "approve")}>Approve internal step</Button></div> : null}</section>) : <div className="module-empty"><Clock3 size={22} /><strong>No runs recorded</strong><p>A dry run records a preview and does not change customer records.</p></div>}</div></aside></>}
     </main>
   );
 }

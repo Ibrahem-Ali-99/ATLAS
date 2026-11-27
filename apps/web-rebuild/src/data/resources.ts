@@ -112,6 +112,7 @@ export async function loadCrm(): Promise<Record<CrmSection, CrmRecord[]>> {
       name: item.title,
       detail: item.source || "Lead",
       status: label(item.status),
+      ownerId: item.owner_user_id,
       owner: ownerName.get(item.owner_user_id) || "Unassigned",
       updated: relativeTime(item.updated_at),
       company: item.company_id ? companyName.get(item.company_id) : undefined,
@@ -134,6 +135,7 @@ export async function loadCrm(): Promise<Record<CrmSection, CrmRecord[]>> {
       detail: item.company_id ? companyName.get(item.company_id) || "Opportunity" : "Opportunity",
       status: label(item.stage),
       stage: label(item.stage),
+      ownerId: item.owner_user_id,
       owner: ownerName.get(item.owner_user_id) || "Unassigned",
       updated: "",
       company: item.company_id ? companyName.get(item.company_id) : undefined,
@@ -162,21 +164,22 @@ export async function loadCrm(): Promise<Record<CrmSection, CrmRecord[]>> {
   };
 }
 
-export async function saveCrm(section: CrmSection, record: { id?: string; name: string; company?: string; status: string }, companies: CrmRecord[], leads: CrmRecord[]): Promise<void> {
+export async function saveCrm(section: CrmSection, record: { id?: string; name: string; company?: string; status: string; ownerId?: string }, companies: CrmRecord[], leads: CrmRecord[]): Promise<void> {
   const companyId = companies.find((item) => item.name === record.company)?.id ?? null;
-  const status = record.status.toLowerCase().replaceAll(" ", "_");
+  const status = record.status === "Complete" ? "completed" : record.status.toLowerCase().replaceAll(" ", "_");
   if (section === "Companies") {
     const body = { name: record.name };
     await apiFetch(orgPath(record.id ? `/companies/${record.id}` : "/companies"), { method: record.id ? "PATCH" : "POST", body: JSON.stringify(body) });
     return;
   }
   if (section === "Contacts") {
-    const body = { full_name: record.name, company_id: companyId };
+    const body = { full_name: record.name, company_id: companyId, title: record.status || null };
     await apiFetch(orgPath(record.id ? `/contacts/${record.id}` : "/contacts"), { method: record.id ? "PATCH" : "POST", body: JSON.stringify(body) });
     return;
   }
   if (section === "Leads") {
-    const body = { title: record.name, status, company_id: companyId };
+    const body: Record<string, unknown> = { title: record.name, status, company_id: companyId };
+    if (record.ownerId) body.owner_user_id = record.ownerId;
     await apiFetch(orgPath(record.id ? `/leads/${record.id}` : "/leads"), { method: record.id ? "PATCH" : "POST", body: JSON.stringify(body) });
     return;
   }
@@ -186,7 +189,8 @@ export async function saveCrm(section: CrmSection, record: { id?: string; name: 
     return;
   }
   if (section === "Opportunities") {
-    const body = { title: record.name, stage: status, company_id: companyId };
+    const body: Record<string, unknown> = { title: record.name, stage: status, company_id: companyId };
+    if (record.ownerId) body.owner_user_id = record.ownerId;
     await apiFetch(orgPath(record.id ? `/opportunities/${record.id}` : "/opportunities"), { method: record.id ? "PATCH" : "POST", body: JSON.stringify(body) });
     return;
   }
@@ -474,6 +478,16 @@ export function listKnowledge(includeArchived = false) {
   return page<KnowledgeDoc>(`/documents?page=1&page_size=100&include_archived=${includeArchived ? "true" : "false"}`);
 }
 
+export function replaceKnowledge(id: string, file: File) {
+  const body = new FormData();
+  body.append("file", file);
+  return apiFetch<KnowledgeDoc>(orgPath(`/documents/${id}/content`), { method: "POST", body });
+}
+
+export function reindexKnowledge(id: string) {
+  return apiFetch<KnowledgeDoc>(orgPath(`/documents/${id}/reindex`), { method: "POST" });
+}
+
 export function uploadKnowledge(file: File) {
   const body = new FormData();
   body.append("file", file);
@@ -524,6 +538,7 @@ export type WorkflowGraph = {
   trigger: string;
   actions: WorkflowAction[];
   conditions?: { field: string; operator: string; value: string }[];
+  otherwise_actions?: WorkflowAction[];
   interval_seconds?: number;
 };
 export type WorkflowRow = {
@@ -539,7 +554,7 @@ export type WorkflowRow = {
   last_run_at: string | null;
 };
 
-export function workflowDefinition(name: string, trigger: string, intervalSeconds = 86400): WorkflowGraph {
+export function workflowDefinition(name: string, trigger: string, intervalSeconds = 86400, branch?: { condition?: string; otherwiseTitle?: string }): WorkflowGraph {
   const mapped = trigger === "Schedule" ? "schedule" : trigger === "Status changed" ? "lead_status_changed" : trigger === "Record created" ? "lead_created" : "manual";
   const definition: WorkflowGraph = {
     trigger: mapped,
@@ -550,7 +565,14 @@ export function workflowDefinition(name: string, trigger: string, intervalSecond
   };
   if (mapped === "schedule") definition.interval_seconds = intervalSeconds;
   if (mapped === "lead_status_changed") {
-    definition.conditions = [{ field: "lead_status", operator: "equals", value: "qualified" }];
+    definition.conditions = [{ field: "lead_status", operator: "equals", value: branch?.condition || "qualified" }];
+    const otherwiseTitle = branch?.otherwiseTitle?.trim();
+    if (otherwiseTitle) {
+      definition.otherwise_actions = [
+        { type: "require_approval", note: `Otherwise: ${name}`.slice(0, 500) },
+        { type: "create_task", title: otherwiseTitle.slice(0, 200), priority: "normal" },
+      ];
+    }
   }
   return definition;
 }
@@ -560,21 +582,21 @@ function workflowSlug(name: string): string {
   return `${base.length >= 3 ? base : "workflow"}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-export function createWorkflowRow(name: string, trigger: string, intervalSeconds = 86400) {
+export function createWorkflowRow(name: string, trigger: string, intervalSeconds = 86400, branch?: { condition?: string; otherwiseTitle?: string }) {
   return apiFetch<WorkflowRow>(orgPath("/workflow-definitions"), {
     method: "POST",
-    body: JSON.stringify({ name, slug: workflowSlug(name), description: name, definition: workflowDefinition(name, trigger, intervalSeconds) }),
+    body: JSON.stringify({ name, slug: workflowSlug(name), description: name, definition: workflowDefinition(name, trigger, intervalSeconds, branch) }),
   });
 }
 
-export function updateWorkflowRow(row: Pick<WorkflowRow, "id" | "slug" | "version">, name: string, trigger: string, intervalSeconds = 86400) {
+export function updateWorkflowRow(row: Pick<WorkflowRow, "id" | "slug" | "version">, name: string, trigger: string, intervalSeconds = 86400, branch?: { condition?: string; otherwiseTitle?: string }) {
   return apiFetch<WorkflowRow>(orgPath(`/workflow-definitions/${row.id}`), {
     method: "PATCH",
     body: JSON.stringify({
       name,
       slug: row.slug,
       description: name,
-      definition: workflowDefinition(name, trigger, intervalSeconds),
+      definition: workflowDefinition(name, trigger, intervalSeconds, branch),
       expected_version: row.version,
     }),
   });
@@ -588,8 +610,27 @@ export function workflowCommand(id: string, action: "activate" | "pause" | "dupl
   return apiFetch(orgPath(`/workflow-definitions/${id}/${action}`), { method: "POST" });
 }
 
-export function startWorkflow(id: string, dryRun: boolean) {
-  return apiFetch(orgPath(`/workflow-definitions/${id}/runs`), { method: "POST", body: JSON.stringify({ request_id: crypto.randomUUID(), dry_run: dryRun }) });
+export function startWorkflow(id: string, dryRun: boolean, context?: { leadId?: string; opportunityId?: string }) {
+  return apiFetch(orgPath(`/workflow-definitions/${id}/runs`), {
+    method: "POST",
+    body: JSON.stringify({
+      request_id: crypto.randomUUID(),
+      dry_run: dryRun,
+      lead_id: context?.leadId || null,
+      opportunity_id: context?.opportunityId || null,
+    }),
+  });
+}
+
+export function reviewWorkflowRun(workflowId: string, runId: string, decision: "approve" | "reject") {
+  return apiFetch(orgPath(`/workflow-definitions/${workflowId}/runs/${runId}/review`), {
+    method: "POST",
+    body: JSON.stringify({ decision }),
+  });
+}
+
+export function listLeadChoices() {
+  return apiFetch<Page<{ id: string; title: string }>>(orgPath("/leads?page=1&page_size=100")).then((pageResult) => pageResult.items);
 }
 
 export type WorkflowRunDetail = {
@@ -598,6 +639,7 @@ export type WorkflowRunDetail = {
   error: string | null;
   created_at: string;
   dry_run?: boolean;
+  branch?: string | null;
   steps?: { type: string; status: string }[];
 };
 
@@ -758,7 +800,7 @@ export function loadBillingPlans() {
 export function checkoutBilling(planCode: string) {
   return apiFetch<{ mode: string; checkout_url?: string; status: string }>(orgPath("/billing/checkout"), {
     method: "POST",
-    body: JSON.stringify({ plan_code: planCode, billing_interval: "month" }),
+    body: JSON.stringify({ plan_code: planCode, billing_interval: "monthly" }),
   });
 }
 

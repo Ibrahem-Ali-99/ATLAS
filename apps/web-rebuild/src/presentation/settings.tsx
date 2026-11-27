@@ -20,9 +20,11 @@ export function SettingsWorkspace({ onToast, onSessionExpired }: { onToast: (mes
   const [inviteEmail, setInviteEmail] = useState("");
   const [confirmAction, setConfirmAction] = useState<null | { type: "remove" | "sessions" | "leave"; member?: Member }>(null);
   const filtered = useMemo(() => members.filter((member) => `${member.name} ${member.email}`.toLowerCase().includes(search.toLowerCase())), [members, search]);
-  const refresh = () => Promise.all([loadTeam(), loadInvitations()]).then(([team, invitations]) => {
-    const people: Member[] = team.map((member) => ({ id: member.membership_id, name: member.full_name, email: member.email, initials: member.full_name.slice(0, 2).toUpperCase(), role: member.role === "admin" ? "Admin" : "Staff", status: "Active", self: member.email === appConfig.user.email }));
-    const pending: Member[] = invitations.filter((item) => !item.accepted_at).map((item) => ({ id: item.id, name: item.email, email: item.email, initials: item.email.slice(0, 2).toUpperCase(), role: "Staff", status: "Pending", pending: true }));
+  const refresh = () => Promise.allSettled([loadTeam(), loadInvitations()]).then(([team, invitations]) => {
+    const people: Member[] = team.status === "fulfilled" ? team.value.map((member) => ({ id: member.membership_id, name: member.full_name, email: member.email, initials: member.full_name.slice(0, 2).toUpperCase(), role: member.role === "admin" ? "Admin" : "Staff", status: "Active", self: member.email === appConfig.user.email })) : [];
+    const pending: Member[] = invitations.status === "fulfilled" ? invitations.value.filter((item) => !item.accepted_at).map((item) => ({ id: item.id, name: item.email, email: item.email, initials: item.email.slice(0, 2).toUpperCase(), role: "Staff", status: "Pending", pending: true })) : [];
+    if (team.status === "rejected") onToast(failureMessage(team.reason));
+    if (invitations.status === "rejected") onToast(failureMessage(invitations.reason));
     setMembers([...people, ...pending]);
   });
   useEffect(() => {

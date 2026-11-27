@@ -34,7 +34,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { ApiError } from "@/data/client";
-import { archiveCrm, createFollowUp, createLeadPrediction, failureMessage, getLeadPrediction, loadCrm, restoreCrm, saveCrm, type LeadPredictionResult } from "@/data/resources";
+import { archiveCrm, createFollowUp, createLeadPrediction, failureMessage, getLeadPrediction, loadCrm, loadTeam, restoreCrm, saveCrm, type LeadPredictionResult } from "@/data/resources";
 import { Avatar, Badge, Button, Modal, type Tone } from "./components";
 import { appConfig, workspace } from "./appConfig";
 
@@ -53,6 +53,7 @@ type CRMRecord = {
   detail: string;
   status: string;
   owner: string;
+  ownerId?: string;
   updated: string;
   company?: string;
   contact?: string;
@@ -140,11 +141,22 @@ export function CRMWorkspace({
   const [formName, setFormName] = useState("");
   const [formCompany, setFormCompany] = useState("");
   const [formStatus, setFormStatus] = useState("New");
+  const [formOwner, setFormOwner] = useState("");
+  const [members, setMembers] = useState<{ user_id: string; full_name: string }[]>([]);
   const [view, setView] = useState<"table" | "kanban">("table");
   const [loading, setLoading] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState<CRMRecord | null>(null);
   const pageSize = 4;
+  useEffect(() => {
+    loadTeam().then((rows) => setMembers(rows.map((member) => ({ user_id: member.user_id, full_name: member.full_name })))).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (!filterOpen) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setFilterOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [filterOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -206,7 +218,8 @@ export function CRMWorkspace({
     setEditing(null);
     setFormName("");
     setFormCompany("");
-    setFormStatus(section === "Companies" ? "Prospect" : section === "Customer inquiries" ? "Open" : "New");
+    setFormStatus(section === "Leads" || section === "Opportunities" ? "New" : section === "Tasks" ? "Open" : "");
+    setFormOwner("");
     setCreating(true);
   };
 
@@ -215,13 +228,14 @@ export function CRMWorkspace({
     setFormName(record.name);
     setFormCompany(record.company || "");
     setFormStatus(record.status);
+    setFormOwner(record.ownerId || "");
     setCreating(true);
   };
 
   const refresh = () => loadCrm().then(setData).catch((error: unknown) => onToast(failureMessage(error)));
 
   const saveRecord = () => {
-    void saveCrm(section, { id: editing?.id, name: formName, company: formCompany, status: formStatus }, data.Companies, data.Leads)
+    void saveCrm(section, { id: editing?.id, name: formName, company: formCompany, status: formStatus, ownerId: formOwner }, data.Companies, data.Leads)
       .then(() => {
         setCreating(false);
         onToast(editing ? `${formName} was updated` : `${formName} was created`);
@@ -441,8 +455,10 @@ export function CRMWorkspace({
         <form onSubmit={(event) => { event.preventDefault(); saveRecord(); }}>
           <div className="dialog-body">
             <label className="field"><span>Name</span><input autoFocus readOnly={section === "Tasks" && !!editing} value={formName} onChange={(event) => setFormName(event.target.value)} placeholder={`Enter ${currentContent.singular} name`} aria-invalid={formName.length > 0 && formName.trim().length < 2} /><small className="field-help">{section === "Tasks" && editing ? "Task edits store the status. Create a new task to change the title." : formName.length > 0 && formName.trim().length < 2 ? "Use at least two characters." : "Required"}</small></label>
-            {section !== "Companies" && <label className="field"><span>Company</span><input value={formCompany} onChange={(event) => setFormCompany(event.target.value)} placeholder="Link a company" /></label>}
-            <label className="field"><span>Status</span><select value={formStatus} onChange={(event) => setFormStatus(event.target.value)}>{section === "Companies" ? <><option>Prospect</option><option>Customer</option></> : section === "Customer inquiries" ? <><option>Open</option><option>In progress</option><option>Waiting</option><option>Resolved</option></> : section === "Opportunities" ? <><option>New</option><option>Contacted</option><option>Qualified</option><option>Won</option><option>Lost</option></> : <><option>New</option><option>In progress</option><option>Complete</option></>}</select></label>
+            {section !== "Companies" && <label className="field"><span>{section === "Customer inquiries" ? "Message" : "Company"}</span><input value={formCompany} onChange={(event) => setFormCompany(event.target.value)} placeholder={section === "Customer inquiries" ? "Stored inquiry message" : "Link a company"} /></label>}
+            {section === "Contacts" && <label className="field"><span>Title</span><input value={formStatus} onChange={(event) => setFormStatus(event.target.value)} placeholder="Role" /></label>}
+            {(section === "Leads" || section === "Opportunities" || section === "Tasks") && <label className="field"><span>Status</span><select value={formStatus} onChange={(event) => setFormStatus(event.target.value)}>{section === "Opportunities" ? <><option>New</option><option>Contacted</option><option>Qualified</option><option>Won</option><option>Lost</option></> : section === "Tasks" ? <><option>Open</option><option>In progress</option><option>Complete</option></> : <><option>New</option><option>Contacted</option><option>Qualified</option><option>Unqualified</option><option>Won</option><option>Lost</option></>}</select></label>}
+            {(section === "Leads" || section === "Opportunities") && <label className="field"><span>Owner</span><select aria-label="Record owner" value={formOwner} onChange={(event) => setFormOwner(event.target.value)}><option value="">Unassigned</option>{members.map((member) => <option key={member.user_id} value={member.user_id}>{member.full_name}</option>)}</select></label>}
           </div>
           <div className="dialog-footer"><Button type="button" onClick={() => setCreating(false)}>Cancel</Button><Button type="submit" variant="primary" disabled={formName.trim().length < 2}>{editing ? "Save changes" : "Create record"}</Button></div>
         </form>

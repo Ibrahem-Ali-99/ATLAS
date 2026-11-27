@@ -169,6 +169,7 @@ function Shell({
   const [counts, setCounts] = useState<NavCounts>({});
   const [crmSection, setCrmSection] = useState<CRMSection>("Companies");
   const [crmFocus, setCrmFocus] = useState("");
+  const [inboxFocus, setInboxFocus] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const firstName = session.user.full_name.split(" ")[0] || session.user.full_name;
@@ -316,12 +317,12 @@ function Shell({
         </header>
         {activeNav === "Overview" ? <Overview organizationId={organizationId} organizationName={organizationName} firstName={firstName} onApproved={() => void loadNavCounts(organizationId).then(setCounts)} /> : null}
         {activeNav === "CRM" ? <CRMWorkspace section={crmSection} onSectionChange={setCrmSection} onToast={setToast} focusQuery={crmFocus} onOpenInbox={() => navigate("Inbox")} /> : null}
-        {activeNav === "Inbox" ? <InboxWorkspace onToast={setToast} onOpenCrm={openCrm} /> : null}
+        {activeNav === "Inbox" ? <InboxWorkspace onToast={setToast} onOpenCrm={openCrm} focusQuery={inboxFocus} /> : null}
         {activeNav === "Assistant" ? <AssistantWorkspace onToast={setToast} /> : null}
         {activeNav === "Knowledge" ? <KnowledgeWorkspace onToast={setToast} /> : null}
         {activeNav === "Approvals" ? <ApprovalsWorkspace onToast={setToast} onOpenCrm={(query) => openCrm("Companies", query)} /> : null}
         {activeNav === "Workflows" ? <WorkflowsWorkspace onToast={setToast} /> : null}
-        {activeNav === "Agent Runs" ? <AgentRunsWorkspace onToast={setToast} onOpenApprovals={() => navigate("Approvals")} /> : null}
+        {activeNav === "Agent Runs" ? <AgentRunsWorkspace onToast={setToast} onOpenApprovals={() => navigate("Approvals")} onOpenInbox={(query) => { setInboxFocus(query); navigate("Inbox"); }} /> : null}
         {activeNav === "Analytics" ? <AnalyticsWorkspace onToast={setToast} onOpenCrm={() => navigate("CRM")} /> : null}
         {activeNav === "Campaigns" ? <CampaignsWorkspace onToast={setToast} /> : null}
         {activeNav === "Monitoring" ? <MonitoringWorkspace onToast={setToast} /> : null}

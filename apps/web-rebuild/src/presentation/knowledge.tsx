@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { Avatar, Badge, Button, Modal, type Tone } from "./components";
-import { archiveKnowledge, chunksKnowledge, failureMessage, listKnowledge, previewKnowledge, restoreKnowledge, retryKnowledge, searchKnowledge, uploadKnowledge } from "@/data/resources";
+import { archiveKnowledge, chunksKnowledge, failureMessage, listKnowledge, previewKnowledge, reindexKnowledge, replaceKnowledge, restoreKnowledge, retryKnowledge, searchKnowledge, uploadKnowledge } from "@/data/resources";
 import { appConfig } from "./appConfig";
 
 type DocumentStatus = "Indexed" | "Processing" | "Failed";
@@ -86,7 +86,13 @@ function useKnowledgeModel(onToast: (message: string) => void) {
   const restore = (id: string) => {
     void restoreKnowledge(id).then(() => { onToast("Document restored"); return refresh(); }).catch((error: unknown) => onToast(failureMessage(error)));
   };
-  return { documents, filtered, selected, selectedId, setSelectedId, search, setSearch, status, setStatus, type, setType, showArchived, setShowArchived, mode, setMode, semanticQuery, setSemanticQuery, uploadOpen, setUploadOpen, removeTarget, setRemoveTarget, addFile, retry, remove, restore };
+  const replace = (id: string, file: File) => {
+    void replaceKnowledge(id, file).then(() => { onToast(`${file.name} replaced the stored file`); return refresh(); }).catch((error: unknown) => onToast(failureMessage(error)));
+  };
+  const reindex = (id: string) => {
+    void reindexKnowledge(id).then(() => { onToast("Reindex queued"); return refresh(); }).catch((error: unknown) => onToast(failureMessage(error)));
+  };
+  return { documents, filtered, selected, selectedId, setSelectedId, search, setSearch, status, setStatus, type, setType, showArchived, setShowArchived, mode, setMode, semanticQuery, setSemanticQuery, uploadOpen, setUploadOpen, removeTarget, setRemoveTarget, addFile, retry, remove, restore, replace, reindex };
 }
 
 export function KnowledgeWorkspace({ onToast }: { onToast: (message: string) => void }) {
@@ -118,7 +124,7 @@ export function KnowledgeWorkspace({ onToast }: { onToast: (message: string) => 
               </button>) : <div className="module-empty"><BookOpen size={25} /><strong>No documents found</strong><p>Change your search or filters, or upload a new document.</p><Button size="sm" onClick={() => { model.setSearch(""); model.setStatus("All statuses"); model.setType("All file types"); }}>Clear filters</Button></div>}
             </div>
           </section>
-          <DocumentInspector document={model.selected} onRetry={model.retry} onRemove={model.setRemoveTarget} onRestore={model.restore} />
+          <DocumentInspector document={model.selected} onRetry={model.retry} onRemove={model.setRemoveTarget} onRestore={model.restore} onReplace={model.replace} onReindex={model.reindex} />
         </div>
       ) : <SemanticSearch query={model.semanticQuery} setQuery={model.setSemanticQuery} onOpen={(id) => { model.setSelectedId(id); model.setMode("library"); }} />}
 
@@ -131,7 +137,8 @@ export function KnowledgeWorkspace({ onToast }: { onToast: (message: string) => 
   );
 }
 
-function DocumentInspector({ document, onRetry, onRemove, onRestore }: { document: KnowledgeDocument | null; onRetry: (id: string) => void; onRemove: (document: KnowledgeDocument) => void; onRestore: (id: string) => void }) {
+function DocumentInspector({ document, onRetry, onRemove, onRestore, onReplace, onReindex }: { document: KnowledgeDocument | null; onRetry: (id: string) => void; onRemove: (document: KnowledgeDocument) => void; onRestore: (id: string) => void; onReplace: (id: string, file: File) => void; onReindex: (id: string) => void }) {
+  const replaceRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<"content" | "passages">("content");
   const [excerpt, setExcerpt] = useState("");
   const [passages, setPassages] = useState<{ content: string; page_number: number | null; chunk_index: number }[]>([]);
@@ -148,7 +155,7 @@ function DocumentInspector({ document, onRetry, onRemove, onRestore }: { documen
     {document.status === "Processing" && <div className="indexing-card"><div><LoaderCircle size={16} /><span><strong>Indexing document</strong><small>Extracting text and preparing passages.</small></span></div><i><span style={{ width: "40%" }} /></i></div>}
     <div className="inspector-tabs"><button className={tab === "content" ? "active" : ""} onClick={() => setTab("content")}>Extracted content</button><button className={tab === "passages" ? "active" : ""} onClick={() => setTab("passages")}>Indexed passages</button></div>
     <div className="inspector-content">{document.status !== "Indexed" ? <div className="module-empty compact"><AlertTriangle size={22} /><strong>Content unavailable</strong><p>Extracted content will appear after indexing succeeds.</p></div> : tab === "content" ? <article><p>{excerpt || "No extracted preview is stored for this document."}</p></article> : <div className="passage-list">{passages.map((passage) => <article key={passage.chunk_index}><span>Passage {passage.chunk_index + 1}{passage.page_number ? ` · Page ${passage.page_number}` : ""}</span><p>{passage.content}</p></article>)}</div>}</div>
-    <footer>{document.archived ? <Button size="sm" onClick={() => onRestore(document.id)}><RefreshCw size={13} /> Restore</Button> : <Button size="sm" variant="ghost" onClick={() => onRemove(document)}><Trash2 size={13} /> Archive</Button>}</footer>
+    <footer>{document.archived ? <Button size="sm" onClick={() => onRestore(document.id)}><RefreshCw size={13} /> Restore</Button> : <><input ref={replaceRef} className="sr-only" type="file" accept=".pdf,.txt,application/pdf,text/plain" aria-label={`Replace ${document.name}`} onChange={(event) => { const next = event.target.files?.[0]; event.target.value = ""; if (next) onReplace(document.id, next); }} /><Button size="sm" onClick={() => replaceRef.current?.click()}>Replace file</Button><Button size="sm" disabled={document.status === "Processing"} onClick={() => onReindex(document.id)}>Reindex</Button><Button size="sm" variant="ghost" onClick={() => onRemove(document)}><Trash2 size={13} /> Archive</Button></>}</footer>
   </aside>;
 }
 
@@ -170,14 +177,17 @@ function UploadDialog({ open, onClose, onAdd }: { open: boolean; onClose: () => 
 
 function SemanticSearch({ query, setQuery, onOpen }: { query: string; setQuery: (query: string) => void; onOpen: (id: string) => void }) {
   const [searched, setSearched] = useState(false);
+  const [pending, setPending] = useState(false);
   const [results, setResults] = useState<{ document_id: string; document_title: string; page_number: number | null; content: string; score: number }[]>([]);
   const [error, setError] = useState("");
   const run = () => {
     setSearched(true);
-    searchKnowledge(query).then((page) => { setResults(page.items); setError(""); }).catch((reason: unknown) => setError(failureMessage(reason)));
+    setPending(true);
+    setError("");
+    searchKnowledge(query).then((page) => setResults(page.items)).catch((reason: unknown) => setError(failureMessage(reason))).finally(() => setPending(false));
   };
   return <section className="panel semantic-search">
-    <div className="semantic-search-head"><span className="assistant-logo"><Sparkles size={20} /></span><h2>Semantic search</h2><p>Find relevant passages by meaning, not only exact keywords.</p><div className="semantic-query"><Search size={16} /><input value={query} onChange={(event) => { setQuery(event.target.value); setSearched(false); }} placeholder="Ask a question about your knowledge" aria-label="Semantic knowledge search" /><Button variant="primary" disabled={!query.trim()} onClick={run}>Search</Button></div></div>
-    <div className="semantic-results">{error ? <div className="module-empty"><Search size={24} /><strong>Search failed</strong><p>{error}</p></div> : !searched ? <div className="module-empty"><Search size={24} /><strong>Search is ready</strong><p>Run the query to rank matching passages.</p></div> : results.length ? <><div className="results-summary"><strong>{results.length} ranked passages</strong><span>Sorted by semantic relevance</span></div>{results.map((result, index) => <article key={`${result.document_id}-${index}`}><div className="rank">{index + 1}</div><div><div className="result-source"><FileText size={14} /><strong>{result.document_title}</strong><span>{result.page_number ? `Page ${result.page_number}` : "Passage"}</span><Badge tone="green">{result.score.toFixed(2)}</Badge></div><p>{result.content}</p><button onClick={() => onOpen(result.document_id)}>Open source <ChevronRight size={13} /></button></div></article>)}</> : <div className="module-empty"><Search size={24} /><strong>No relevant passages</strong><p>Try a broader question or add more knowledge documents.</p></div>}</div>
+    <div className="semantic-search-head"><span className="assistant-logo"><Sparkles size={20} /></span><h2>Semantic search</h2><p>Find relevant passages by meaning, not only exact keywords.</p><div className="semantic-query"><Search size={16} /><input value={query} onChange={(event) => { setQuery(event.target.value); setSearched(false); }} placeholder="Ask a question about your knowledge" aria-label="Semantic knowledge search" /><Button variant="primary" disabled={!query.trim() || pending} onClick={run}>Search</Button></div></div>
+    <div className="semantic-results">{error ? <div className="module-empty"><Search size={24} /><strong>Search failed</strong><p>{error}</p></div> : pending || !searched ? <div className="module-empty"><Search size={24} /><strong>{pending ? "Searching knowledge" : "Search is ready"}</strong><p>{pending ? "Ranking matching passages." : "Run the query to rank matching passages."}</p></div> : results.length ? <><div className="results-summary"><strong>{results.length} ranked passages</strong><span>Sorted by semantic relevance</span></div>{results.map((result, index) => <article key={`${result.document_id}-${index}`}><div className="rank">{index + 1}</div><div><div className="result-source"><FileText size={14} /><strong>{result.document_title}</strong><span>{result.page_number ? `Page ${result.page_number}` : "Passage"}</span><Badge tone="green">{result.score.toFixed(2)}</Badge></div><p>{result.content}</p><button onClick={() => onOpen(result.document_id)}>Open source <ChevronRight size={13} /></button></div></article>)}</> : <div className="module-empty"><Search size={24} /><strong>No relevant passages</strong><p>Try a broader question or add more knowledge documents.</p></div>}</div>
   </section>;
 }

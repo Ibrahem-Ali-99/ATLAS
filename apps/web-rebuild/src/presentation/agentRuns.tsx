@@ -44,7 +44,7 @@ const statusLabel = (value: string): RunStatus => value === "awaiting_approval" 
 const toneFor = (status: RunStatus): Tone =>
   status === "Completed" ? "green" : status === "Running" ? "blue" : status === "Waiting approval" ? "amber" : "red";
 
-export function AgentRunsWorkspace({ onToast, onOpenApprovals }: { onToast: (message: string) => void; onOpenApprovals?: () => void }) {
+export function AgentRunsWorkspace({ onToast, onOpenApprovals, onOpenInbox }: { onToast: (message: string) => void; onOpenApprovals?: () => void; onOpenInbox?: (query: string) => void }) {
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("All statuses");
@@ -92,7 +92,7 @@ export function AgentRunsWorkspace({ onToast, onOpenApprovals }: { onToast: (mes
           <div className="sandbox-callout"><Terminal size={16} /><span><strong>Stored execution</strong><small>Steps and approvals below are the records saved for this run. External delivery stays behind an approval.</small></span></div>
           <section className="run-section"><h3>Execution timeline</h3>{detail?.events.length ? <div className="run-timeline">{detail.events.map((event) => <RunStep key={`${event.step}-${event.created_at}`} icon={event.status === "failed" ? AlertTriangle : Play} title={event.step} detail={event.error_message || event.status} state={event.status === "failed" ? "failed" : "complete"} />)}</div> : <p className="detail-copy">No execution steps are stored for this run.</p>}</section>
           <section className="run-section"><h3>Approvals</h3>{detail?.approvals.length ? <div className="evidence-list">{detail.approvals.map((approval) => <div key={approval.id}><ShieldCheck size={14} /><span><strong>{approval.action_type.replaceAll("_", " ")}</strong><small>{approval.status}</small></span></div>)}</div> : <p className="detail-copy">No approval is linked to this run.</p>}</section>
-          <section className="run-section"><h3>Linked record</h3><div className="evidence-list"><div><Building2 size={14} /><span><strong>{selected.linked}</strong><small>{detail?.run.error_message || selected.status}</small></span></div></div></section>
+          <section className="run-section"><h3>Linked record</h3><div className="evidence-list"><div><Building2 size={14} /><span><strong>{selected.linked}</strong><small>{detail?.run.error_message || selected.status}</small></span>{onOpenInbox && selected.linked !== "Inquiry" ? <Button size="sm" onClick={() => onOpenInbox(selected.linked)}>Open conversation</Button> : null}</div></div></section>
           {selected.status === "Failed" && <div className="state-banner error"><CircleAlert size={16} /><span><strong>Run failed</strong><small>{detail?.run.error_message || "The stored run did not finish."}</small></span></div>}
           {selected.status === "Completed" && <div className="execution-result"><CheckCircle2 size={17} /><span><strong>Run completed</strong><small>The stored run finished. External delivery stays behind an approval.</small></span></div>}
           {selected.status === "Waiting approval" && <div className="state-banner warning"><ShieldCheck size={16} /><span><strong>Approval required</strong><small>The proposed action will not continue until a reviewer decides.</small></span>{onOpenApprovals && <Button size="sm" onClick={onOpenApprovals}>Open approval <ArrowRight size={13} /></Button>}</div>}

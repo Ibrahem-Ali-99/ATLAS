@@ -93,6 +93,8 @@ class InvitationCreated(BaseModel):
 
 
 class InvitationStatusOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     email: EmailStr
     role: Literal["staff"]
