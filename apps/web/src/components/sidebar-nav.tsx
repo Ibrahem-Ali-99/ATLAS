@@ -100,7 +100,7 @@ export function SidebarNav({
                 >
                   <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
                   {!collapsed ? <span>{item.label}</span> : null}
-                  {!collapsed && counts[item.href] !== undefined ? <span className="nav-count">{counts[item.href]}</span> : null}
+                  {!collapsed && counts[item.href] !== undefined ? <span className="nav-count" aria-hidden="true">{counts[item.href]}</span> : null}
                 </Link>
               );
             })}
