@@ -1,6 +1,11 @@
 """The public assistant uses its own credential, budget, and visitor library."""
 
+import os
+import subprocess
+import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -290,6 +295,111 @@ def test_administrator_can_stop_public_inference(client: TestClient, db: Session
     )
     assert restored.status_code == 200
     assert restored.json()["killed"] is False
+
+
+def _ledger_from_a_new_process(organization_id: uuid.UUID) -> tuple[int, int]:
+    script = """
+import os
+import uuid
+from sqlalchemy import func, select
+from app.core.database import SessionLocal
+from app.domains.assistant.public_budget import PublicInferenceSpend, public_inference_killed
+organization_id = uuid.UUID(os.environ["ATLAS_GATE_ORG"])
+session = SessionLocal()
+try:
+    count = session.scalar(
+        select(func.count()).select_from(PublicInferenceSpend).where(
+            PublicInferenceSpend.organization_id == organization_id
+        )
+    )
+    killed = public_inference_killed(session)
+finally:
+    session.close()
+print(f"{count} {int(bool(killed))}")
+"""
+    env = os.environ.copy()
+    env["ATLAS_GATE_ORG"] = str(organization_id)
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    count_text, killed_text = completed.stdout.strip().split()
+    return int(count_text), int(killed_text)
+
+
+def test_budget_and_kill_switch_hold_across_concurrency_and_restart(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = make_organization(
+        db, "Harbor visitor", f"harbor-visitor-{uuid.uuid4().hex[:8]}"
+    )
+    capped = get_settings().model_copy(
+        update={
+            "public_inference_session_limit": 2,
+            "public_inference_min_interval_seconds": 0,
+            "public_inference_global_limit": 50,
+        }
+    )
+    monkeypatch.setattr("app.domains.assistant.public_budget.get_settings", lambda: capped)
+
+    def reserve_shared() -> str:
+        return reserve_public_inference(
+            organization.id, "shared-session", "Where is the yard?"
+        ).code
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        codes = list(pool.map(lambda _index: reserve_shared(), range(8)))
+    assert codes.count("allowed") == 2
+    assert set(codes) <= {"allowed", "public_inference_session_budget"}
+
+    stored, killed = _ledger_from_a_new_process(organization.id)
+    assert stored == 2
+    assert killed == 0
+    reset_public_inference()
+    after_restart = reserve_public_inference(
+        organization.id, "shared-session", "Where is the yard?"
+    )
+    assert after_restart.allowed is False
+    assert after_restart.code == "public_inference_session_budget"
+
+    set_public_inference_killed(db, True)
+    try:
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            denied = list(
+                pool.map(
+                    lambda _index: reserve_public_inference(
+                        organization.id,
+                        f"killed-{uuid.uuid4().hex}",
+                        "Where is the yard?",
+                    ).code,
+                    range(6),
+                )
+            )
+        assert denied == ["public_inference_disabled"] * 6
+        _stored, killed_again = _ledger_from_a_new_process(organization.id)
+        assert killed_again == 1
+    finally:
+        set_public_inference_killed(db, False)
+
+    authorized = _public()
+    monkeypatch.setattr("app.integrations.language.get_settings", lambda: authorized)
+    paid = get_chat_client(db, organization.id, public_inference=True)
+    assert isinstance(paid, OpenAICompatibleChatClient)
+    assert paid._settings.llm_api_key != authorized.llm_api_key
+    for switch in (
+        {"public_llm_authorized": False},
+        {"public_inference_enabled": False},
+    ):
+        closed = authorized.model_copy(update=switch)
+        monkeypatch.setattr("app.integrations.language.get_settings", lambda closed=closed: closed)
+        standby = get_chat_client(db, organization.id, public_inference=True)
+        assert isinstance(standby, DeterministicChatClient)
 
 
 def test_non_visitor_cannot_take_the_public_client(

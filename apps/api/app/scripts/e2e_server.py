@@ -101,6 +101,11 @@ def main() -> None:
     os.environ["ATLAS_EMBEDDING_MODEL"] = "text-embedding-3-small"
     os.environ["ATLAS_EMBEDDING_DIMENSIONS"] = "1536"
     os.environ["ATLAS_PUBLIC_DEMO"] = "false"
+    os.environ["ATLAS_PUBLIC_INFERENCE_ENABLED"] = "false"
+    os.environ["ATLAS_PUBLIC_LLM_AUTHORIZED"] = "false"
+    os.environ["ATLAS_PUBLIC_LLM_API_KEY"] = ""
+    os.environ["ATLAS_PUBLIC_EMBEDDING_AUTHORIZED"] = "false"
+    os.environ["ATLAS_PUBLIC_EMBEDDING_API_KEY"] = ""
     os.environ["ATLAS_N8N_LEAD_WEBHOOK_URL"] = ""
     web_port = os.environ.get("ATLAS_E2E_WEB_PORT", "3010")
     os.environ["ATLAS_CORS_ORIGINS"] = f"http://127.0.0.1:{web_port},http://localhost:{web_port}"

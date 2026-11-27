@@ -108,8 +108,8 @@ foreach ($name in @(
   Remove-Item "Env:$name" -ErrorAction SilentlyContinue
 }
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:LOCALAPPDATA "ms-playwright"
-Invoke-ReleaseStep "browser" {
-  Push-Location apps/web
+Invoke-ReleaseStep "web-rebuild-browser" {
+  Push-Location apps/web-rebuild
   try { npx playwright test --reporter=line } finally { Pop-Location }
 }
 

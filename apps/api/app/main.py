@@ -85,8 +85,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level, settings.environment)
-    docs_url = None if settings.environment == "production" else "/docs"
-    openapi_url = None if settings.environment == "production" else "/openapi.json"
+    # The public portfolio stays in development so workspace chat can use the
+    # deterministic provider. That process still must not publish the schema.
+    hide_schema = settings.environment == "production" or settings.public_demo
+    docs_url = None if hide_schema else "/docs"
+    openapi_url = None if hide_schema else "/openapi.json"
     app = FastAPI(
         title="ATLAS API",
         version="0.1.0",

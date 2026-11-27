@@ -59,9 +59,9 @@ The procedure is [portfolio-deployment.md](portfolio-deployment.md). The private
 
 - A hostname and DNS. Not purchased.
 - The virtual machine. Not rented.
-- The first Ollama pull needs outbound network on that machine once.
+- No local model pull. This stack does not run Ollama.
 - Personal acceptance of the pictures and the copy.
-- A clean `.\scripts\verify-release.ps1` on a tree with no other session's uncommitted files. The 26 November counts were not a clean checkout. This checklist does not replace that run.
+- A clean `.\scripts\verify-release.ps1` on a tree with no other session's uncommitted files. That script runs the `apps/web-rebuild` browser suite. The retired `apps/web` browser failures are recorded in [release-verification.md](release-verification.md) and are not a gate.
 - The private Harbor WhatsApp callback still cannot move onto this public host. Meta allows one callback URL per app. That demonstration stays on the Harbor review.
 
 ## Do not do these yet

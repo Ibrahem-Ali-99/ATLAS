@@ -25,6 +25,8 @@ dist/
 *.tsbuildinfo
 /apps/web/playwright-report/
 /apps/web/test-results/
+/apps/web-rebuild/playwright-report/
+/apps/web-rebuild/test-results/
 /apps/web/review/
 /apps/web/ui-shots/
 /review/

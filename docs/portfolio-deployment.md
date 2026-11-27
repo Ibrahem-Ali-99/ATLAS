@@ -21,6 +21,17 @@ These rules come from the current application and from `docs/portfolio-demo.md`.
 
 Do not set `ATLAS_ENVIRONMENT=production` on this file. Production rejects the deterministic workspace chat provider. Visitor retrieval no longer needs that stand-in, but the signed-in workspace on this stack still does.
 
+`PORTFOLIO_ENVIRONMENT=development` is the public process mode. The controls that a production process would enforce are still set on this stack:
+
+- `ATLAS_COOKIE_SECURE` is true. The session cookie is HttpOnly and SameSite=Lax. Preflight refuses a public stack that turns the secure flag off.
+- Caddy is the only published listener. It redirects HTTP to HTTPS and sends `Strict-Transport-Security` when the host is not localhost. The API, Postgres, and Mailpit have no host port.
+- Caddy answers `/docs`, `/openapi.json`, and `/redoc` with 404. The API process also leaves those routes unmounted while `ATLAS_PUBLIC_DEMO` is true, so the schema is not available on the Compose network either.
+- An unexpected exception returns `internal_error` with the message "An unexpected error occurred". The response and the log line do not include the exception text.
+- `ATLAS_PUBLIC_DEMO=true` refuses a Harbor model key, a Harbor embedding key, live email, and an n8n URL. The seed command refuses to run in that process. Public inference stays off until both authorization switches are true, and preflight rejects a public key before that.
+- State-changing requests still require the CSRF token issued for the session.
+
+Development mode remains visible in the API configuration because the workspace chat provider is the deterministic stand-in. It does not publish the schema, weaken the cookie, or open a provider.
+
 ## What this stack leaves out
 
 | Production service | Portfolio |

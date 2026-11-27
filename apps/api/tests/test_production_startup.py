@@ -4,7 +4,28 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from app.core.config import get_settings
+from app.main import create_app
 from tests.bootstrap import API_ROOT, TEST_DATABASE_URL
+
+
+def test_public_demo_hides_the_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = get_settings().model_copy(
+        update={
+            "public_demo": True,
+            "llm_api_key": "",
+            "embedding_api_key": "",
+            "n8n_lead_webhook_url": "",
+            "email_mode": "sandbox",
+            "email_live_enabled": False,
+        }
+    )
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    app = create_app()
+    assert app.docs_url is None
+    assert app.openapi_url is None
 
 
 def test_production_startup_has_a_secure_session_and_no_demo_seed(tmp_path: Path) -> None:

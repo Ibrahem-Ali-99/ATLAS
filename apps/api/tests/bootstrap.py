@@ -106,3 +106,31 @@ def ensure_database(name: str, *, require_new: bool = False) -> None:
                 connection.execute(text(f'CREATE DATABASE "{name}"'))
     finally:
         admin.dispose()
+
+
+def drop_generated_database(name: str) -> None:
+    """Drop one browser database. The name must be a generated acceptance id."""
+
+    if re.fullmatch(r"atlas_e2e_[0-9a-f]{32}", name) is None:
+        raise RuntimeError("Refusing to drop an unexpected database")
+    admin = create_engine(
+        ADMIN_DATABASE_URL,
+        isolation_level="AUTOCOMMIT",
+        pool_pre_ping=True,
+        connect_args={
+            "connect_timeout": 5,
+            "options": "-c lock_timeout=5000 -c statement_timeout=30000",
+        },
+    )
+    try:
+        with admin.connect() as connection:
+            connection.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": name},
+            )
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+    finally:
+        admin.dispose()

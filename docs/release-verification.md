@@ -70,9 +70,45 @@ Remove-Item Env:NEXT_DIST_DIR
 
 `npx --prefix` on this npm does not pass the compiler arguments through, so each command runs inside its package directory. The dist directory stays `.next-release-check`, not the directory a dev server is using.
 
-`npm run test:unit` covers API base URLs, billing errors, document origins, and the public catalog. TypeScript must pass with no errors for both clients. Each production build must finish, including its own type check and static page generation. The replacement client has no Playwright suite. The browser suite below stays on `apps/web` and talks to the API.
+`npm run test:unit` covers API base URLs, billing errors, document origins, and the public catalog. TypeScript must pass with no errors for both clients. Each production build must finish, including its own type check and static page generation. The release browser suite is `apps/web-rebuild`. The older client in `apps/web` is not the image this deployment builds.
 
-## 6. Run the browser suite
+## 6. Run the replacement browser suite
+
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:LOCALAPPDATA "ms-playwright"
+Push-Location apps/web-rebuild
+npx playwright test --reporter=line
+Pop-Location
+```
+
+Playwright starts a disposable API on port 8012 and the replacement client on port 3012. The database name is `atlas_e2e_` plus 32 hex characters, seeded with the example identity, and dropped after the run. The API process forces the deterministic providers and leaves public inference unauthorized. The suite signs in, opens every module, creates one company, asks the Assistant, uploads and searches a note, approves a workflow step, exports opportunities, opens Settings, repeats a module at 390px, and launches a visitor who cannot see that company. It does not use ports 3040 or 8014.
+
+## 7. Recorded failures of the retired client
+
+On 27 November 2026 the `apps/web` Playwright suite, against its own disposable API, finished 23 passed, 15 failed, and 3 skipped. That client is not the portfolio image. These tests were not repaired:
+
+- `e2e/automations-integrations-acceptance.spec.ts` — admin can inspect persisted integrations and automation activity. The screen no longer exposes a heading named Language model.
+- `e2e/crm-acceptance.spec.ts` — CRM lifecycle persists relationships and recoverable archives. The company control after Create is not the button the test clicks.
+- `e2e/crm-follow-up-acceptance.spec.ts` — grounded knowledge, CRM follow-up, approval and sandbox delivery work together.
+- `e2e/email-activity.spec.ts` — approved email is delivered once and visible in Email Activity.
+- `e2e/figma-acceptance-capture.spec.ts` — capture populated Overview, CRM, and Assistant screens.
+- `e2e/harbor-demonstration.spec.ts` — Harbor demonstration supports the main workspace actions. The company control for Harbor & Co. did not appear within the timeout.
+- `e2e/inbox-acceptance.spec.ts` — website chat settings persist and staff can reply to a visitor on mobile. The handoff control was not found.
+- `e2e/knowledge-acceptance.spec.ts` — Knowledge upload, indexing, search, inspection, and removal. The uploaded row did not become ready for the assertion.
+- `e2e/overview-analytics-acceptance.spec.ts` — Overview and Analytics follow CRM changes. The page has no heading named Pipeline overview.
+- `e2e/populated-workspace-acceptance.spec.ts` — populated workspace supports connected CRM operations.
+- `e2e/settings-integrations.spec.ts` — organization selection switches and persists the workspace. The organization control is not the selector the test uses.
+- `e2e/workspace-navigation.spec.ts` — Overview creates an opportunity from the mobile workspace.
+- `e2e/workspace.spec.ts` — workspace flow uses the browser and deterministic providers. The Assistant screen has two headings, and the profile control is named Open profile menu.
+- `e2e/workspace.spec.ts` — staff can use CRM and another organization cannot see Harbor records.
+
+`e2e/workspace.spec.ts` — narrow viewport opens every page without a missing chunk — failed in that same run because the Inbox count was part of the accessible name. The count is now hidden from the name. That one test was run again and passed. The other fourteen were left as recorded failures of the retired client.
+
+`scripts/verify-release.ps1` runs the replacement suite. It does not run this retired suite.
+
+## 8. Retired browser command
+
+The older suite remains available for inspection. It is not a release gate.
 
 ```powershell
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:LOCALAPPDATA "ms-playwright"
@@ -86,7 +122,7 @@ Pop-Location
 
 Playwright starts its own API on port 8011 and web app on port 3011, with sandbox billing and sandbox mail. `e2e/duplicate-key.spec.ts` fails if any workspace route logs a duplicate React key. Record passed, failed, and skipped counts.
 
-## 7. Read the provider record against the diff
+## 9. Read the provider record against the diff
 
 ```powershell
 git log --oneline 52c6b17..HEAD -- apps/api/app/domains/billing apps/api/app/api/v1/billing.py
