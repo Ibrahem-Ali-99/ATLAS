@@ -41,6 +41,10 @@ The procedure is [portfolio-deployment.md](portfolio-deployment.md). The private
 - [ ] Billing checkout, invitations, provider connect, and campaign scheduling return a refusal.
 - [ ] The Harbor review on ports 8014 and 3040 is still the private database after the public stack starts. Its password is not on the public site.
 
+## Still in this working tree
+
+- The rest of `apps/web-rebuild` — layout, workspace page, presentation modules, and package files — was left uncommitted. It is being edited in this checkout. `infrastructure/portfolio/up.sh` cannot build the image from commit `73eccfb` alone. Commit that client before renting a host.
+
 ## Still external
 
 - A hostname and DNS. Not purchased.
