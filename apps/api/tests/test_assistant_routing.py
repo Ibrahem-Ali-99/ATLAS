@@ -41,6 +41,8 @@ def test_clear_questions_route_without_a_model() -> None:
     )
     assert route_question("Send the customer an email", has_history=False) is Intent.mutation
     assert route_question("Hello", has_history=False) is Intent.greeting
+    named = "Name one company stored in this workspace"
+    assert route_question(named, has_history=True) is Intent.grounded
     assert parse_classifier_intent('{"intent":"general"}') is Intent.general
     assert parse_classifier_intent("not json") is None
 

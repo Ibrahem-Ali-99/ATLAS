@@ -40,20 +40,24 @@ _LIMIT = 8
 
 class QueryArgs(BaseModel):
     query: str = Field(default="", max_length=200)
+    limit: int | None = Field(default=None, ge=1, le=8)
 
 
 class LeadArgs(BaseModel):
     query: str = Field(default="", max_length=200)
     needs_attention: bool = False
+    limit: int | None = Field(default=None, ge=1, le=8)
 
 
 class InboxArgs(BaseModel):
     query: str = Field(default="", max_length=200)
+    limit: int | None = Field(default=None, ge=1, le=8)
 
 
 class TaskArgs(BaseModel):
     query: str = Field(default="", max_length=200)
     overdue_only: bool = False
+    limit: int | None = Field(default=None, ge=1, le=8)
 
 
 class KnowledgeArgs(BaseModel):
@@ -62,6 +66,7 @@ class KnowledgeArgs(BaseModel):
 
 class WorkflowArgs(BaseModel):
     failed_only: bool = False
+    limit: int | None = Field(default=None, ge=1, le=8)
 
 
 class AvailabilityArgs(BaseModel):
@@ -148,13 +153,20 @@ def _schema(name: str, description: str, model: type[BaseModel]) -> dict[str, An
     }
 
 
+def _cap(limit: int | None) -> int:
+    if not isinstance(limit, int):
+        return _LIMIT
+    return min(_LIMIT, max(1, limit))
+
+
 def _list_companies(ctx: ToolContext, args: QueryArgs) -> ToolOutcome:
+    size = _cap(args.limit)
     rows, total = crm.list_companies(
         ctx.db,
         ctx.organization_id,
         q=args.query or None,
         page=1,
-        page_size=_LIMIT,
+        page_size=size,
     )
     payload_rows = [
         {"name": row.name, "industry": row.industry, "website": row.website} for row in rows
@@ -162,17 +174,21 @@ def _list_companies(ctx: ToolContext, args: QueryArgs) -> ToolOutcome:
     records = [
         _crm("company", row.id, row.name, row.industry or row.website or row.name) for row in rows
     ]
-    return _ok("list_companies", {"companies": payload_rows, "total": total}, records)
+    payload: dict[str, Any] = {"companies": payload_rows, "total": total}
+    if args.limit is not None:
+        payload["limited_to"] = size
+    return _ok("list_companies", payload, records)
 
 
 def _list_contacts(ctx: ToolContext, args: QueryArgs) -> ToolOutcome:
+    size = _cap(args.limit)
     rows, total = crm.list_contacts(
         ctx.db,
         ctx.organization_id,
         q=args.query or None,
         company_id=None,
         page=1,
-        page_size=_LIMIT,
+        page_size=size,
     )
     payload_rows = [
         {"name": row.full_name, "email": row.email, "title": row.title} for row in rows
@@ -181,10 +197,14 @@ def _list_contacts(ctx: ToolContext, args: QueryArgs) -> ToolOutcome:
         _crm("contact", row.id, row.full_name, row.email or row.title or row.full_name)
         for row in rows
     ]
-    return _ok("list_contacts", {"contacts": payload_rows, "total": total}, records)
+    payload: dict[str, Any] = {"contacts": payload_rows, "total": total}
+    if args.limit is not None:
+        payload["limited_to"] = size
+    return _ok("list_contacts", payload, records)
 
 
 def _list_leads(ctx: ToolContext, args: LeadArgs) -> ToolOutcome:
+    size = _cap(args.limit)
     term = args.query.strip() or None
     if args.needs_attention:
         rows = []
@@ -199,11 +219,11 @@ def _list_leads(ctx: ToolContext, args: LeadArgs) -> ToolOutcome:
                 owner_user_id=None,
                 origin=None,
                 page=1,
-                page_size=_LIMIT,
+                page_size=size,
             )
             total += count
             for row in found:
-                if len(rows) < _LIMIT:
+                if len(rows) < size:
                     rows.append(row)
     else:
         rows, total = crm.list_leads(
@@ -215,9 +235,9 @@ def _list_leads(ctx: ToolContext, args: LeadArgs) -> ToolOutcome:
             owner_user_id=None,
             origin=None,
             page=1,
-            page_size=_LIMIT,
+            page_size=size,
         )
-    contact_ids = [row.contact_id for row in rows[:_LIMIT] if row.contact_id]
+    contact_ids = [row.contact_id for row in rows[:size] if row.contact_id]
     contact_names = {}
     if contact_ids:
         contact_names = {
@@ -236,20 +256,24 @@ def _list_leads(ctx: ToolContext, args: LeadArgs) -> ToolOutcome:
             "notes": _clip(row.notes),
             "contact": contact_names.get(row.contact_id),
         }
-        for row in rows[:_LIMIT]
+        for row in rows[:size]
     ]
     records = [
         _crm("lead", row.id, row.title, f"{_enum(row.status)}. {_clip(row.notes) or row.title}")
-        for row in rows[:_LIMIT]
+        for row in rows[:size]
     ]
-    return _ok(
-        "list_leads",
-        {"leads": payload_rows, "total": total, "needs_attention": args.needs_attention},
-        records,
-    )
+    payload: dict[str, Any] = {
+        "leads": payload_rows,
+        "total": total,
+        "needs_attention": args.needs_attention,
+    }
+    if args.limit is not None:
+        payload["limited_to"] = size
+    return _ok("list_leads", payload, records)
 
 
-def _list_members(ctx: ToolContext, _args: QueryArgs) -> ToolOutcome:
+def _list_members(ctx: ToolContext, args: QueryArgs) -> ToolOutcome:
+    size = _cap(args.limit)
     include_email = ctx.role == MembershipRole.admin
     payload_rows = []
     records = []
@@ -260,21 +284,21 @@ def _list_members(ctx: ToolContext, _args: QueryArgs) -> ToolOutcome:
             item["email"] = user.email
         payload_rows.append(item)
         records.append(_crm("member", user.id, user.full_name, role))
-    return _ok(
-        "list_members",
-        {"members": payload_rows[:_LIMIT], "total": len(payload_rows)},
-        records,
-    )
+    payload: dict[str, Any] = {"members": payload_rows[:size], "total": len(payload_rows)}
+    if args.limit is not None:
+        payload["limited_to"] = size
+    return _ok("list_members", payload, records[:size])
 
 
 def _list_opportunities(ctx: ToolContext, args: QueryArgs) -> ToolOutcome:
+    size = _cap(args.limit)
     query = select(Opportunity).where(
         Opportunity.organization_id == ctx.organization_id,
         Opportunity.archived_at.is_(None),
     )
     if args.query:
         query = query.where(Opportunity.title.ilike(f"%{args.query}%"))
-    rows = list(ctx.db.scalars(query.order_by(Opportunity.updated_at.desc()).limit(_LIMIT)).all())
+    rows = list(ctx.db.scalars(query.order_by(Opportunity.updated_at.desc()).limit(size)).all())
     payload_rows = [
         {
             "title": row.title,
@@ -288,12 +312,16 @@ def _list_opportunities(ctx: ToolContext, args: QueryArgs) -> ToolOutcome:
         _crm("opportunity", row.id, row.title, f"{row.stage}. {row.value or ''} {row.currency}")
         for row in rows
     ]
-    return _ok("list_opportunities", {"opportunities": payload_rows, "total": len(rows)}, records)
+    payload: dict[str, Any] = {"opportunities": payload_rows, "total": len(rows)}
+    if args.limit is not None:
+        payload["limited_to"] = size
+    return _ok("list_opportunities", payload, records)
 
 
 def _list_tasks(ctx: ToolContext, args: TaskArgs) -> ToolOutcome:
     from datetime import UTC, datetime
 
+    size = _cap(args.limit)
     now = datetime.now(UTC)
     query = select(WorkflowTask).where(
         WorkflowTask.organization_id == ctx.organization_id,
@@ -302,7 +330,7 @@ def _list_tasks(ctx: ToolContext, args: TaskArgs) -> ToolOutcome:
     if args.overdue_only:
         query = query.where(WorkflowTask.due_at.is_not(None), WorkflowTask.due_at < now)
     rows = list(
-        ctx.db.scalars(query.order_by(WorkflowTask.due_at.asc().nulls_last()).limit(_LIMIT)).all()
+        ctx.db.scalars(query.order_by(WorkflowTask.due_at.asc().nulls_last()).limit(size)).all()
     )
     payload_rows = [
         {
@@ -318,14 +346,18 @@ def _list_tasks(ctx: ToolContext, args: TaskArgs) -> ToolOutcome:
         _crm("task", row.id, row.title, row.due_at.isoformat() if row.due_at else row.status)
         for row in rows
     ]
-    return _ok(
-        "list_tasks",
-        {"tasks": payload_rows, "total": len(rows), "overdue_only": args.overdue_only},
-        records,
-    )
+    payload: dict[str, Any] = {
+        "tasks": payload_rows,
+        "total": len(rows),
+        "overdue_only": args.overdue_only,
+    }
+    if args.limit is not None:
+        payload["limited_to"] = size
+    return _ok("list_tasks", payload, records)
 
 
 def _search_inbox(ctx: ToolContext, args: InboxArgs) -> ToolOutcome:
+    size = _cap(args.limit)
     query = select(InboxConversation).where(
         InboxConversation.organization_id == ctx.organization_id,
         InboxConversation.archived_at.is_(None),
@@ -336,7 +368,7 @@ def _search_inbox(ctx: ToolContext, args: InboxArgs) -> ToolOutcome:
             or_(InboxConversation.subject.ilike(term), InboxConversation.channel.ilike(term))
         )
     rows = list(
-        ctx.db.scalars(query.order_by(InboxConversation.updated_at.desc()).limit(_LIMIT)).all()
+        ctx.db.scalars(query.order_by(InboxConversation.updated_at.desc()).limit(size)).all()
     )
     payload_rows = [
         {"subject": row.subject, "channel": row.channel, "status": _enum(row.status)}
@@ -345,7 +377,10 @@ def _search_inbox(ctx: ToolContext, args: InboxArgs) -> ToolOutcome:
     records = [
         _crm("inbox", row.id, row.subject, f"{row.channel}. {_enum(row.status)}") for row in rows
     ]
-    return _ok("search_inbox", {"conversations": payload_rows, "total": len(rows)}, records)
+    payload: dict[str, Any] = {"conversations": payload_rows, "total": len(rows)}
+    if args.limit is not None:
+        payload["limited_to"] = size
+    return _ok("search_inbox", payload, records)
 
 
 def _analytics(ctx: ToolContext, _args: QueryArgs) -> ToolOutcome:
@@ -447,10 +482,11 @@ def _availability(ctx: ToolContext, args: AvailabilityArgs) -> ToolOutcome:
 
 
 def _workflow_runs(ctx: ToolContext, args: WorkflowArgs) -> ToolOutcome:
+    size = _cap(args.limit)
     query = select(WorkflowRun).where(WorkflowRun.organization_id == ctx.organization_id)
     if args.failed_only:
         query = query.where(WorkflowRun.status.in_(("failed", "needs_attention")))
-    rows = list(ctx.db.scalars(query.order_by(WorkflowRun.created_at.desc()).limit(_LIMIT)).all())
+    rows = list(ctx.db.scalars(query.order_by(WorkflowRun.created_at.desc()).limit(size)).all())
     payload_rows = [
         {
             "kind": _enum(row.kind),
@@ -463,11 +499,14 @@ def _workflow_runs(ctx: ToolContext, args: WorkflowArgs) -> ToolOutcome:
     records = [
         _crm("workflow_run", row.id, _enum(row.kind), _enum(row.status)) for row in rows
     ]
-    return _ok(
-        "list_workflow_runs",
-        {"runs": payload_rows, "total": len(rows), "failed_only": args.failed_only},
-        records,
-    )
+    payload: dict[str, Any] = {
+        "runs": payload_rows,
+        "total": len(rows),
+        "failed_only": args.failed_only,
+    }
+    if args.limit is not None:
+        payload["limited_to"] = size
+    return _ok("list_workflow_runs", payload, records)
 
 
 def _provider_health(ctx: ToolContext, _args: QueryArgs) -> ToolOutcome:
@@ -514,7 +553,12 @@ def _proposal(ctx: ToolContext, intent: Intent, lead_name: str, tool_name: str) 
 
 
 _TOOLS: list[tuple[str, str, type[BaseModel], Any]] = [
-    ("list_companies", "List or search companies in this workspace.", QueryArgs, _list_companies),
+    (
+        "list_companies",
+        "List or search companies in this workspace. Set limit when the user asks for a count.",
+        QueryArgs,
+        _list_companies,
+    ),
     ("list_contacts", "List or search contacts in this workspace.", QueryArgs, _list_contacts),
     (
         "list_leads",

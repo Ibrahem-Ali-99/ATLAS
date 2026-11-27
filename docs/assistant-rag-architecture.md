@@ -20,14 +20,14 @@ On local Ollama `nomic-embed-text:v1.5`, development hard negatives landed betwe
 ## Turn order
 
 1. A prompt-injection phrase returns a refusal and does not search.
-2. Weather, jokes, and similar unrelated questions return a short boundary.
-3. A greeting or a capability question returns the stored reply for that intent.
+2. A greeting, general-knowledge question, or writing and reasoning request is answered by the language model. It does not search the workspace, and a greeting does not recite a capability list. A question that already states the quantities for a calculation is arithmetic, even when it mentions a customer or a pallet.
+3. A capability question still returns the stored product reply. A request for one record returns one record. A workspace list uses the matching tool. A document question uses the answerable pipeline.
 4. A bare topic asks which company or document the member means.
 5. Summary, follow-up, appointment, and task turns read one stored lead and, when needed, store a proposal. A delete or other mutation is refused as read-only.
 6. A follow-up pronoun is rewritten from the previous user question. The rewrite does not call a model.
 7. Document search uses the answerable pipeline. CRM search still adds leads and contacts of a named company.
-8. When nothing qualifies, the reply asks for the company, document, or lead.
-9. A grounded model call sees only the passages that survived answerability. The prompt tells the model to copy prices, codes, dates, temperatures, units, and opening hours as written, and to answer every supported part. `attribute_answer` then drops a citation whose text does not contain the number, code, or email in the answer. `80000` and `80,000` are the same figure. `9` and `09` are the same clock component. `19` is not accepted as `9`.
+8. When a specific company fact is not in the records, the reply says it was not found. An explanation with no stored passage may use general knowledge and says it is not a company record.
+9. A grounded model call sees only the passages that survived answerability. The prompt tells the model to copy prices, codes, dates, temperatures, units, and opening hours as written, and to copy a code in full. An excerpt that would otherwise end inside a code or a price is extended to the end of that token. The prompt also tells the model to answer every supported part. `attribute_answer` then drops a citation whose text does not contain the number, code, or email in the answer. `80000` and `80,000` are the same figure. `9` and `09` are the same clock component. `19` is not accepted as `9`.
 
 ## Public website chat and visitor Assistant sessions
 

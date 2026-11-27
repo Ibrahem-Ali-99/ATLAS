@@ -98,6 +98,106 @@ def test_customers_employees_and_leads_skip_the_document_library(
     assert stolen.status_code == 404
 
 
+def test_one_company_returns_one_record_and_one_citation(
+    client: TestClient, db: Session
+) -> None:
+    client.app.dependency_overrides[get_chat_client] = lambda: ForbiddenChat()
+    client.app.dependency_overrides[get_embedding_client] = lambda: HashEmbeddingClient()
+    admin = make_user(db, "ada@example.com", full_name="Ada Lovelace")
+    atlas = make_organization(db, "Atlas Demo", "atlas-demo")
+    make_membership(db, admin, atlas, MembershipRole.admin)
+    ada = login(client, "ada@example.com", PASSWORD)
+    headers = _csrf(ada)
+    org = _org(ada)
+    for name in ("Harbor & Co.", "Zephyr Mills"):
+        created = client.post(
+            f"/api/v1/organizations/{org}/companies",
+            json={"name": name, "industry": "Logistics"},
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+    uploaded = client.post(
+        f"/api/v1/organizations/{org}/documents",
+        files={
+            "file": (
+                "shortage-claim.txt",
+                b"Shortage claims require a pier photo and a written notice.",
+                "text/plain",
+            )
+        },
+        headers=headers,
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    _process_ingestion()
+
+    answer = _ask(client, org, headers, "Name one company stored in this workspace")
+    assert "Harbor & Co." in answer["content"]
+    assert "Zephyr Mills" not in answer["content"]
+    assert "Shortage claims" not in answer["content"]
+    assert answer["tools"] == ["list_companies"]
+    assert len(answer["sources"]) == 1
+    assert answer["sources"][0]["kind"] == "crm"
+    assert answer["sources"][0]["title"] == "Harbor & Co."
+
+
+def test_greeting_and_general_knowledge_do_not_search(
+    client: TestClient, db: Session
+) -> None:
+    class Talk:
+        def __init__(self) -> None:
+            self.systems: list[str] = []
+
+        def ensure_configured(self) -> None:
+            return None
+
+        def complete(self, system: str, user: str) -> str:
+            self.systems.append(system)
+            if "capital" in user.lower():
+                return "Paris is the capital of France. That is general knowledge."
+            if "240" in user and "15%" in user:
+                return "204 pallets remain. That figure is arithmetic, not a company record."
+            return "Hi. What are you working on?"
+
+        def stream(self, system: str, user: str):
+            yield self.complete(system, user)
+
+    embedder = HashEmbeddingClient()
+    talk = Talk()
+    client.app.dependency_overrides[get_chat_client] = lambda: talk
+    client.app.dependency_overrides[get_embedding_client] = lambda: embedder
+    admin = make_user(db, "ada@example.com")
+    atlas = make_organization(db, "Atlas Demo", "atlas-demo")
+    make_membership(db, admin, atlas, MembershipRole.admin)
+    ada = login(client, "ada@example.com", PASSWORD)
+    headers = _csrf(ada)
+    org = _org(ada)
+
+    greeting = _ask(client, org, headers, "Hello")
+    assert greeting["content"] == "Hi. What are you working on?"
+    assert "What I can help with" not in greeting["content"]
+    assert greeting["sources"] == []
+    assert greeting["tools"] == []
+    assert talk.systems
+    assert "capability" not in talk.systems[0].lower()
+
+    before = embedder.calls if hasattr(embedder, "calls") else 0
+    order = _ask(
+        client,
+        org,
+        headers,
+        "A customer orders 240 pallets and cancels 15% of the order. How many remain?",
+    )
+    assert "204" in order["content"]
+    assert order["sources"] == []
+    assert order["tools"] == []
+
+    capital = _ask(client, org, headers, "What is the capital of France?")
+    assert "Paris" in capital["content"]
+    assert capital["sources"] == []
+    assert capital["tools"] == []
+    assert not hasattr(embedder, "calls") or embedder.calls == before
+
+
 def test_compare_and_overdue_select_business_tools() -> None:
     from app.domains.assistant.planner import asks_for_several_sources, plan_request
 
@@ -118,6 +218,47 @@ def test_compare_and_overdue_select_business_tools() -> None:
         "Check whether Monday morning is open on the calendar."
     )
     assert asks_for_stored_appointment("Which appointments are stored?")
+    one = plan_request("Name one company stored in this workspace", [])
+    assert one.tools == [("list_companies", {"query": "", "limit": 1})]
+    assert one.general is False
+    hello = plan_request("Hello", [])
+    assert hello.general is True
+    assert hello.tools == []
+    capital = plan_request("What is the capital of France?", [])
+    assert capital.general is True
+    assert capital.tools == []
+    writing = plan_request("Write two sentences about why clear invoices matter.", [])
+    assert writing.general is True
+    freezer = plan_request("What temperature is the freezer kept at?", [])
+    assert [name for name, _arguments in freezer.tools] == ["search_knowledge"]
+    from app.domains.assistant.prompts import general_prompt
+    from app.domains.assistant.routing import Intent, route_question
+
+    pallet = (
+        "A customer orders 240 pallets and cancels 15% of the order. How many remain?"
+    )
+    reasoning = plan_request(pallet, [])
+    assert reasoning.general is True
+    assert reasoning.tools == []
+    assert route_question(pallet, has_history=False) is Intent.general
+    assert "204" in general_prompt(pallet, [])
+    yard = plan_request("How many pallets does the bonded yard hold?", [])
+    assert [name for name, _arguments in yard.tools] == ["search_knowledge"]
+    rate = plan_request("What is 15% of our frozen pallet rate?", [])
+    assert rate.general is False
+    assert [name for name, _arguments in rate.tools] == ["search_knowledge"]
+    insurance = plan_request(
+        "What is the cargo insurance occurrence limit and the deductible?",
+        [],
+    )
+    assert insurance.general is False
+    assert [name for name, _arguments in insurance.tools] == ["search_knowledge"]
+    follow = plan_request(
+        "And if they cancel 20% instead?",
+        [("user", pallet), ("assistant", "204 remain.")],
+    )
+    assert follow.general is True
+    assert follow.tools == []
 
 
 def _ask(

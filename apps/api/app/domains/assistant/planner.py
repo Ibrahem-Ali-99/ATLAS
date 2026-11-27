@@ -8,7 +8,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.domains.assistant.routing import allows_ungrounded_chat
+from app.domains.assistant.routing import (
+    allows_ungrounded_chat,
+    continues_supplied_reasoning,
+    is_open_conversation,
+    is_self_contained_reasoning,
+)
 
 _PRIVATE = re.compile(r"\b(private home|home address|salary|birthday|date of birth)\b")
 _EMPLOYEES = re.compile(
@@ -35,7 +40,62 @@ _DRAFT = re.compile(r"\b(draft|write)\b.{0,48}\b(message|email|reply|follow-up|f
 _APPOINTMENT = re.compile(r"\b(appointment|meeting)\b")
 _KNOWLEDGE = re.compile(
     r"\b(polic(?:y|ies)|procedure|documents?|warehous\w*|storage|bonded|contract|"
-    r"rate card|knowledge|according to|offers?|services)\b"
+    r"rate card|knowledge|according to|offers?|services|temperature|freezer|frozen|"
+    r"fees?|opening hours|invoice|superseded|insurance|deductible|occupancy)\b"
+)
+_NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+_QUANTITY = re.compile(
+    r"\b(?:name|list|give|show|pick|choose|return|find|cite)\s+"
+    r"(?:me\s+)?(?:only\s+|just\s+)?"
+    r"(one|two|three|four|five|six|seven|eight|nine|ten|\d{1,2})\b"
+    r"|\b(one|two|three|four|five|six|seven|eight|nine|ten|\d{1,2})\s+"
+    r"(companies|company|customers?|clients?|accounts?|leads?|contacts?|"
+    r"employees?|members?|people|documents?|tasks?|records?|opportunities|"
+    r"opportunity|workflows?)\b"
+    r"|\btop\s+(one|two|three|four|five|six|seven|eight|\d{1,2})\b"
+)
+_FILLER = {
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "stored",
+    "workspace",
+    "just",
+    "only",
+    "single",
+    "named",
+    "called",
+    "top",
+    "compare",
+    "comparison",
+    "versus",
+    "vs",
+    "business",
+    "performance",
+}
+_WORKSPACE_HINT = re.compile(r"\b(workspace|stored|crm|our records)\b")
+_RECORD_TOPIC = re.compile(r"\b(phone|address|booking|pallet|hours)\b")
+_EXPLAIN = re.compile(r"\b(explain|describe|overview|how does|what is a|what is an|what are)\b")
+_FIGURE = re.compile(
+    r"\b(how much|how many|when|code|fee|rate|address|phone|salary|temperature)\b"
 )
 _REFERENCE = re.compile(r"\b(that|this|those|them|it|mentioned|earlier)\b")
 _NOISE = re.compile(
@@ -106,30 +166,68 @@ def asks_for_several_sources(question: str) -> bool:
     return hits >= 2
 
 
+def requested_count(question: str) -> int | None:
+    """How many records the user asked for, when they named a count."""
+
+    match = _QUANTITY.search(question.lower())
+    if match is None:
+        return None
+    raw = next(group for group in match.groups() if group)
+    value = int(raw) if raw.isdigit() else _NUMBER_WORDS.get(raw)
+    if value is None or value < 1 or value > 8:
+        return None
+    return value
+
+
+def explains_without_a_figure(question: str) -> bool:
+    """An explanation can use general knowledge when no record answers it."""
+
+    text = " ".join(question.lower().split())
+    return bool(_EXPLAIN.search(text) and not _FIGURE.search(text))
+
+
 def plan_request(question: str, history: list[tuple[str, str]]) -> LocalDecision:
     text = " ".join(question.lower().split())
     if _PRIVATE.search(text):
         return LocalDecision(direct=PRIVATE_ANSWER)
+    if is_self_contained_reasoning(question) or continues_supplied_reasoning(question, history):
+        return LocalDecision(general=True)
+    if is_open_conversation(question):
+        return LocalDecision(general=True)
     if allows_ungrounded_chat(text) and not _business(text):
         return LocalDecision(general=True)
     prior = _prior_topic(history) if _REFERENCE.search(text) else None
     combined = f"{text} {prior.lower()}" if prior else text
     if _REFERENCE.search(text) and prior is None and not _business(text):
         return LocalDecision(direct=UNKNOWN_REFERENCE)
+    count = requested_count(question)
     named = [
         (name, arguments)
-        for name, arguments in _select(text, _query(question))
+        for name, arguments in _select(text, _query(question), question, count)
         if name != "search_knowledge"
     ]
     if named:
         return LocalDecision(tools=named[:3])
     query = _query(prior if prior else question)
-    tools = _select(combined, query)
+    source = f"{question} {prior}" if prior else question
+    tools = _select(combined, query, source, count)
     if tools:
         return LocalDecision(tools=tools[:3])
     if _REFERENCE.search(text) and prior is None:
         return LocalDecision(direct=UNKNOWN_REFERENCE)
-    return LocalDecision(direct=CLARIFY_ANSWER)
+    if _names_a_record(question):
+        label = _lookup_query(_query(question)) or question.strip()[:200]
+        return LocalDecision(
+            tools=[
+                ("list_companies", _with_limit({"query": label}, count)),
+                ("search_knowledge", {"query": question.strip()[:500]}),
+            ]
+        )
+    if _KNOWLEDGE.search(text) or _RECORD_TOPIC.search(text):
+        return LocalDecision(tools=[("search_knowledge", {"query": question.strip()[:500]})])
+    if _WORKSPACE_HINT.search(text):
+        return LocalDecision()
+    return LocalDecision(general=True)
 
 
 def compose_answer(question: str, payloads: list[dict[str, Any]]) -> str:
@@ -167,41 +265,54 @@ def answer_uses_results(text: str, payloads: list[dict[str, Any]]) -> bool:
         return True
     lowered = text.lower()
     mentioned = sum(1 for name in names if len(name) > 2 and name.lower() in lowered)
+    limit = _payload_limit(payloads)
+    if limit is not None:
+        return mentioned == limit or (mentioned > 0 and mentioned <= limit)
     if len(names) >= 3:
         return mentioned >= 3
     return mentioned >= 1
 
 
-def _select(text: str, query: str) -> list[tuple[str, dict[str, Any]]]:
+def _select(
+    text: str, query: str, source: str, count: int | None
+) -> list[tuple[str, dict[str, Any]]]:
     tools: list[tuple[str, dict[str, Any]]] = []
-    knowledge = bool(_KNOWLEDGE.search(text))
+    knowledge = bool(_KNOWLEDGE.search(text) or _RECORD_TOPIC.search(text))
+    lookup = _lookup_query(query)
     if _EMPLOYEES.search(text):
-        tools.append(("list_members", {}))
+        tools.append(("list_members", _with_limit({}, count)))
     if _CUSTOMERS.search(text) and not knowledge:
-        tools.append(("list_companies", {"query": "" if _generic(query) else query}))
+        tools.append(("list_companies", _with_limit({"query": lookup}, count)))
     if _LEADS.search(text) and not (knowledge and "lead" not in text and "priorit" not in text):
         attention = bool(re.search(r"priorit|attention|open lead|need", text))
         tools.append(
             (
                 "list_leads",
-                {
-                    "query": "" if _generic(query) or attention else query,
-                    "needs_attention": attention,
-                },
+                _with_limit(
+                    {
+                        "query": "" if attention else lookup,
+                        "needs_attention": attention,
+                    },
+                    count,
+                ),
             )
         )
     if _CONTACTS.search(text):
-        tools.append(("list_contacts", {"query": "" if _generic(query) else query}))
+        tools.append(("list_contacts", _with_limit({"query": lookup}, count)))
     if _OPPORTUNITIES.search(text):
-        tools.append(("list_opportunities", {"query": "" if _generic(query) else query}))
+        tools.append(("list_opportunities", _with_limit({"query": lookup}, count)))
     if (_TASKS.search(text) or _OVERDUE.search(text)) and not _DRAFT.search(text):
-        tools.append(("list_tasks", {"overdue_only": bool(_OVERDUE.search(text))}))
+        tools.append(
+            ("list_tasks", _with_limit({"overdue_only": bool(_OVERDUE.search(text))}, count))
+        )
     if _INBOX.search(text):
-        tools.append(("search_inbox", {"query": "" if _generic(query) else query}))
+        tools.append(("search_inbox", _with_limit({"query": lookup}, count)))
     if _ANALYTICS.search(text):
         tools.append(("business_analytics", {}))
     if _WORKFLOWS.search(text):
-        tools.append(("list_workflow_runs", {"failed_only": "fail" in text}))
+        tools.append(
+            ("list_workflow_runs", _with_limit({"failed_only": "fail" in text}, count))
+        )
     if _CALENDAR.search(text) and not knowledge:
         tools.append(("check_availability", {}))
     if _PROVIDERS.search(text):
@@ -217,7 +328,7 @@ def _select(text: str, query: str) -> list[tuple[str, dict[str, Any]]]:
     elif _APPOINTMENT.search(text) and "available" not in text:
         tools.append(("propose_appointment", {"lead_name": lead_name or "the lead"}))
     if knowledge:
-        tools.append(("search_knowledge", {"query": query or text[:500]}))
+        tools.append(("search_knowledge", {"query": source.strip()[:500]}))
     return tools
 
 
@@ -274,6 +385,41 @@ def _generic(query: str) -> bool:
     return not query or words <= _GENERIC
 
 
+def _lookup_query(query: str) -> str:
+    words = [
+        word
+        for word in query.split()
+        if word not in _FILLER and word not in _GENERIC and not word.isdigit()
+    ]
+    cleaned = " ".join(words)
+    if _generic(cleaned):
+        return ""
+    return cleaned
+
+
+def _with_limit(arguments: dict[str, Any], count: int | None) -> dict[str, Any]:
+    if count is None:
+        return arguments
+    return {**arguments, "limit": count}
+
+
+def _names_a_record(question: str) -> bool:
+    if "&" in question:
+        return True
+    return bool(re.search(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", question))
+
+
+def _payload_limit(payloads: list[dict[str, Any]]) -> int | None:
+    limits = [
+        payload.get("limited_to")
+        for payload in payloads
+        if isinstance(payload.get("limited_to"), int)
+    ]
+    if not limits:
+        return None
+    return min(limits)
+
+
 def _names(payloads: list[dict[str, Any]]) -> list[str]:
     found: list[str] = []
     for payload in payloads:
@@ -321,9 +467,23 @@ def _compose_one(payload: dict[str, Any]) -> str:
 
 def _companies(payload: dict[str, Any]) -> str:
     rows = _rows(payload, "companies")
+    limit = payload.get("limited_to")
+    if isinstance(limit, int) and limit > 0:
+        rows = rows[:limit]
     total = int(payload.get("total") or len(rows))
     if not rows:
         return "No companies are stored in this workspace."
+    if isinstance(limit, int) and len(rows) == 1:
+        industry = rows[0].get("industry") or "no industry is stored"
+        return (
+            f"{rows[0]['name']} is one company stored in this workspace. "
+            f"Industry: {industry}."
+        )
+    if isinstance(limit, int):
+        lines = [
+            f"- {row['name']} ({row.get('industry') or 'industry not stored'})" for row in rows
+        ]
+        return "\n".join(lines)
     if len(rows) == 1:
         industry = rows[0].get("industry") or "no industry is stored"
         return f"{rows[0]['name']} is the company on file. Industry: {industry}."

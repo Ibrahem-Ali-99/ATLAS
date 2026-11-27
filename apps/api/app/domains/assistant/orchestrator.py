@@ -24,7 +24,9 @@ from app.domains.assistant.planner import (
     PRIVATE_ANSWER,
     answer_uses_results,
     compose_answer,
+    explains_without_a_figure,
     plan_request,
+    requested_count,
 )
 from app.domains.assistant.tools import ToolContext, ToolOutcome, execute_tool, tool_schemas
 from app.domains.identity.models import MembershipRole
@@ -32,14 +34,19 @@ from app.domains.identity.service import get_membership
 from app.domains.knowledge.retrieval import RetrievedChunk
 from app.integrations.language import ChatClient, EmbeddingClient, ModelToolResult
 
-MAX_ROUNDS = 4
+MAX_ROUNDS = 3
 MAX_CALLS = 3
 
 _TOOL_SYSTEM = (
     "You are the ATLAS business assistant for one organization. "
     "Choose a tool when the user asks for workspace records. "
-    "Use search_knowledge only for questions about documents, policies, or procedures. "
+    "Do not call a tool for greetings, general knowledge, writing, or reasoning. "
+    "A question that already states the quantities for a calculation is arithmetic. "
+    "Do not call a tool because that question mentions a customer, order, or pallet. "
+    "Use search_knowledge only for questions about documents, policies, rates, or procedures. "
+    "Do not use search_knowledge just to name a company, lead, or employee. "
     "Use list_companies for customers, list_members for employees, and list_leads for leads. "
+    "If the user asks for one record, set limit to 1. Do not return a longer list. "
     "Do not send messages, book meetings, spend money, or change records. "
     "Use provider_health to read connection status. "
     "It does not send, book, or change a subscription. "
@@ -84,8 +91,15 @@ def orchestrate_turn(
         request=question.strip(),
     )
     context = _context(db, conversation, embedder)
+    decision = plan_request(question, history)
     try:
-        if _tool_client(chat):
+        needs_model_plan = (
+            _tool_client(chat)
+            and not decision.general
+            and not decision.direct
+            and not decision.tools
+        )
+        if needs_model_plan:
             try:
                 plan = _run_model(db, execution, context, chat, question, history, summary)
             except AppError as exc:
@@ -159,7 +173,7 @@ def _run_local(
     linked = _linked_contact(db, execution, context, question, outcomes)
     if linked is not None:
         return linked
-    return _assemble(outcomes, summary)
+    return _assemble(_apply_count(question, outcomes), summary, question=question)
 
 
 def _run_model(
@@ -186,7 +200,9 @@ def _run_model(
     final_text: str | None = None
     for round_index in range(MAX_ROUNDS):
         choice = "none" if round_index == MAX_ROUNDS - 1 else "auto"
-        result = chat.complete_with_tools(messages, schemas, tool_choice=choice)  # type: ignore[attr-defined]
+        result = chat.complete_with_tools(  # type: ignore[attr-defined]
+            messages, schemas, tool_choice=choice, reasoning_effort="low"
+        )
         _remember_tokens(db, execution, result)
         if not result.tool_calls or choice == "none":
             final_text = result.content
@@ -220,6 +236,7 @@ def _run_model(
                 outcomes.append(
                     _run_one(db, execution, context, call.name, _object(call.arguments))
                 )
+            _apply_count(question, outcomes[-1:])
             messages.append(
                 {
                     "role": "tool",
@@ -236,7 +253,8 @@ def _run_model(
         return linked
     if any(outcome.documents for outcome in outcomes):
         trust_model = True
-    return _assemble(outcomes, final_text if trust_model else None, summary)
+    outcomes = _apply_count(question, outcomes)
+    return _assemble(outcomes, final_text if trust_model else None, summary, question=question)
 
 
 def _cover_business_tools(
@@ -394,8 +412,40 @@ def _linked_contact(
     )
 
 
+def _apply_count(question: str, outcomes: list[ToolOutcome]) -> list[ToolOutcome]:
+    count = requested_count(question)
+    if count is None:
+        return outcomes
+    keys = (
+        "companies",
+        "contacts",
+        "leads",
+        "members",
+        "opportunities",
+        "tasks",
+        "conversations",
+        "runs",
+        "connections",
+    )
+    for outcome in outcomes:
+        if outcome.name == "search_knowledge":
+            continue
+        for key in keys:
+            rows = outcome.payload.get(key)
+            if isinstance(rows, list) and len(rows) > count:
+                outcome.payload[key] = rows[:count]
+                outcome.payload["limited_to"] = count
+        if len(outcome.records) > count:
+            outcome.records = outcome.records[:count]
+            outcome.payload["limited_to"] = count
+    return outcomes
+
+
 def _assemble(
-    outcomes: list[ToolOutcome], summary: str | None, model_text: str | None = None
+    outcomes: list[ToolOutcome],
+    summary: str | None,
+    model_text: str | None = None,
+    question: str = "",
 ) -> TurnPlan:
     documents: list[RetrievedChunk] = []
     records: list[dict[str, str]] = []
@@ -426,6 +476,8 @@ def _assemble(
             summary=summary,
         )
     if knowledge and not records:
+        if explains_without_a_figure(question):
+            return TurnPlan(mode="general", phases=phases, summary=summary)
         from app.domains.assistant.service import NO_RECORDS
 
         return TurnPlan(

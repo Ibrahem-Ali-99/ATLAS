@@ -18,6 +18,7 @@ from app.domains.assistant.catalog import answer_inventory as read_inventory
 from app.domains.assistant.catalog import answer_leads as read_leads
 from app.domains.assistant.context import retrieve_crm_records
 from app.domains.assistant.models import (
+    AssistantExecution,
     Conversation,
     ConversationSummary,
     Message,
@@ -25,8 +26,8 @@ from app.domains.assistant.models import (
     MessageSource,
     SourceKind,
 )
-from app.domains.assistant.orchestrator import TurnPlan, chat_selects_tools, orchestrate_turn
-from app.domains.assistant.planner import asks_for_several_sources
+from app.domains.assistant.orchestrator import TurnPlan, orchestrate_turn
+from app.domains.assistant.planner import asks_for_several_sources, plan_request
 from app.domains.assistant.prompts import (
     GENERAL_SYSTEM,
     GROUNDED_SYSTEM,
@@ -40,13 +41,14 @@ from app.domains.assistant.routing import (
     CLASSIFIER_SYSTEM,
     GREETING_ANSWER,
     INJECTION_ANSWER,
+    MODEL_CHAT_UNAVAILABLE,
     MUTATION_ANSWER,
     RECORD_OVERRIDE_ANSWER,
-    UNRELATED_ANSWER,
     Intent,
     allows_ungrounded_chat,
     asks_for_stored_appointment,
     is_bare_topic,
+    is_open_conversation,
     is_record_override,
     operation_intents,
     parse_classifier_intent,
@@ -107,6 +109,7 @@ class PreparedTurn:
     escalation_reason: str | None = None
     execution_id: uuid.UUID | None = None
     proposal_draft: operations.ProposalDraft | None = None
+    brief: bool = False
 
     def holds_evidence(self) -> bool:
         """A grounded draft can state a fact the retrieved rows do not support."""
@@ -263,7 +266,6 @@ def prepare_turn(
     db.add(user_message)
     db.commit()
     history = _prior_turns(db, organization_id, conversation.id, user_message.id)
-    summary = _checkpoint_summary(db, conversation, user_message.id, chat)
     titles = _recent_source_titles(db, organization_id, conversation.id, user_message.id, content)
     intent = route_question(content, has_history=bool(history))
     if intent is Intent.injection:
@@ -274,8 +276,6 @@ def prepare_turn(
         if excerpts:
             answer += f"\n\nFrom {excerpts[0].document_title}: {excerpts[0].content[:700]}"
         return _stored_reply(db, conversation, answer, _phases("retrieving_documents"))
-    if intent is Intent.unrelated:
-        return _stored_reply(db, conversation, UNRELATED_ANSWER, _phases())
     if intent is Intent.ambiguous and is_bare_topic(content):
         return _stored_reply(db, conversation, AMBIGUOUS_ANSWER, _phases())
     if intent is Intent.ambiguous:
@@ -318,11 +318,13 @@ def prepare_turn(
         )
     if intent is Intent.capability:
         return _stored_reply(db, conversation, CAPABILITY_ANSWER, _phases())
-    if intent is Intent.greeting and not chat_selects_tools(chat):
-        return _stored_reply(db, conversation, GREETING_ANSWER, _phases())
     if intent is Intent.recall:
         opening = _opening_user_text(db, organization_id, conversation.id, user_message.id)
         return _stored_reply(db, conversation, recall_answer(history, opening), _phases())
+    if _conversational(content, intent):
+        return _conversational_turn(
+            db, conversation, user_message, content, history, intent, chat
+        )
     read = _catalog_answer(db, organization_id, intent)
     if read is not None and not asks_for_several_sources(content):
         return _stored_read(db, conversation, read)
@@ -330,6 +332,7 @@ def prepare_turn(
         clarification = operations.clarify_named_work(db, organization_id, content)
         if clarification:
             return _stored_reply(db, conversation, clarification, _phases("searching_crm"))
+    summary = _checkpoint_summary(db, conversation, user_message.id, chat)
     return _from_plan(
         db,
         conversation,
@@ -412,10 +415,11 @@ def _from_plan(
             proposal_draft=plan.proposal,
         )
     answer = plan.answer or NO_RECORDS
+    records = _records_used(answer, plan.crm_records)
     if answer == NO_RECORDS:
         conversation.needs_human_review = True
         conversation.escalation_reason = "No relevant organization evidence was found"
-    saved = _save_answer(db, conversation, answer, [], plan.crm_records)
+    saved = _save_answer(db, conversation, answer, [], records)
     if plan.proposal is not None:
         operations.attach_proposal(db, conversation, saved, plan.proposal)
     executions.finish_execution(db, plan.execution_id, assistant_message_id=saved.id)
@@ -425,7 +429,7 @@ def _from_plan(
         system_prompt="",
         user_prompt="",
         documents=[],
-        crm_records=plan.crm_records,
+        crm_records=records,
         document_search=plan.document_search,
         refusal=saved.content,
         phases=plan.phases,
@@ -465,6 +469,7 @@ def reject_public_turn(
 
 
 def complete_turn(db: Session, turn: PreparedTurn, client: ChatClient) -> ReplyOut:
+    _prepare_model(turn, client)
     if turn.needs_model:
         try:
             answer = client.complete(turn.system_prompt, turn.user_prompt).strip()
@@ -476,6 +481,7 @@ def complete_turn(db: Session, turn: PreparedTurn, client: ChatClient) -> ReplyO
             answer = _answer_from_evidence(turn)
         if not answer:
             raise AppError(502, "llm_failed", "The language model returned an empty answer")
+        note_model_usage(db, turn, client)
     else:
         answer = turn.refusal or NO_RECORDS
     return save_completed_turn(db, turn, answer)
@@ -535,10 +541,125 @@ def save_completed_turn(db: Session, turn: PreparedTurn, answer: str) -> ReplyOu
 
 
 def stream_turn(turn: PreparedTurn, client: ChatClient) -> Iterator[str]:
+    _prepare_model(turn, client)
     if turn.refusal is not None:
         yield turn.refusal
         return
     yield from client.stream(turn.system_prompt, turn.user_prompt)
+
+
+def note_model_usage(db: Session, turn: PreparedTurn, client: ChatClient) -> None:
+    usage = getattr(client, "last_usage", None)
+    if not isinstance(usage, tuple) or turn.execution_id is None:
+        return
+    row = db.get(AssistantExecution, turn.execution_id)
+    if row is None:
+        return
+    prompt, completion = usage if len(usage) == 2 else (None, None)
+    executions.add_tokens(
+        row,
+        prompt if isinstance(prompt, int) else None,
+        completion if isinstance(completion, int) else None,
+    )
+
+
+def _conversational(content: str, intent: Intent) -> bool:
+    if intent in {
+        Intent.capability,
+        Intent.inventory,
+        Intent.documents,
+        Intent.companies,
+        Intent.inquiries,
+        Intent.leads,
+        Intent.recall,
+        Intent.mutation,
+        Intent.handoff,
+        Intent.summary,
+        Intent.follow_up,
+        Intent.appointment,
+        Intent.task,
+        Intent.ambiguous,
+        Intent.injection,
+    }:
+        return False
+    if intent in {Intent.greeting, Intent.unrelated}:
+        return True
+    if not is_open_conversation(content):
+        return False
+    decision = plan_request(content, [])
+    return not decision.tools and decision.direct is None
+
+
+def _conversational_turn(
+    db: Session,
+    conversation: Conversation,
+    user_message: Message,
+    content: str,
+    history: list[tuple[str, str]],
+    intent: Intent,
+    chat: ChatClient | None,
+) -> PreparedTurn:
+    if not _can_attempt_model(chat):
+        text = GREETING_ANSWER if intent is Intent.greeting else MODEL_CHAT_UNAVAILABLE
+        return _stored_reply(db, conversation, text, _phases())
+    execution = executions.begin_execution(
+        db,
+        organization_id=conversation.organization_id,
+        conversation_id=conversation.id,
+        user_id=conversation.user_id,
+        user_message_id=user_message.id,
+        request=content.strip(),
+    )
+    executions.add_step(
+        db,
+        execution,
+        tool_name="respond",
+        arguments={},
+        status="succeeded",
+        duration_ms=0,
+        records=[],
+    )
+    turn = _general_turn(conversation, content, history, "skipped", _phases())
+    turn.execution_id = execution.id
+    turn.brief = True
+    return turn
+
+
+def _can_attempt_model(chat: ChatClient | None) -> bool:
+    """True when a chat client exists. A missing key is reported by the route."""
+
+    if chat is None or not callable(getattr(chat, "complete", None)):
+        return False
+    ensure = getattr(chat, "ensure_configured", None)
+    if not callable(ensure):
+        return True
+    try:
+        ensure()
+    except AppError:
+        return True
+    except Exception:
+        return False
+    return True
+
+
+def _prepare_model(turn: PreparedTurn, client: ChatClient) -> None:
+    if not turn.brief:
+        return
+    prefer = getattr(client, "prefer_brief_reply", None)
+    if callable(prefer):
+        prefer()
+
+
+def _records_used(answer: str, records: list[dict[str, str]]) -> list[dict[str, str]]:
+    if len(records) <= 1:
+        return records
+    lowered = answer.lower()
+    named = [
+        record
+        for record in records
+        if len(record.get("title", "")) > 2 and record["title"].lower() in lowered
+    ]
+    return named if named else records[:1]
 
 
 def _catalog_answer(db: Session, organization_id: uuid.UUID, intent: Intent) -> ReadAnswer | None:
@@ -783,6 +904,7 @@ def _general_turn(
         crm_records=[],
         document_search=document_search,
         phases=phases or _phases(),
+        question=content,
         summary=summary,
     )
 
@@ -807,6 +929,8 @@ def _checkpoint_summary(
         ).all()
     )
     if existing is not None and existing.through_message_id == through_message_id:
+        return existing.summary
+    if existing is not None and len(messages) - existing.message_count < 4:
         return existing.summary
     if sum(len(message.content) for message in messages) <= 2400 or chat is None:
         return existing.summary if existing is not None else None

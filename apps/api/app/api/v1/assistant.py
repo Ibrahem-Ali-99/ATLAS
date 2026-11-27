@@ -423,6 +423,7 @@ def stream_message(
             answer = turn.refusal if turn.refusal is not None else "".join(parts).strip()
             if turn.needs_model and not answer:
                 raise AppError(502, "llm_failed", "The language model returned an empty answer")
+            service.note_model_usage(db, turn, chat)
             reply = service.save_completed_turn(db, turn, answer or service.NO_RECORDS)
             record_operation(
                 operation="assistant_response",

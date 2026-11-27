@@ -92,8 +92,27 @@ _INJECTION = re.compile(
     r"\breveal (your |the )?(hidden |system )?prompt\b"
 )
 _UNRELATED = re.compile(
-    r"\b(weather|forecast|joke|recipe|sports score|capital of france|who won the)\b|"
+    r"\b(weather|forecast|joke|recipe|sports score|capital of|who won the)\b|"
     r"\btranslate this\b"
+)
+_OBVIOUS_GENERAL = re.compile(
+    r"\b(capital of|who won|weather|forecast|joke|recipe|translate|spell|"
+    r"how are you|thank you|thanks)\b"
+)
+_CREATIVE = re.compile(
+    r"\b(write|rewrite|rephrase|brainstorm|compose|outline|poem|haiku|help me think)\b"
+)
+_WORKSPACE_SCOPE = re.compile(
+    r"\b(our|ours|workspace|stored|crm|approval|approvals|workflow|inbox|"
+    r"customer|customers|company|companies|lead|leads|contact|contacts|"
+    r"employee|employees|staff|document|documents|invoice|policy|policies|"
+    r"rate card|according to)\b"
+)
+_RECORD_FACT = re.compile(
+    r"\b(temperature|freezer|frozen|fee|fees|rate|rates|opening hours|"
+    r"bond|bonded|yard|warehouse|warehousing|procedure|contract|"
+    r"booking|superseded|salary|phone|address|pallet|storage|"
+    r"insurance|deductible|occupancy)\b"
 )
 _BARE_TOPIC = re.compile(r"^(storage|rates?|yard|claims|cover|hours)$")
 
@@ -163,17 +182,11 @@ MUTATION_ANSWER = "\n".join(
     ]
 )
 
-GREETING_ANSWER = (
-    "Hello. Tell me what you want to check in this workspace and I will use the stored "
-    "records. I can explain ATLAS, list what this organization has stored, and answer "
-    "from those CRM records and documents. I will not guess a company fact that is not "
-    "in those records."
-)
+GREETING_ANSWER = "Hello. What would you like to work on?"
 
-UNRELATED_ANSWER = (
-    "I can't help with that from here. I don't check the weather, tell jokes, or answer "
-    "general knowledge. I can look up this organization's documents and CRM, explain how "
-    "approvals work, or draft a follow-up that waits until someone approves it."
+MODEL_CHAT_UNAVAILABLE = (
+    "I can answer that once the language model is available. "
+    "I can still look up a stored company, lead, or document."
 )
 
 INJECTION_ANSWER = (
@@ -287,11 +300,14 @@ def route_question(question: str, *, has_history: bool) -> Intent:
         return Intent.greeting
     if is_bare_topic(text):
         return Intent.ambiguous
+    if is_self_contained_reasoning(text):
+        return Intent.general
     if has_history and _REPHRASE.search(text):
         return Intent.general
     if _REFERENCE.search(text):
         return Intent.grounded
-    if has_history and _PRONOUN.search(text) and not _FACT.search(text) and len(text.split()) <= 12:
+    dangling = bool(_PRONOUN.search(text)) and not _WORKSPACE_SCOPE.search(text)
+    if has_history and dangling and not _FACT.search(text) and len(text.split()) <= 12:
         return Intent.ambiguous
     return Intent.grounded
 
@@ -318,6 +334,142 @@ def parse_classifier_intent(raw: str) -> Intent | None:
 def allows_ungrounded_chat(question: str) -> bool:
     """A question with no retrieved record may reach the model only as conversation."""
     return bool(_UNGROUNDED.search(normalize_question(question)))
+
+
+_STORED_LOOKUP = re.compile(
+    r"\b(our|ours|stored|according to|on file|in the crm|in this workspace|"
+    r"rate card|the document|the policy|the contract|do we (?:have|charge|store)|"
+    r"does the (?:yard|warehouse|document|policy)|what does the)\b"
+)
+_MISSING_FIGURE = re.compile(
+    r"\b(?:the|our|current|frozen|chilled|ambient|bonded|weekly|storage)\s+"
+    r"(?:rate|fee|price|tariff|charge|salary)\b"
+)
+_RESULT_ASK = re.compile(
+    r"\b(how many|how much|remain(?:ing|s)?|left|total|difference|calculate|compute|"
+    r"multiplied|times|plus|minus|divided)\b"
+)
+_PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|percent\b)")
+_PHONE_LIKE = re.compile(r"\+\d[\d\-]{6,}\d")
+
+
+def is_self_contained_reasoning(question: str) -> bool:
+    """A word problem that already states the quantities needed to compute an answer.
+
+    Business nouns in that problem are the subject of the arithmetic. They are not
+    a request to search the CRM or the document library.
+    """
+
+    text = normalize_question(question)
+    if not text or is_prompt_injection(text) or is_record_override(text):
+        return False
+    if _FOLLOW_UP.search(text) or _APPOINTMENT.search(text) or _TASK.search(text):
+        return False
+    if _DRAFT_EMAIL.search(text) or _EXTERNAL_SEND.search(text):
+        return False
+    if _MUTATION_VERB.search(text) and _MUTATION_OBJECT.search(text):
+        return False
+    if _STORED_LOOKUP.search(text) or _MISSING_FIGURE.search(text):
+        return False
+    without_phones = _PHONE_LIKE.sub(" ", text)
+    numbers = re.findall(r"\d+(?:\.\d+)?", without_phones)
+    percent = _PERCENT.search(without_phones)
+    operator = bool(
+        re.search(r"\b(multiplied|times|plus|minus|divided|calculate|compute)\b", without_phones)
+    )
+    asks = bool(_RESULT_ASK.search(without_phones))
+    if percent and len(numbers) >= 2 and (asks or operator):
+        return True
+    if operator and len(numbers) >= 2:
+        return True
+    if (
+        asks
+        and len(numbers) >= 2
+        and re.search(r"\b(remain(?:ing|s)?|left|total|difference)\b", text)
+    ):
+        return True
+    return False
+
+
+def continues_supplied_reasoning(question: str, history: list[tuple[str, str]]) -> bool:
+    """A short change to a calculation that was already stated in this conversation."""
+
+    text = normalize_question(question)
+    if not text or _STORED_LOOKUP.search(text) or _MISSING_FIGURE.search(text):
+        return False
+    if re.search(r"\b(company|companies|lead|document|policy)\b", text):
+        return False
+    if _REFERENCE.search(text):
+        return False
+    prior = next((content for role, content in reversed(history) if role == "user"), "")
+    if not prior or not is_self_contained_reasoning(prior):
+        return False
+    return bool(re.search(r"(%|percent|instead|what if|remain|remaining|left|another)", text))
+
+
+def arithmetic_hint(question: str) -> str | None:
+    """State a figure that is fully determined by the quantities in the question."""
+
+    if not is_self_contained_reasoning(question):
+        return None
+    text = normalize_question(_PHONE_LIKE.sub(" ", question))
+    percent = _PERCENT.search(text)
+    numbers = [float(item) for item in re.findall(r"\d+(?:\.\d+)?", text)]
+    if percent and re.search(r"\b(cancel(?:led|s|ing)?|reduce[ds]?)\b", text):
+        rate = float(percent.group(1))
+        bases = [item for item in numbers if item != rate]
+        if len(bases) == 1 and 0 <= rate <= 100:
+            remain = bases[0] * (1 - rate / 100)
+            cancelled = bases[0] * (rate / 100)
+            if re.search(r"\b(remain(?:ing|s)?|left)\b", text):
+                return _arithmetic_sentence(remain)
+            if re.search(r"\b(were cancelled|canceled amount|cancelled amount)\b", text):
+                return _arithmetic_sentence(cancelled)
+    product = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:multiplied by|times)\s*(\d+(?:\.\d+)?)",
+        text,
+    )
+    if product:
+        return _arithmetic_sentence(float(product.group(1)) * float(product.group(2)))
+    portion = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:%|percent)\s+of\s+(\d+(?:\.\d+)?)",
+        text,
+    )
+    if portion:
+        return _arithmetic_sentence(float(portion.group(1)) / 100 * float(portion.group(2)))
+    return None
+
+
+def _arithmetic_sentence(value: float) -> str:
+    shown = str(int(value)) if value.is_integer() else f"{value:.2f}".rstrip("0").rstrip(".")
+    return (
+        f"The quantities in the question produce {shown}. "
+        "That figure is arithmetic, not a stored company record."
+    )
+
+
+def is_open_conversation(question: str) -> bool:
+    """General talk, knowledge, writing, or reasoning that should not search the workspace."""
+
+    text = normalize_question(question)
+    if not text or is_prompt_injection(text) or is_record_override(text):
+        return False
+    if is_self_contained_reasoning(text):
+        return True
+    if _GREETING.search(text) or _OBVIOUS_GENERAL.search(text):
+        return True
+    if _CREATIVE.search(text) and not re.search(
+        r"\b(our|stored|according to|workspace|the document|follow-up|follow up)\b", text
+    ):
+        return True
+    if _WORKSPACE_SCOPE.search(text) or _RECORD_FACT.search(text):
+        return False
+    return bool(
+        re.search(
+            r"\b(explain|why|what is|what's|who is|how does|how do i|brainstorm)\b",
+            text,
+        )
+    )
 
 
 def unsupported_without_evidence(question: str) -> bool:
