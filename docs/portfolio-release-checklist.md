@@ -8,8 +8,8 @@ The procedure is [portfolio-deployment.md](portfolio-deployment.md). The private
 
 - The public pages are `/`, `/demo`, and `/case-study` in `apps/web-rebuild`. The workspace is `/login`. The portfolio image sets `ATLAS_PUBLIC_SITE=1`. A local product server leaves that flag unset, so `/` stays the workspace.
 - Product pictures in `apps/web-rebuild/public/portfolio/` are viewport captures of that client reading the Harbor & Co. workspace. They are not drawings. The integrations picture is the private review. It does not show a secret, and the public stack does not mount that database.
-- `infrastructure/compose.portfolio.yaml` builds `apps/web-rebuild`. The file still points visitor chat at Ollama `llama3.2:1b`. That model was measured on 27 November 2026 and is not an acceptable public assistant. Leave the paid key empty until a Groq-backed change is explicitly accepted. Visitor retrieval stays on the deterministic stand-in. Live email, campaigns, WhatsApp, Stripe, Google Calendar, and n8n stay off.
-- Public replies are off unless `ATLAS_PUBLIC_INFERENCE_ENABLED` is set. The portfolio file sets it. Limits are 8 replies per session and 200 per process inside one hour, 2 seconds apart, 2 at a time, 256 output tokens, and 2,000 input characters. Abuse patterns are rejected before the model is called. A non-visitor cannot use that client. A keyless call to a public model host is refused.
+- `infrastructure/compose.portfolio.yaml` builds `apps/web-rebuild`. It does not run Ollama. Visitor chat can use Groq `openai/gpt-oss-20b` only when `PORTFOLIO_PUBLIC_LLM_AUTHORIZED` and `PORTFOLIO_PUBLIC_INFERENCE_ENABLED` are both true and `PORTFOLIO_PUBLIC_LLM_API_KEY` is a key that is not the Harbor key. The file defaults both switches to false and the key to empty. Visitor retrieval is the in-process semantic index over that visitor's enterprise library. Live email, campaigns, WhatsApp, Stripe, Google Calendar, and n8n stay off.
+- Public replies stay off until those two switches are set. Limits are 8 replies per session, 200 per hour, 500 per UTC day, and 4,000 per UTC month, plus token caps and a $5 monthly spend cap. Replies are 2 seconds apart, 2 at a time, and 256 output tokens. The ledger is in Postgres. An administrator kill switch can stop calls without a restart. A visitor cannot set it. Abuse patterns are rejected before a provider is called. A non-visitor cannot use the public client.
 
 ## Qualification recorded on 27 November 2026
 
@@ -19,7 +19,7 @@ The procedure is [portfolio-deployment.md](portfolio-deployment.md). The private
 - [x] Every long-running service became healthy, and the model pull completed before the API started.
 - [x] A visitor launch was isolated from Atlas Demo, refused integration configuration and checkout, stopped at eight replies, refused a second immediate reply, and was deleted after the session expired.
 - [x] Resident memory with the model loaded was about 2.0 GiB. Ollama used 1.65 GiB of its 1.75 GiB cap. The 8 GB host recommendation stands for this compose file.
-- [ ] Do not rent a host for `llama3.2:1b` as the public assistant. The replacement, if accepted, is Groq `openai/gpt-oss-20b` behind the same budgets and a key that is not the Harbor key. That path is not implemented: a public demo still refuses a paid key.
+- [x] The public Groq path is implemented and left off. Do not set `PORTFOLIO_PUBLIC_LLM_AUTHORIZED` until the dedicated key is accepted. The workspace key remains refused.
 
 ## Before a machine is rented
 
@@ -31,13 +31,13 @@ The procedure is [portfolio-deployment.md](portfolio-deployment.md). The private
 
 ## On the host, still before traffic
 
-- [ ] One amd64 Ubuntu LTS machine, 2 vCPU, 8 GB RAM, 40 GB disk. Ports 22, 80, and 443 only.
+- [ ] One amd64 Ubuntu LTS machine, 2 vCPU, 4 GB RAM, 40 GB disk. Ports 22, 80, and 443 only.
 - [ ] One A record, and an AAAA record only if the host has a reachable IPv6 address.
 - [ ] Three generated secrets in `infrastructure/portfolio/.env`: `PORTFOLIO_SECRET_KEY`, the credential key after `demo-01=`, and `PORTFOLIO_POSTGRES_PASSWORD`. The password is letters and digits only. None of them are committed.
 - [ ] `PORTFOLIO_HOST`, the CORS origin, and `PORTFOLIO_CAMPAIGN_PUBLIC_URL` are `https://` plus that hostname. HTTP and HTTPS ports are 80 and 443.
-- [ ] Provider, Stripe, and Google values stay empty. `PORTFOLIO_ENVIRONMENT=development` and `PORTFOLIO_PUBLIC_DEMO=true`.
+- [ ] Provider, Stripe, and Google values stay empty. `PORTFOLIO_ENVIRONMENT=development` and `PORTFOLIO_PUBLIC_DEMO=true`. `PORTFOLIO_PUBLIC_INFERENCE_ENABLED` and `PORTFOLIO_PUBLIC_LLM_AUTHORIZED` stay false, and `PORTFOLIO_PUBLIC_LLM_API_KEY` stays empty.
 - [ ] `python3 infrastructure/portfolio/preflight.py --env-file infrastructure/portfolio/.env` exits 0.
-- [ ] `sh infrastructure/portfolio/up.sh` becomes healthy. The first boot pulls `llama3.2:1b` from the Ollama library. That pull is a download, not a paid API.
+- [ ] `sh infrastructure/portfolio/up.sh` becomes healthy. The first boot does not pull a local chat model.
 - [ ] Seed passwords are the ones already used for local development, exported only for `python3 infrastructure/portfolio/apply_demo.py`, then unset. They are not written into the env file or the site.
 - [ ] `python3 infrastructure/portfolio/smoke.py --base-url https://HOST` prints `{"ok": true}` and does not sign in.
 
@@ -53,7 +53,7 @@ The procedure is [portfolio-deployment.md](portfolio-deployment.md). The private
 
 ## Still in this working tree
 
-- The rest of `apps/web-rebuild` — layout, workspace page, presentation modules, and package files — was left uncommitted. It is being edited in this checkout. `infrastructure/portfolio/up.sh` cannot build the image from commit `73eccfb` alone. Commit that client before renting a host.
+- Commit the replacement client, the public-assistant budgets, and this compose file before renting a host. `infrastructure/portfolio/up.sh` builds `apps/web-rebuild`.
 
 ## Still external
 

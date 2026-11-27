@@ -25,6 +25,7 @@ from app.domains.assistant.inference_guard import (
     assess_public_inference,
     finish_public_inference,
 )
+from app.domains.assistant.public_budget import settle_public_inference
 from app.domains.assistant.service import _configured_system
 from app.domains.audit.service import record_event
 from app.domains.automation.workflows import stage_lead_created
@@ -1555,7 +1556,11 @@ def widget_message(
         and conversation.status != InboxStatus.resolved
     ):
         decision = assess_public_inference(
-            f"{widget.organization_id}:{session.id}", body.message, hold_slot=True
+            f"{widget.organization_id}:{session.id}",
+            body.message,
+            hold_slot=True,
+            organization_id=widget.organization_id,
+            persist=get_settings().public_llm_authorized,
         )
         if not decision.allowed:
             conversation.handoff_requested = True
@@ -1563,6 +1568,12 @@ def widget_message(
             conversation.status = InboxStatus.pending
             db.commit()
             return {"status": "accepted"}
+        chat = get_chat_client(
+            db,
+            widget.organization_id,
+            max_output_tokens=get_settings().public_inference_max_output_tokens,
+            public_inference=True,
+        )
         try:
             result = evaluate_inbox_draft(
                 db,
@@ -1570,12 +1581,7 @@ def widget_message(
                 conversation.id,
                 body.message,
                 get_embedding_client(db, widget.organization_id),
-                get_chat_client(
-                    db,
-                    widget.organization_id,
-                    max_output_tokens=get_settings().public_inference_max_output_tokens,
-                    public_inference=True,
-                ),
+                chat,
             )
             if result["grounding"] == "grounded":
                 draft = json.loads(str(result["response"]))
@@ -1602,12 +1608,21 @@ def widget_message(
                 )
                 conversation.status = InboxStatus.pending
             db.commit()
+            usage = getattr(chat, "last_usage", None)
+            if isinstance(usage, tuple) and len(usage) == 2:
+                prompt, completion = usage
+                settle_public_inference(
+                    decision.reservation_id,
+                    prompt if isinstance(prompt, int) else None,
+                    completion if isinstance(completion, int) else None,
+                )
         except Exception:
             db.rollback()
             conversation.handoff_requested = True
             conversation.handoff_reason = DETERMINISTIC_FALLBACK
             conversation.status = InboxStatus.pending
             db.commit()
+            settle_public_inference(decision.reservation_id, 0, 0)
         finally:
             finish_public_inference()
     return {"status": "accepted"}

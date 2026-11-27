@@ -16,6 +16,7 @@ from app.domains.assistant.inference_guard import (
     assess_public_inference,
     finish_public_inference,
 )
+from app.domains.assistant.public_budget import settle_public_inference
 from app.domains.assistant.schemas import (
     ConversationCreate,
     ConversationDetail,
@@ -56,19 +57,33 @@ class _VisitorSlot:
     chat: ChatClient | None = None
     held: bool = False
     denied: str | None = None
+    reservation_id: uuid.UUID | None = None
 
 
 def _visitor_slot(db: DbSession, member: Member, text: str) -> _VisitorSlot:
-    """Apply the public budget to a visitor Assistant turn when the switch is on."""
+    """Apply the public budget when a visitor may call a model."""
 
     if not is_visitor_slug(member.organization.slug):
         return _VisitorSlot()
-    if not get_settings().public_inference_enabled:
+    settings = get_settings()
+    from app.integrations.language import local_model_endpoint
+
+    paid = settings.public_inference_enabled and settings.public_llm_authorized
+    local = (
+        settings.public_inference_enabled
+        and not settings.llm_api_key.strip()
+        and local_model_endpoint(settings.llm_base_url)
+    )
+    if not paid and not local:
         return _VisitorSlot()
+    if paid and not settings.public_llm_api_key.strip():
+        return _VisitorSlot(denied="Public model replies are not configured.")
     decision = assess_public_inference(
         f"assistant:{member.organization.id}:{member.user.id}",
         text,
         hold_slot=True,
+        organization_id=member.organization.id,
+        persist=paid,
     )
     if not decision.allowed:
         return _VisitorSlot(denied=decision.message)
@@ -77,10 +92,29 @@ def _visitor_slot(db: DbSession, member: Member, text: str) -> _VisitorSlot:
             db,
             member.organization.id,
             public_inference=True,
-            max_output_tokens=get_settings().public_inference_max_output_tokens,
+            max_output_tokens=settings.public_inference_max_output_tokens,
         ),
         held=True,
+        reservation_id=decision.reservation_id,
     )
+
+
+def _release_visitor_slot(slot: _VisitorSlot, chat: ChatClient, *, spent: bool) -> None:
+    if slot.held:
+        finish_public_inference()
+    if slot.reservation_id is None:
+        return
+    if not spent:
+        settle_public_inference(slot.reservation_id, 0, 0)
+        return
+    usage = getattr(chat, "last_usage", None)
+    if isinstance(usage, tuple) and len(usage) == 2:
+        prompt, completion = usage
+        settle_public_inference(
+            slot.reservation_id,
+            prompt if isinstance(prompt, int) else None,
+            completion if isinstance(completion, int) else None,
+        )
 
 
 def organization_chat(request: Request, member: Member, db: DbSession) -> ChatClient:
@@ -292,6 +326,7 @@ def create_message(
         chat = slot.chat
     turn: service.PreparedTurn | None = None
     started = time.perf_counter()
+    spent = False
     try:
         turn = service.prepare_turn(
             db,
@@ -317,6 +352,7 @@ def create_message(
                 "escalation_reason": turn.escalation_reason,
             },
         )
+        spent = True
         return result
     except AppError as exc:
         failure = DETERMINISTIC_FALLBACK if slot.held else exc.message
@@ -336,8 +372,7 @@ def create_message(
             raise AppError(exc.status_code, exc.code, failure) from exc
         raise
     finally:
-        if slot.held:
-            finish_public_inference()
+        _release_visitor_slot(slot, chat, spent=spent)
 
 
 @router.post("/conversations/{conversation_id}/messages/stream")
@@ -386,12 +421,10 @@ def stream_message(
         failure = DETERMINISTIC_FALLBACK if slot.held else exc.message
         if turn is not None:
             service.record_provider_failure(db, turn.conversation, failure)
-        if slot.held:
-            finish_public_inference()
+        _release_visitor_slot(slot, chat, spent=False)
         raise
     except Exception:
-        if slot.held:
-            finish_public_inference()
+        _release_visitor_slot(slot, chat, spent=False)
         raise
 
     assert turn is not None
@@ -399,6 +432,7 @@ def stream_message(
     def events() -> Iterator[str]:
         parts: list[str] = []
         started = time.perf_counter()
+        spent = False
         try:
             for phase in turn.phases:
                 if phase in {
@@ -436,6 +470,7 @@ def stream_message(
             )
             if turn.holds_evidence():
                 yield _event("token", {"text": reply.message.content})
+            spent = True
             yield _event("done", reply.model_dump(mode="json"))
         except AppError as exc:
             failure = DETERMINISTIC_FALLBACK if slot.held else exc.message
@@ -449,8 +484,7 @@ def stream_message(
             )
             yield _event("error", {"code": exc.code, "message": failure})
         finally:
-            if slot.held:
-                finish_public_inference()
+            _release_visitor_slot(slot, chat, spent=spent)
 
     return StreamingResponse(events(), media_type="text/event-stream")
 

@@ -385,9 +385,29 @@ WORKFLOWS: tuple[tuple[str, str, str, dict[str, object]], ...] = (
 )
 
 
+def visitor_documents() -> tuple[tuple[str, str, str], ...]:
+    """Short demonstration notes plus the enterprise library.
+
+    The short notes stay first so the seeded assistant citation is unchanged.
+    A library file is skipped when a short note already uses its title or name.
+    """
+
+    from app.domains.demo.harbor_library import library_documents
+
+    chosen: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for title, filename, body in (*library_documents(), *DOCUMENTS):
+        if title in seen or filename in seen:
+            continue
+        seen.add(title)
+        seen.add(filename)
+        chosen.append((title, filename, body))
+    return tuple(chosen)
+
+
 def seeded_document_hashes() -> frozenset[str]:
     return frozenset(
-        hashlib.sha256(body.encode()).hexdigest() for _title, _filename, body in DOCUMENTS
+        hashlib.sha256(body.encode()).hexdigest() for _title, _filename, body in visitor_documents()
     )
 
 

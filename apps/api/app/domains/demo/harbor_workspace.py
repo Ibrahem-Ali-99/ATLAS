@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -56,6 +56,7 @@ from app.domains.crm.models import (
     Opportunity,
     PipelineStage,
 )
+from app.domains.demo.access import is_visitor_slug
 from app.domains.demo.harbor_catalog import (
     APPOINTMENT_COUNT,
     COMPANIES,
@@ -74,9 +75,11 @@ from app.domains.demo.harbor_catalog import (
     WORKFLOWS,
     lead_title,
     moment,
+    visitor_documents,
 )
 from app.domains.identity.models import Organization, User
 from app.domains.inbox.models import InboxConversation, InboxMessage, InboxStatus
+from app.domains.knowledge.chunking import chunk_pages
 from app.domains.knowledge.models import Chunk, Document, DocumentStatus, EvaluationQuestion
 from app.domains.knowledge.vectors import store_chunk_embedding
 from app.domains.provenance.origin import Origin
@@ -417,7 +420,9 @@ def _knowledge(
     root = Path(storage_root or settings.upload_storage_dir).expanduser().resolve()
     first_document: Document | None = None
     first_chunk: Chunk | None = None
-    for index, (title, filename, body) in enumerate(DOCUMENTS):
+    documents = visitor_documents() if is_visitor_slug(organization.slug) else DOCUMENTS
+    short_titles = {title for title, _filename, _body in DOCUMENTS}
+    for index, (title, filename, body) in enumerate(documents):
         payload = body.encode()
         document = _stamp(
             Document(
@@ -432,7 +437,7 @@ def _knowledge(
                 origin=Origin.demo,
                 content_sha256=hashlib.sha256(payload).hexdigest(),
             ),
-            moment(index, len(DOCUMENTS), now=now),
+            moment(index, len(documents), now=now),
         )
         db.add(document)
         db.flush()
@@ -442,19 +447,51 @@ def _knowledge(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
         document.storage_path = str(path)
-        chunk = Chunk(
-            organization_id=organization.id,
-            document_id=document.id,
-            chunk_index=0,
-            page_number=1,
-            content=body,
+        pieces = (
+            [body]
+            if title in short_titles
+            else [item.content for item in chunk_pages([(1, body)])]
         )
-        store_chunk_embedding(chunk, hash_embedding(body, settings.embedding_dimensions), settings)
-        db.add(chunk)
-        if index == 0:
-            first_document = document
-            first_chunk = chunk
+        if not pieces:
+            pieces = [body]
+        for piece_index, content in enumerate(pieces):
+            chunk = Chunk(
+                organization_id=organization.id,
+                document_id=document.id,
+                chunk_index=piece_index,
+                page_number=1,
+                content=content,
+            )
+            if not is_visitor_slug(organization.slug):
+                store_chunk_embedding(
+                    chunk,
+                    hash_embedding(content, settings.embedding_dimensions),
+                    settings,
+                )
+            db.add(chunk)
+            if title == "Bonded warehousing overview" and piece_index == 0:
+                first_document = document
+                first_chunk = chunk
+            elif first_document is None and piece_index == 0:
+                first_document = document
+                first_chunk = chunk
     db.flush()
+    if is_visitor_slug(organization.slug):
+        from app.integrations.language import get_embedding_client
+
+        embedder = get_embedding_client(db, organization.id)
+        rows = list(
+            db.scalars(
+                select(Chunk)
+                .where(Chunk.organization_id == organization.id)
+                .order_by(Chunk.document_id, Chunk.chunk_index, Chunk.id)
+            ).all()
+        )
+        vectors = embedder.embed([row.content for row in rows])
+        overlay = getattr(embedder, "settings", settings)
+        for row, vector in zip(rows, vectors, strict=True):
+            store_chunk_embedding(row, vector, overlay)
+        db.flush()
     if first_document is None or first_chunk is None:
         raise AppError(500, "demo_limited", "The demonstration library was not stored.")
     return first_document, first_chunk

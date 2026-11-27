@@ -111,6 +111,11 @@ def test_visitor_assistant_uses_the_public_budget(
             "public_inference_min_interval_seconds": 0,
             "public_inference_session_limit": 2,
             "public_inference_global_limit": 10,
+            "public_llm_authorized": True,
+            "public_llm_provider": "groq",
+            "public_llm_base_url": "https://api.groq.com/openai/v1",
+            "public_llm_api_key": "public-groq-key-not-the-harbor-key",
+            "public_llm_model": "openai/gpt-oss-20b",
         }
     )
     for target in (
@@ -128,6 +133,11 @@ def test_visitor_assistant_uses_the_public_budget(
             "public_inference_enabled": True,
             "public_inference_min_interval_seconds": 0,
             "public_inference_session_limit": 0,
+            "public_llm_authorized": True,
+            "public_llm_provider": "groq",
+            "public_llm_base_url": "https://api.groq.com/openai/v1",
+            "public_llm_api_key": "public-groq-key-not-the-harbor-key",
+            "public_llm_model": "openai/gpt-oss-20b",
         }
     )
     for target in (

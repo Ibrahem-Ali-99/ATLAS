@@ -66,6 +66,18 @@ def test_provider_keys_live_stripe_and_other_databases_are_rejected() -> None:
     assert "sk_live_" not in rendered
 
 
+def test_public_groq_key_stays_off_until_authorized() -> None:
+    settings = valid()
+    settings["PORTFOLIO_PUBLIC_LLM_API_KEY"] = "gsk_public_" + "k" * 24
+    issues = problems(settings)
+    rendered = "\n".join(issues)
+    assert any("must stay empty until public chat is authorized" in issue for issue in issues)
+    assert "gsk_public_" not in rendered
+    settings["PORTFOLIO_PUBLIC_LLM_AUTHORIZED"] = "true"
+    settings["PORTFOLIO_PUBLIC_INFERENCE_ENABLED"] = "true"
+    assert problems(settings) == []
+
+
 def test_database_password_cannot_match_the_user() -> None:
     settings = valid()
     settings["PORTFOLIO_POSTGRES_USER"] = "p" * 40

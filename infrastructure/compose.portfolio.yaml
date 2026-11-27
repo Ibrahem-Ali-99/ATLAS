@@ -1,7 +1,8 @@
 # Public portfolio demo. Production is infrastructure/compose.production.yaml.
-# This file does not publish Postgres, Mailpit, Ollama, or the API.
-# It does not run n8n. Visitor chat uses a keyless local model on this network.
-# Visitor retrieval stays on the deterministic stand-in.
+# This file does not publish Postgres, Mailpit, or the API.
+# It does not run n8n or a local generation service.
+# Visitor chat stays on the deterministic stand-in until Groq is explicitly authorized.
+# Visitor retrieval uses in-process semantic vectors over that visitor's library.
 # The database name is fixed. Do not point this stack at another workspace.
 
 name: atlas-portfolio
@@ -86,19 +87,32 @@ services:
       context: ../apps/api
       dockerfile: Dockerfile
     environment:
-      # Production rejects the deterministic embedding provider, which visitor
-      # retrieval still uses. Development plus the public-demo flag keeps paid
-      # keys, live email, and n8n from booting. Visitor chat uses the local model.
+      # Development keeps the workspace chat provider on the deterministic
+      # stand-in. Production rejects that provider. The public-demo flag still
+      # refuses the workspace model key, live email, and n8n. Paid visitor chat
+      # stays off until PORTFOLIO_PUBLIC_LLM_AUTHORIZED is true.
       ATLAS_ENVIRONMENT: development
       ATLAS_PUBLIC_DEMO: "true"
-      ATLAS_PUBLIC_INFERENCE_ENABLED: "true"
+      ATLAS_PUBLIC_INFERENCE_ENABLED: ${PORTFOLIO_PUBLIC_INFERENCE_ENABLED:-false}
+      ATLAS_PUBLIC_LLM_AUTHORIZED: ${PORTFOLIO_PUBLIC_LLM_AUTHORIZED:-false}
+      ATLAS_PUBLIC_LLM_PROVIDER: groq
+      ATLAS_PUBLIC_LLM_BASE_URL: https://api.groq.com/openai/v1
+      ATLAS_PUBLIC_LLM_API_KEY: ${PORTFOLIO_PUBLIC_LLM_API_KEY:-}
+      ATLAS_PUBLIC_LLM_MODEL: openai/gpt-oss-20b
+      ATLAS_PUBLIC_LLM_INPUT_USD_PER_MILLION: "0.075"
+      ATLAS_PUBLIC_LLM_OUTPUT_USD_PER_MILLION: "0.30"
       ATLAS_PUBLIC_INFERENCE_SESSION_LIMIT: "8"
       ATLAS_PUBLIC_INFERENCE_GLOBAL_LIMIT: "200"
+      ATLAS_PUBLIC_INFERENCE_DAILY_LIMIT: "500"
+      ATLAS_PUBLIC_INFERENCE_MONTHLY_LIMIT: "4000"
+      ATLAS_PUBLIC_INFERENCE_MONTHLY_SPEND_USD: "5"
       ATLAS_PUBLIC_INFERENCE_WINDOW_SECONDS: "3600"
       ATLAS_PUBLIC_INFERENCE_MAX_INPUT_CHARS: "2000"
       ATLAS_PUBLIC_INFERENCE_MAX_OUTPUT_TOKENS: "256"
       ATLAS_PUBLIC_INFERENCE_MIN_INTERVAL_SECONDS: "2"
       ATLAS_PUBLIC_INFERENCE_MAX_CONCURRENCY: "2"
+      ATLAS_PUBLIC_EMBEDDING_AUTHORIZED: "false"
+      ATLAS_PUBLIC_EMBEDDING_API_KEY: ""
       ATLAS_SECRET_KEY: ${PORTFOLIO_SECRET_KEY:?Set PORTFOLIO_SECRET_KEY}
       ATLAS_CREDENTIAL_ENCRYPTION_KEYS: ${PORTFOLIO_CREDENTIAL_ENCRYPTION_KEYS:?Set PORTFOLIO_CREDENTIAL_ENCRYPTION_KEYS}
       ATLAS_DATABASE_URL: postgresql+psycopg://${PORTFOLIO_POSTGRES_USER:-atlas}:${PORTFOLIO_POSTGRES_PASSWORD:?Set PORTFOLIO_POSTGRES_PASSWORD}@postgres:5432/atlas_portfolio
@@ -111,10 +125,10 @@ services:
       ATLAS_LOGIN_WINDOW_SECONDS: "900"
       ATLAS_WEBHOOK_RATE_LIMIT: "10"
       ATLAS_WEBHOOK_MAX_BYTES: "32768"
-      ATLAS_LLM_PROVIDER: openai
-      ATLAS_LLM_BASE_URL: http://ollama:11434/v1
+      ATLAS_LLM_PROVIDER: double
+      ATLAS_LLM_BASE_URL: http://double.invalid/v1
       ATLAS_LLM_API_KEY: ""
-      ATLAS_LLM_MODEL: llama3.2:1b
+      ATLAS_LLM_MODEL: double
       ATLAS_LLM_MAX_OUTPUT_TOKENS: "256"
       ATLAS_EMBEDDING_PROVIDER: double
       ATLAS_EMBEDDING_BASE_URL: http://double.invalid/v1
@@ -123,7 +137,6 @@ services:
       ATLAS_EMBEDDING_DIMENSIONS: "1536"
       ATLAS_MAX_UPLOAD_BYTES: "2097152"
       ATLAS_STORAGE_DIR: /var/lib/atlas/portfolio-docs
-      ATLAS_MODEL_DIR: /var/lib/atlas/models
       ATLAS_PUBLIC_API_URL: http://api:8000
       ATLAS_N8N_LEAD_WEBHOOK_URL: ""
       ATLAS_EMAIL_MODE: sandbox
@@ -145,17 +158,12 @@ services:
       ATLAS_INBOX_WEBHOOK_SECRET: ""
     volumes:
       - portfolio_docs:/var/lib/atlas/portfolio-docs
-      - model_data:/var/lib/atlas/models
     networks:
       - private
     depends_on:
       postgres:
         condition: service_healthy
       mailpit:
-        condition: service_healthy
-      chat-model:
-        condition: service_completed_successfully
-      ollama:
         condition: service_healthy
     healthcheck:
       test:
@@ -227,46 +235,6 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
-  ollama:
-    image: ollama/ollama:0.12.6
-    volumes:
-      - portfolio_ollama:/root/.ollama
-    networks:
-      - private
-    healthcheck:
-      test: ["CMD", "/bin/ollama", "list"]
-      interval: 15s
-      timeout: 10s
-      retries: 12
-      start_period: 20s
-    logging: *default-logging
-    deploy:
-      resources:
-        limits:
-          memory: 1792M
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
-
-  chat-model:
-    image: ollama/ollama:0.12.6
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-    entrypoint: ["ollama", "pull", "llama3.2:1b"]
-    networks:
-      - private
-    depends_on:
-      ollama:
-        condition: service_healthy
-    logging: *default-logging
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-    security_opt:
-      - no-new-privileges:true
-    restart: "no"
-
 networks:
   private:
 
@@ -274,7 +242,5 @@ volumes:
   caddy_data:
   caddy_config:
   portfolio_docs:
-  model_data:
   postgres_data:
   mailpit_data:
-  portfolio_ollama:

@@ -1,9 +1,10 @@
 """Budgets for public model calls.
 
-The switch is off unless ATLAS_PUBLIC_INFERENCE_ENABLED is set. A signed-in
-workspace that is not a visitor organization does not use this guard. A visitor
-Assistant session uses the same budgets as the website widget, and only after
-the switch is on. Until then the visitor stays on the deterministic stand-in.
+The switch is off unless ATLAS_PUBLIC_INFERENCE_ENABLED is set, and a paid
+Groq call also requires ATLAS_PUBLIC_LLM_AUTHORIZED. A signed-in workspace
+that is not a visitor organization does not use this guard. Persistent
+limits are checked when the caller asks to persist. Until the paid path is
+authorized, the visitor stays on the deterministic stand-in.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 
 from app.core.config import get_settings
@@ -34,6 +36,7 @@ class InferenceDecision:
     allowed: bool
     code: str
     message: str
+    reservation_id: uuid.UUID | None = None
 
 
 def reset_public_inference() -> None:
@@ -45,7 +48,13 @@ def reset_public_inference() -> None:
 
 
 def assess_public_inference(
-    session_key: str, text: str, *, now: float | None = None, hold_slot: bool = False
+    session_key: str,
+    text: str,
+    *,
+    now: float | None = None,
+    hold_slot: bool = False,
+    organization_id: uuid.UUID | None = None,
+    persist: bool = False,
 ) -> InferenceDecision:
     settings = get_settings()
     if not settings.public_inference_enabled:
@@ -68,7 +77,33 @@ def assess_public_inference(
             "public_inference_input_limited",
             "That message is too long for a public reply",
         )
+    reservation_id: uuid.UUID | None = None
+    if persist:
+        if organization_id is None:
+            return InferenceDecision(
+                False,
+                "public_inference_unavailable",
+                "Public replies are temporarily unavailable",
+            )
+        from app.domains.assistant.public_budget import reserve_public_inference
+
+        reserved = reserve_public_inference(organization_id, session_key, cleaned)
+        if not reserved.allowed:
+            return reserved
+        reservation_id = reserved.reservation_id
     moment = time.monotonic() if now is None else now
+    denied = _claim_memory(session_key, moment, hold_slot)
+    if denied is not None:
+        if reservation_id is not None:
+            from app.domains.assistant.public_budget import void_public_inference
+
+            void_public_inference(reservation_id)
+        return denied
+    return InferenceDecision(True, "allowed", "Allowed", reservation_id)
+
+
+def _claim_memory(session_key: str, moment: float, hold_slot: bool) -> InferenceDecision | None:
+    settings = get_settings()
     window = settings.public_inference_window_seconds
     global _IN_FLIGHT
     with _LOCK:
@@ -106,7 +141,7 @@ def assess_public_inference(
         _GLOBAL_TIMES.append(moment)
         if hold_slot:
             _IN_FLIGHT += 1
-    return InferenceDecision(True, "allowed", "Allowed")
+    return None
 
 
 def finish_public_inference() -> None:

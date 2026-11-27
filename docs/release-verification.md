@@ -22,9 +22,10 @@ The branch is `feature/atlas-product-completion`. `.env`, the web local env, the
 ```powershell
 uv lock --check --directory apps/api
 npm ci --ignore-scripts --dry-run --prefix apps/web
+npm ci --ignore-scripts --dry-run --prefix apps/web-rebuild
 ```
 
-Both commands must exit 0. Do not refresh either lockfile unless a dependency declaration changed.
+Each command must exit 0. Do not refresh a lockfile unless a dependency declaration changed. The deployed client is `apps/web-rebuild`. `apps/web` remains in the check because its unit and browser suites still exercise the API.
 
 ## 3. Check the migration head
 
@@ -32,7 +33,7 @@ Both commands must exit 0. Do not refresh either lockfile unless a dependency de
 uv run --directory apps/api alembic heads
 ```
 
-The command must print one line: `20261126_0055 (head)`. The API suite then upgrades `atlas_test` and upgrades, downgrades, and re-upgrades `atlas_migration_test`. The browser setup upgrades a new `atlas_e2e_*` database to the same head and drops it afterward.
+The command must print one line ending in `(head)`. The current head is `20261127_0057`. The API suite then upgrades `atlas_test` and upgrades, downgrades, and re-upgrades `atlas_migration_test`. The browser setup upgrades a new `atlas_e2e_*` database to the same head and drops it afterward.
 
 ## 4. Run the API suite
 
@@ -50,12 +51,16 @@ Use a dist directory other than `.next` and `.next-e2e-phase2d` so a running dev
 ```powershell
 npm run test:unit --prefix apps/web
 npx --prefix apps/web tsc --noEmit
+npx --prefix apps/web-rebuild tsc --noEmit
 $env:NEXT_DIST_DIR = ".next-release-check"
 npx --prefix apps/web next build
 Remove-Item Env:NEXT_DIST_DIR
+$env:NEXT_DIST_DIR = ".next-release-check"
+npx --prefix apps/web-rebuild next build
+Remove-Item Env:NEXT_DIST_DIR
 ```
 
-`npm run test:unit` covers API base URLs, billing errors, document origins, and the public catalog. TypeScript must pass with no errors. The production build must finish, including its own type check and static page generation.
+`npm run test:unit` covers API base URLs, billing errors, document origins, and the public catalog. TypeScript must pass with no errors for both clients. Each production build must finish, including its own type check and static page generation. The replacement client has no Playwright suite. The browser suite below stays on `apps/web` and talks to the API.
 
 ## 6. Run the browser suite
 

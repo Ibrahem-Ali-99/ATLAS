@@ -73,7 +73,7 @@ def problems(settings: dict[str, str]) -> list[str]:
     get = settings.get
     if get("PORTFOLIO_ENVIRONMENT") != "development":
         issues.append(
-            "PORTFOLIO_ENVIRONMENT must be development because visitor retrieval still uses the deterministic embedding provider"
+            "PORTFOLIO_ENVIRONMENT must be development while workspace chat uses the deterministic stand-in"
         )
     if get("PORTFOLIO_PUBLIC_DEMO", "").lower() != "true":
         issues.append("PORTFOLIO_PUBLIC_DEMO must be true")
@@ -134,6 +134,16 @@ def problems(settings: dict[str, str]) -> list[str]:
     for key in FORBIDDEN_KEYS:
         if get(key, "").strip():
             issues.append(f"{key} must stay empty on the public demo")
+    authorized = get("PORTFOLIO_PUBLIC_LLM_AUTHORIZED", "false").lower() == "true"
+    enabled = get("PORTFOLIO_PUBLIC_INFERENCE_ENABLED", "false").lower() == "true"
+    public_key = get("PORTFOLIO_PUBLIC_LLM_API_KEY", "").strip()
+    if authorized != enabled:
+        issues.append("Public chat authorization and inference must be turned on together")
+    if authorized:
+        if not strong(public_key, 20) or public_key == get("PORTFOLIO_LLM_API_KEY", "").strip():
+            issues.append("PORTFOLIO_PUBLIC_LLM_API_KEY requires a dedicated Groq secret")
+    elif public_key:
+        issues.append("PORTFOLIO_PUBLIC_LLM_API_KEY must stay empty until public chat is authorized")
     for key, value in settings.items():
         lowered = value.lower()
         if "sk_live_" in lowered or "rk_live_" in lowered:

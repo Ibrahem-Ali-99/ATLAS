@@ -7,7 +7,7 @@ from typing import Any, Literal, cast
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.domains.knowledge.models import Chunk, Document
 from app.domains.knowledge.vectors import (
@@ -99,11 +99,8 @@ def search_chunks(
     if len(query) < 2:
         return []
     vector = embedder.embed([query])[0]
-    settings = (
-        embedder.settings
-        if isinstance(embedder, OpenAICompatibleEmbeddingClient)
-        else get_settings()
-    )
+    custom = getattr(embedder, "settings", None)
+    settings = custom if isinstance(custom, Settings) else get_settings()
     lock_embedding_index(db, organization_id, shared=True)
     use_vectors = True
     if isinstance(embedder, OpenAICompatibleEmbeddingClient):

@@ -49,6 +49,8 @@ Invoke-ReleaseStep "lockfiles" {
   uv lock --check --directory apps/api
   if ($LASTEXITCODE -ne 0) { return }
   npm ci --ignore-scripts --dry-run --prefix apps/web
+  if ($LASTEXITCODE -ne 0) { return }
+  npm ci --ignore-scripts --dry-run --prefix apps/web-rebuild
 }
 
 $headOutput = @(uv run --directory apps/api alembic heads 2>&1)
@@ -70,11 +72,23 @@ Invoke-ReleaseStep "web-unit" {
 Invoke-ReleaseStep "web-typecheck" {
   npx --prefix apps/web tsc --noEmit
 }
+Invoke-ReleaseStep "web-rebuild-typecheck" {
+  npx --prefix apps/web-rebuild tsc --noEmit
+}
 
 $env:NEXT_DIST_DIR = ".next-release-check"
 try {
   Invoke-ReleaseStep "web-build" {
     npx --prefix apps/web next build
+  }
+} finally {
+  Remove-Item Env:NEXT_DIST_DIR -ErrorAction SilentlyContinue
+}
+
+$env:NEXT_DIST_DIR = ".next-release-check"
+try {
+  Invoke-ReleaseStep "web-rebuild-build" {
+    npx --prefix apps/web-rebuild next build
   }
 } finally {
   Remove-Item Env:NEXT_DIST_DIR -ErrorAction SilentlyContinue

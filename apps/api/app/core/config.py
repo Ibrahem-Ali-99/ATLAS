@@ -3,6 +3,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -78,6 +79,27 @@ class Settings(BaseSettings):
     public_inference_max_output_tokens: int = Field(default=400, ge=32, le=2048)
     public_inference_min_interval_seconds: float = Field(default=2, ge=0, le=60)
     public_inference_max_concurrency: int = Field(default=2, ge=1, le=8)
+    public_inference_daily_limit: int = Field(default=500, ge=0, le=100_000)
+    public_inference_monthly_limit: int = Field(default=4_000, ge=0, le=1_000_000)
+    public_inference_session_tokens: int = Field(default=12_000, ge=0, le=2_000_000)
+    public_inference_hourly_tokens: int = Field(default=80_000, ge=0, le=20_000_000)
+    public_inference_daily_tokens: int = Field(default=400_000, ge=0, le=50_000_000)
+    public_inference_monthly_tokens: int = Field(default=2_000_000, ge=0, le=200_000_000)
+    public_inference_monthly_spend_usd: float = Field(default=5.0, ge=0, le=1_000)
+    # Separate from the workspace key. Paid public chat stays off until authorized.
+    public_llm_authorized: bool = False
+    public_llm_provider: Literal["groq", "openai"] = "groq"
+    public_llm_base_url: str = "https://api.groq.com/openai/v1"
+    public_llm_api_key: str = ""
+    public_llm_model: str = "openai/gpt-oss-20b"
+    public_llm_input_usd_per_million: float = Field(default=0.075, ge=0, le=1_000)
+    public_llm_output_usd_per_million: float = Field(default=0.30, ge=0, le=1_000)
+    public_embedding_authorized: bool = False
+    public_embedding_provider: Literal["openai"] = "openai"
+    public_embedding_base_url: str = "https://api.openai.com/v1"
+    public_embedding_api_key: str = ""
+    public_embedding_model: str = "text-embedding-3-small"
+    public_embedding_dimensions: int = 1536
     embedding_provider: Literal["openai", "ollama", "double"] = "openai"
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_api_key: str = ""
@@ -212,6 +234,29 @@ class Settings(BaseSettings):
             self.llm_provider == "double" or self.embedding_provider == "double"
         ):
             raise ValueError("Deterministic providers are not allowed in production")
+        public_key = self.public_llm_api_key.strip()
+        if public_key and public_key == self.llm_api_key.strip():
+            raise ValueError("ATLAS_PUBLIC_LLM_API_KEY must not reuse ATLAS_LLM_API_KEY")
+        if (
+            self.public_embedding_api_key.strip()
+            and self.public_embedding_api_key.strip() == self.embedding_api_key.strip()
+        ):
+            raise ValueError(
+                "ATLAS_PUBLIC_EMBEDDING_API_KEY must not reuse ATLAS_EMBEDDING_API_KEY"
+            )
+        if self.public_embedding_dimensions not in {768, 1536}:
+            raise ValueError("ATLAS_PUBLIC_EMBEDDING_DIMENSIONS must be 768 or 1536")
+        if self.public_llm_authorized:
+            if not self.public_llm_api_key.strip():
+                raise ValueError("ATLAS_PUBLIC_LLM_AUTHORIZED requires ATLAS_PUBLIC_LLM_API_KEY")
+            if self.public_llm_provider != "groq" or self.public_llm_model != "openai/gpt-oss-20b":
+                raise ValueError("Authorized public chat uses Groq openai/gpt-oss-20b")
+            if (urlsplit(self.public_llm_base_url).hostname or "").lower() != "api.groq.com":
+                raise ValueError("Authorized public chat must call api.groq.com")
+        if self.public_embedding_authorized and not self.public_embedding_api_key.strip():
+            raise ValueError(
+                "ATLAS_PUBLIC_EMBEDDING_AUTHORIZED requires ATLAS_PUBLIC_EMBEDDING_API_KEY"
+            )
         if self.public_demo:
             if self.email_mode != "sandbox" or self.email_live_enabled:
                 raise ValueError("ATLAS_PUBLIC_DEMO cannot send live email")

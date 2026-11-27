@@ -526,6 +526,39 @@ def _post_with_retry(
     return response
 
 
+def public_chat_settings(settings: Settings) -> Settings:
+    """Chat settings that carry only the public Groq credential."""
+
+    return settings.model_copy(
+        update={
+            "llm_provider": "groq",
+            "llm_base_url": settings.public_llm_base_url,
+            "llm_api_key": settings.public_llm_api_key,
+            "llm_model": settings.public_llm_model,
+            "public_llm_api_key": "",
+            "public_llm_authorized": False,
+            "public_demo": False,
+        }
+    )
+
+
+def public_embedding_settings(settings: Settings) -> Settings:
+    """Embedding settings that carry only the public retrieval credential."""
+
+    return settings.model_copy(
+        update={
+            "embedding_provider": settings.public_embedding_provider,
+            "embedding_base_url": settings.public_embedding_base_url,
+            "embedding_api_key": settings.public_embedding_api_key,
+            "embedding_model": settings.public_embedding_model,
+            "embedding_dimensions": settings.public_embedding_dimensions,
+            "public_embedding_api_key": "",
+            "public_embedding_authorized": False,
+            "public_demo": False,
+        }
+    )
+
+
 def get_embedding_client(
     db: Any = None, organization_id: Any = None, *, for_verification: bool = False
 ) -> EmbeddingClient:
@@ -534,9 +567,17 @@ def get_embedding_client(
         from app.domains.demo.access import organization_is_visitor
 
         if organization_is_visitor(db, organization_id):
-            from app.integrations.doubles import DeterministicEmbeddingClient
+            if settings.public_embedding_authorized:
+                if not settings.public_embedding_api_key.strip():
+                    raise AppError(
+                        503,
+                        "embedding_unconfigured",
+                        "Public semantic retrieval is not configured.",
+                    )
+                return OpenAICompatibleEmbeddingClient(public_embedding_settings(settings))
+            from app.domains.knowledge.semantic import VisitorSemanticEmbedder
 
-            return DeterministicEmbeddingClient()
+            return VisitorSemanticEmbedder(db, organization_id)
         from app.integrations.resolver import resolve_settings
 
         settings = resolve_settings(
@@ -568,18 +609,41 @@ def get_chat_client(
         from app.domains.demo.access import organization_is_visitor
 
         if organization_is_visitor(db, organization_id):
-            if not (public_inference and settings.public_inference_enabled):
-                from app.integrations.doubles import DeterministicChatClient
+            if (
+                public_inference
+                and settings.public_inference_enabled
+                and settings.public_llm_authorized
+            ):
+                if not settings.public_llm_api_key.strip():
+                    raise AppError(
+                        503,
+                        "llm_unconfigured",
+                        "Public model replies are not configured.",
+                    )
+                client = OpenAICompatibleChatClient(public_chat_settings(settings))
+                client.limit_output(
+                    max_output_tokens
+                    if max_output_tokens is not None
+                    else settings.public_inference_max_output_tokens
+                )
+                return client
+            if (
+                public_inference
+                and settings.public_inference_enabled
+                and not settings.llm_api_key.strip()
+                and local_model_endpoint(settings.llm_base_url)
+            ):
+                client = OpenAICompatibleChatClient(settings)
+                client.permit_keyless_local()
+                client.limit_output(
+                    max_output_tokens
+                    if max_output_tokens is not None
+                    else settings.public_inference_max_output_tokens
+                )
+                return client
+            from app.integrations.doubles import DeterministicChatClient
 
-                return DeterministicChatClient()
-            client = OpenAICompatibleChatClient(settings)
-            client.permit_keyless_local()
-            client.limit_output(
-                max_output_tokens
-                if max_output_tokens is not None
-                else settings.public_inference_max_output_tokens
-            )
-            return client
+            return DeterministicChatClient()
         from app.integrations.resolver import resolve_settings
 
         settings = resolve_settings(db, organization_id, "chat", for_verification=for_verification)

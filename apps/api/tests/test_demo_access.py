@@ -16,7 +16,8 @@ from app.domains.demo.service import cleanup_expired
 from app.domains.identity.models import Organization, UserSession
 from app.domains.identity.service import upsert_organization
 from app.domains.knowledge.models import Document
-from app.integrations.doubles import DeterministicChatClient, DeterministicEmbeddingClient
+from app.domains.knowledge.semantic import VisitorSemanticEmbedder
+from app.integrations.doubles import DeterministicChatClient
 from app.integrations.language import get_chat_client, get_embedding_client
 
 
@@ -107,7 +108,7 @@ def test_anonymous_launch_opens_harbor_and_blocks_credentials(client: TestClient
     found = db.get(Organization, org_uuid)
     assert found is not None and found.slug.startswith("harbor-visitor-"), found
     assert isinstance(get_chat_client(db, org_uuid), DeterministicChatClient)
-    assert isinstance(get_embedding_client(db, org_uuid), DeterministicEmbeddingClient)
+    assert isinstance(get_embedding_client(db, org_uuid), VisitorSemanticEmbedder)
     conversations = client.get(f"/api/v1/organizations/{organization_id}/conversations")
     assert conversations.status_code == 200
     conversation_id = conversations.json()[0]["id"]
@@ -312,7 +313,7 @@ def test_visitor_organization_uses_deterministic_models(db) -> None:
     db.add(organization)
     db.commit()
     assert isinstance(get_chat_client(db, organization.id), DeterministicChatClient)
-    assert isinstance(get_embedding_client(db, organization.id), DeterministicEmbeddingClient)
+    assert isinstance(get_embedding_client(db, organization.id), VisitorSemanticEmbedder)
 
 
 def test_campaign_schedule_is_refused(client: TestClient, db) -> None:

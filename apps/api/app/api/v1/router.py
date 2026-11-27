@@ -19,6 +19,7 @@ from app.api.v1 import (
     invitations,
     knowledge,
     onboarding,
+    operations,
     organizations,
     providers,
     workflow_definitions,
@@ -42,6 +43,7 @@ router.include_router(campaigns.router)
 router.include_router(campaigns.preferences)
 router.include_router(campaigns.feedback)
 router.include_router(onboarding.router)
+router.include_router(operations.router)
 router.include_router(inbox.router)
 router.include_router(inbox.public_widget_router)
 router.include_router(workflow_definitions.router)
