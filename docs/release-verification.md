@@ -39,7 +39,7 @@ The command must print one line ending in `(head)`. The current head is `2026112
 
 ```powershell
 $env:ATLAS_LIVE_PROVIDERS = $null
-uv run --directory apps/api pytest -q --tb=line
+uv run --directory apps/api pytest --tb=line
 ```
 
 Pytest refuses to truncate any database other than `atlas_test`. The live Groq and Ollama test is skipped. Record the passed, failed, and skipped counts from the summary line.
@@ -50,15 +50,25 @@ Use a dist directory other than `.next` and `.next-e2e-phase2d` so a running dev
 
 ```powershell
 npm run test:unit --prefix apps/web
-npx --prefix apps/web tsc --noEmit
-npx --prefix apps/web-rebuild tsc --noEmit
+Push-Location apps/web
+npx tsc --noEmit
+Pop-Location
+Push-Location apps/web-rebuild
+npx tsc --noEmit
+Pop-Location
 $env:NEXT_DIST_DIR = ".next-release-check"
-npx --prefix apps/web next build
+Push-Location apps/web
+npx next build
+Pop-Location
 Remove-Item Env:NEXT_DIST_DIR
 $env:NEXT_DIST_DIR = ".next-release-check"
-npx --prefix apps/web-rebuild next build
+Push-Location apps/web-rebuild
+npx next build
+Pop-Location
 Remove-Item Env:NEXT_DIST_DIR
 ```
+
+`npx --prefix` on this npm does not pass the compiler arguments through, so each command runs inside its package directory. The dist directory stays `.next-release-check`, not the directory a dev server is using.
 
 `npm run test:unit` covers API base URLs, billing errors, document origins, and the public catalog. TypeScript must pass with no errors for both clients. Each production build must finish, including its own type check and static page generation. The replacement client has no Playwright suite. The browser suite below stays on `apps/web` and talks to the API.
 
@@ -69,7 +79,9 @@ $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:LOCALAPPDATA "ms-playwright"
 Remove-Item Env:ATLAS_E2E_ARTIFACT_DIR -ErrorAction SilentlyContinue
 Remove-Item Env:ATLAS_FIGMA_SCREENSHOT_DIR -ErrorAction SilentlyContinue
 Remove-Item Env:ATLAS_E2E_PRODUCTION -ErrorAction SilentlyContinue
-npx --prefix apps/web playwright test --reporter=line
+Push-Location apps/web
+npx playwright test --reporter=line
+Pop-Location
 ```
 
 Playwright starts its own API on port 8011 and web app on port 3011, with sandbox billing and sandbox mail. `e2e/duplicate-key.spec.ts` fails if any workspace route logs a duplicate React key. Record passed, failed, and skipped counts.

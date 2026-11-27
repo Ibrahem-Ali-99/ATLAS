@@ -63,23 +63,26 @@ Write-Output "release_alembic_head=$($headLines[0])"
 
 Remove-Item Env:ATLAS_LIVE_PROVIDERS -ErrorAction SilentlyContinue
 Invoke-ReleaseStep "api" {
-  uv run --directory apps/api pytest -q --tb=line
+  uv run --directory apps/api pytest --tb=line
 }
 
 Invoke-ReleaseStep "web-unit" {
   npm run test:unit --prefix apps/web
 }
 Invoke-ReleaseStep "web-typecheck" {
-  npx --prefix apps/web tsc --noEmit
+  Push-Location apps/web
+  try { npx tsc --noEmit } finally { Pop-Location }
 }
 Invoke-ReleaseStep "web-rebuild-typecheck" {
-  npx --prefix apps/web-rebuild tsc --noEmit
+  Push-Location apps/web-rebuild
+  try { npx tsc --noEmit } finally { Pop-Location }
 }
 
 $env:NEXT_DIST_DIR = ".next-release-check"
 try {
   Invoke-ReleaseStep "web-build" {
-    npx --prefix apps/web next build
+    Push-Location apps/web
+    try { npx next build } finally { Pop-Location }
   }
 } finally {
   Remove-Item Env:NEXT_DIST_DIR -ErrorAction SilentlyContinue
@@ -88,7 +91,8 @@ try {
 $env:NEXT_DIST_DIR = ".next-release-check"
 try {
   Invoke-ReleaseStep "web-rebuild-build" {
-    npx --prefix apps/web-rebuild next build
+    Push-Location apps/web-rebuild
+    try { npx next build } finally { Pop-Location }
   }
 } finally {
   Remove-Item Env:NEXT_DIST_DIR -ErrorAction SilentlyContinue
@@ -105,7 +109,8 @@ foreach ($name in @(
 }
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:LOCALAPPDATA "ms-playwright"
 Invoke-ReleaseStep "browser" {
-  npx --prefix apps/web playwright test --reporter=line
+  Push-Location apps/web
+  try { npx playwright test --reporter=line } finally { Pop-Location }
 }
 
 Write-Output "release_verification=passed"
