@@ -7,6 +7,7 @@ from app.domains.audit.service import record_event
 from app.domains.identity.dependencies import (
     Admin,
     CsrfAdmin,
+    CsrfMember,
     CurrentUser,
     DbSession,
     Member,
@@ -24,6 +25,7 @@ from app.domains.identity.schemas import (
 from app.domains.identity.service import (
     list_memberships,
     list_team,
+    leave_organization,
     remove_membership,
     update_membership_role,
 )
@@ -131,5 +133,18 @@ def remove_member(membership_id: uuid.UUID, admin: CsrfAdmin, db: DbSession) -> 
         "membership_removed",
         {"membership_id": str(membership_id)},
         actor_id=admin.user.id,
+    )
+    db.commit()
+
+
+@router.post("/{organization_id}/leave", status_code=204)
+def leave(member: CsrfMember, db: DbSession) -> None:
+    leave_organization(db, member.organization.id, member.user.id)
+    record_event(
+        db,
+        member.organization.id,
+        "membership_left",
+        {"membership_id": str(member.membership.id)},
+        actor_id=member.user.id,
     )
     db.commit()

@@ -170,6 +170,34 @@ def remove_membership(db: Session, organization_id: uuid.UUID, membership_id: uu
     db.delete(membership)
 
 
+def change_password(
+    db: Session, user: User, session_id: uuid.UUID, current_password: str, new_password: str
+) -> None:
+    if not verify_password(current_password, user.password_hash):
+        raise AppError(400, "current_password_incorrect", "The current password is incorrect")
+    if current_password == new_password:
+        raise AppError(422, "password_unchanged", "Choose a different password")
+    user.password_hash = hash_password(new_password)
+    now = datetime.now(UTC)
+    db.query(UserSession).filter(
+        UserSession.user_id == user.id,
+        UserSession.id != session_id,
+        UserSession.revoked_at.is_(None),
+    ).update({UserSession.revoked_at: now}, synchronize_session=False)
+    db.commit()
+
+
+def leave_organization(db: Session, organization_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    membership = db.scalar(
+        select(Membership)
+        .where(Membership.organization_id == organization_id, Membership.user_id == user_id)
+        .with_for_update()
+    )
+    if membership is None:
+        raise AppError(404, "member_not_found", "Member not found")
+    remove_membership(db, organization_id, membership.id)
+
+
 def create_password_reset(db: Session, email: str) -> str | None:
     user = db.scalar(select(User).where(User.email == normalize_email(email)).with_for_update())
     if user is None or not user.is_active:

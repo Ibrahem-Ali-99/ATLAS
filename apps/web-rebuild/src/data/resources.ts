@@ -233,6 +233,9 @@ export type InboxItem = {
   assignee: string;
   unread: boolean;
   email?: string | null;
+  replyRecipient?: string | null;
+  leadId?: string | null;
+  inquiryId?: string | null;
   messages: { id: string; author: string; body: string; time: string; direction: "in" | "out"; state?: "sent" | "delivered" | "failed" | "pending" }[];
 };
 
@@ -266,12 +269,15 @@ export async function loadInbox(): Promise<InboxItem[]> {
   }));
 }
 
-export async function loadInboxThread(id: string): Promise<Pick<InboxItem, "messages" | "email" | "customer" | "company">> {
-  const detail = await apiFetch<{ customer_name?: string | null; company_name?: string | null; customer?: { email?: string | null; name?: string | null; company_name?: string | null } | null; messages: { id: string; sender: string; body: string; direction: string; delivery_status: string; created_at: string }[] }>(orgPath(`/inbox/${id}`));
+export async function loadInboxThread(id: string): Promise<Pick<InboxItem, "messages" | "email" | "replyRecipient" | "leadId" | "inquiryId" | "customer" | "company">> {
+  const detail = await apiFetch<{ customer_name?: string | null; company_name?: string | null; lead_id?: string | null; reply_recipient?: string | null; customer?: { email?: string | null; name?: string | null; company_name?: string | null; inquiry_id?: string | null } | null; messages: { id: string; sender: string; body: string; direction: string; delivery_status: string; created_at: string }[] }>(orgPath(`/inbox/${id}`));
   return {
     customer: detail.customer?.name || detail.customer_name || "Unknown customer",
     company: detail.customer?.company_name || detail.company_name || "No company",
     email: detail.customer?.email ?? null,
+    replyRecipient: detail.reply_recipient ?? null,
+    leadId: detail.lead_id ?? null,
+    inquiryId: detail.customer?.inquiry_id ?? null,
     messages: detail.messages.map((message) => ({
       id: message.id,
       author: message.sender,
@@ -281,6 +287,10 @@ export async function loadInboxThread(id: string): Promise<Pick<InboxItem, "mess
       state: message.delivery_status === "failed" ? "failed" : message.delivery_status === "delivered" ? "delivered" : "sent",
     })),
   };
+}
+
+export function recordInboxInquiry(id: string, title: string) {
+  return apiFetch<{ lead_id: string; inquiry_id: string }>(orgPath(`/inbox/${id}/crm-intake`), { method: "POST", body: JSON.stringify({ title }) });
 }
 
 export function submitInboxReply(id: string, recipient: string, subject: string, body: string) {
@@ -797,10 +807,10 @@ export function loadBillingPlans() {
   return apiFetch<{ code: string; name: string }[]>(orgPath("/billing/plans"));
 }
 
-export function checkoutBilling(planCode: string) {
+export function checkoutBilling(planCode: string, billingInterval: "monthly" | "yearly" = "monthly") {
   return apiFetch<{ mode: string; checkout_url?: string; status: string }>(orgPath("/billing/checkout"), {
     method: "POST",
-    body: JSON.stringify({ plan_code: planCode, billing_interval: "monthly" }),
+    body: JSON.stringify({ plan_code: planCode, billing_interval: billingInterval }),
   });
 }
 
@@ -881,6 +891,26 @@ export function removeTeamMember(membershipId: string) {
 
 export function renameOrganization(name: string) {
   return apiFetch(orgPath(""), { method: "PATCH", body: JSON.stringify({ name }) });
+}
+
+export function loadOnboardingProgress() {
+  return apiFetch<Record<string, boolean>>(orgPath("/onboarding/progress"));
+}
+
+export function loadProviderStatus() {
+  return apiFetch<{ llm_ready: boolean; embedding_ready: boolean }>(orgPath("/provider-status"));
+}
+
+export function changePassword(currentPassword: string, newPassword: string) {
+  return apiFetch("/api/v1/auth/password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) });
+}
+
+export function resendInvitation(id: string) {
+  return apiFetch<{ token: string }>(orgPath(`/invitations/${id}/resend`), { method: "POST" });
+}
+
+export function leaveOrganization() {
+  return apiFetch(orgPath("/leave"), { method: "POST" });
 }
 
 export function loadOnboarding() {

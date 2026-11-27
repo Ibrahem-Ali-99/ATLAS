@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -69,3 +71,68 @@ def test_invitation_creation_requires_csrf_and_does_not_leak_token(
     )
     assert response.status_code == 403
     assert '"token"' not in response.text.lower()
+
+
+def test_resend_replaces_the_invitation_token_and_leave_keeps_the_last_admin(
+    client: TestClient, db: Session
+) -> None:
+    organization = make_organization(db, "Membership Workspace", f"members-{uuid.uuid4().hex[:8]}")
+    admin = make_user(db, "members-admin@example.com")
+    staff = make_user(db, "members-staff@example.com")
+    outsider = make_user(db, "members-outsider@example.com")
+    other = make_organization(db, "Other Membership", f"other-members-{uuid.uuid4().hex[:8]}")
+    make_membership(db, admin, organization, MembershipRole.admin)
+    make_membership(db, outsider, other, MembershipRole.admin)
+    session = login(client, admin.email, PASSWORD)
+    headers = _csrf(session)
+    created = client.post(
+        f"/api/v1/organizations/{organization.id}/invitations",
+        json={"email": "invitee@example.com"},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    original = created.json()["token"]
+    resent = client.post(
+        f"/api/v1/organizations/{organization.id}/invitations/{created.json()['id']}/resend",
+        headers=headers,
+    )
+    assert resent.status_code == 200, resent.text
+    replacement = resent.json()["token"]
+    assert replacement != original
+    expired = client.post(
+        "/api/v1/invitations/accept",
+        json={"token": original, "full_name": "Invitee", "password": "correct-horse-2"},
+    )
+    assert expired.status_code == 400
+    make_membership(db, staff, organization, MembershipRole.staff)
+    client.cookies.clear()
+    staff_session = login(client, staff.email, PASSWORD)
+    blocked = client.post(
+        f"/api/v1/organizations/{organization.id}/invitations/{created.json()['id']}/resend",
+        headers=_csrf(staff_session),
+    )
+    assert blocked.status_code == 403
+    client.cookies.clear()
+    outsider_session = login(client, outsider.email, PASSWORD)
+    foreign = client.post(
+        f"/api/v1/organizations/{organization.id}/invitations/{created.json()['id']}/resend",
+        headers=_csrf(outsider_session),
+    )
+    assert foreign.status_code == 404
+    client.cookies.clear()
+    colleague_session = login(client, staff.email, PASSWORD)
+    left = client.post(
+        f"/api/v1/organizations/{organization.id}/leave",
+        headers=_csrf(colleague_session),
+    )
+    assert left.status_code == 204
+    client.cookies.clear()
+    admin_session = login(client, admin.email, PASSWORD)
+    members = client.get(f"/api/v1/organizations/{organization.id}/members")
+    assert staff.email not in {item["email"] for item in members.json()}
+    last = client.post(
+        f"/api/v1/organizations/{organization.id}/leave",
+        headers=_csrf(admin_session),
+    )
+    assert last.status_code == 409
+    assert last.json()["error"]["code"] == "last_admin"

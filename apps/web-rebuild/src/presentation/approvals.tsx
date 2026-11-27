@@ -37,6 +37,7 @@ type Approval = {
   status: ApprovalStatus;
   created: string;
   destination: string;
+  actionType: string;
   rationale: string;
   restricted?: boolean;
   payload: Record<string, unknown>;
@@ -45,7 +46,7 @@ type Approval = {
 function mapApproval(row: { id: string; status: string; action_type: string; payload: Record<string, unknown>; created_at: string; decision_note: string | null; execution_error: string | null; requested_by: string }, names: Map<string, string>): Approval {
   const text = (key: string) => typeof row.payload[key] === "string" ? String(row.payload[key]) : "";
   const statusMap: Record<string, ApprovalStatus> = { pending: "Pending", approved: "Approved", rejected: "Rejected", executed: "Executed", failed: "Failed", executing: "Approved", needs_attention: "Failed", expired: "Rejected" };
-  return { id: row.id, title: text("title") || text("subject") || row.action_type.replaceAll("_", " "), action: text("body") || text("summary") || row.action_type.replaceAll("_", " "), requester: names.get(row.requested_by) || "Workspace member", company: text("company_name") || text("recipient") || "Workspace record", status: statusMap[row.status] || "Pending", created: row.created_at.slice(0, 10), destination: row.action_type.replaceAll("_", " "), rationale: row.decision_note || row.execution_error || "Stored approval request.", payload: row.payload };
+  return { id: row.id, title: text("title") || text("subject") || row.action_type.replaceAll("_", " "), action: text("body") || text("summary") || row.action_type.replaceAll("_", " "), requester: names.get(row.requested_by) || "Workspace member", company: text("company_name") || text("recipient") || "Workspace record", status: statusMap[row.status] || "Pending", created: row.created_at.slice(0, 10), destination: row.action_type.replaceAll("_", " "), actionType: row.action_type, rationale: row.decision_note || row.execution_error || "Stored approval request.", payload: row.payload };
 }
 
 const toneFor = (status: ApprovalStatus): Tone =>
@@ -71,6 +72,7 @@ export function ApprovalsWorkspace({ onToast, onOpenCrm }: { onToast: (message: 
     setLoading(true);
     void decideApprovalRow(selected.id, confirm, reason).then(() => { onToast(confirm === "approve" ? "Approval confirmed" : "Request rejected"); setConfirm(null); setReason(""); return reload(); }).catch((error: unknown) => onToast(failureMessage(error))).finally(() => setLoading(false));
   };
+  const external = selected?.actionType === "prepare_customer_response" || selected?.actionType === "request_appointment";
   const retry = () => {
     if (!selected) return;
     setLoading(true);
@@ -99,12 +101,13 @@ export function ApprovalsWorkspace({ onToast, onOpenCrm }: { onToast: (message: 
           <section className="approval-detail-section"><h3>Rationale</h3><p>{selected.rationale}</p></section>
           <section className="approval-detail-section"><h3>Affected records</h3><button className="affected-record" onClick={() => onOpenCrm ? onOpenCrm(selected.company) : onToast(selected.company)}><Building2 size={15} /><span><strong>{selected.company}</strong><small>{selected.destination}</small></span><ChevronRight size={14} /></button></section>
           <section className="approval-detail-section"><h3>Payload</h3><pre><code><Code2 size={13} />{JSON.stringify(selected.payload, null, 2)}</code></pre></section>
-          {selected.status === "Failed" && <div className="state-banner error"><CircleAlert size={16} /><span><strong>Execution failed</strong><small>{selected.rationale}</small></span><Button size="sm" disabled={loading} onClick={retry}>{loading ? <LoaderCircle size={13} /> : <ArrowRight size={13} />} Retry</Button></div>}
+          {selected.status === "Failed" && !external && <div className="state-banner error"><CircleAlert size={16} /><span><strong>Execution failed</strong><small>{selected.rationale}</small></span><Button size="sm" disabled={loading} onClick={retry}>{loading ? <LoaderCircle size={13} /> : <ArrowRight size={13} />} Retry</Button></div>}
+          {external && <div className="permission-state"><LockKeyhole size={18} /><span><strong>Customer delivery stays stopped</strong><small>Approving this request does not send a message or book an appointment.</small></span></div>}
           {selected.status === "Executed" && <div className="execution-result"><CheckCircle2 size={17} /><span><strong>Execution completed</strong><small>The reviewed action was applied to {selected.destination}.</small></span></div>}
           {selected.status === "Rejected" && <div className="execution-result rejected"><XCircle size={17} /><span><strong>Request rejected</strong><small>No workspace changes were applied.</small></span></div>}
           {selected.status === "Pending" && !reviewed.includes(selected.id) && <div className="review-gate"><ShieldCheck size={18} /><div><strong>Review required</strong><p>Inspect the rationale, evidence, affected records, destination, and payload before continuing.</p></div><Button size="sm" onClick={() => setReviewed([...reviewed, selected.id])}><Check size={13} /> Mark review complete</Button></div>}
         </div>
-        <div className="drawer-footer">{selected.status === "Approved" ? <Button variant="primary" disabled={loading} onClick={retry}>{loading ? <LoaderCircle size={14} /> : <Check size={14} />} Execute stored action</Button> : <><Button disabled={selected.status !== "Pending" || selected.restricted || !reviewed.includes(selected.id)} onClick={() => setConfirm("reject")}><Ban size={14} /> Reject</Button><Button variant="primary" disabled={selected.status !== "Pending" || selected.restricted || !reviewed.includes(selected.id)} onClick={() => setConfirm("approve")}><Check size={14} /> Approve</Button></>}</div>
+        <div className="drawer-footer">{selected.status === "Approved" && !external ? <Button variant="primary" disabled={loading} onClick={retry}>{loading ? <LoaderCircle size={14} /> : <Check size={14} />} Execute stored action</Button> : <><Button disabled={selected.status !== "Pending" || selected.restricted || !reviewed.includes(selected.id)} onClick={() => setConfirm("reject")}><Ban size={14} /> Reject</Button><Button variant="primary" disabled={selected.status !== "Pending" || selected.restricted || !reviewed.includes(selected.id)} onClick={() => setConfirm("approve")}><Check size={14} /> Approve</Button></>}</div>
       </aside></>}
 
       <Modal open={confirm !== null} title={confirm === "approve" ? "Approve request?" : "Reject request?"} description={confirm === "approve" ? "The request will be approved for controlled execution." : "Explain why this request should not proceed."} onClose={() => setConfirm(null)}>

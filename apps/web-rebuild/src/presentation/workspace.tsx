@@ -39,7 +39,7 @@ import {
   X,
 } from "lucide-react";
 
-import { searchRecords, type SearchHit } from "@/data/resources";
+import { searchRecords, loadOnboardingProgress, loadProviderStatus, type SearchHit } from "@/data/resources";
 import { ApiError } from "@/data/client";
 import { companyIdByName, createOpportunity, decideApproval, initials, loadNavCounts, loadOverview, type ActivityItem, type ApprovalItem, type NavCounts, type OverviewSnapshot } from "@/data/overview";
 import { getSession, logout, type Session } from "@/data/session";
@@ -315,7 +315,7 @@ function Shell({
             </div>
           </div>
         </header>
-        {activeNav === "Overview" ? <Overview organizationId={organizationId} organizationName={organizationName} firstName={firstName} onApproved={() => void loadNavCounts(organizationId).then(setCounts)} /> : null}
+        {activeNav === "Overview" ? <Overview organizationId={organizationId} organizationName={organizationName} firstName={firstName} onApproved={() => void loadNavCounts(organizationId).then(setCounts)} onOpenSetup={(section, crm) => { if (crm) openCrm(crm, ""); else navigate(section); }} /> : null}
         {activeNav === "CRM" ? <CRMWorkspace section={crmSection} onSectionChange={setCrmSection} onToast={setToast} focusQuery={crmFocus} onOpenInbox={() => navigate("Inbox")} /> : null}
         {activeNav === "Inbox" ? <InboxWorkspace onToast={setToast} onOpenCrm={openCrm} focusQuery={inboxFocus} /> : null}
         {activeNav === "Assistant" ? <AssistantWorkspace onToast={setToast} /> : null}
@@ -334,6 +334,28 @@ function Shell({
       </div>
     </div>
   );
+}
+
+function SetupChecklist({ onOpen }: { onOpen: (section: string, crm?: CRMSection) => void }) {
+  const [progress, setProgress] = useState<Record<string, boolean> | null>(null);
+  const [providersReady, setProvidersReady] = useState(false);
+  useEffect(() => {
+    loadOnboardingProgress().then(setProgress).catch(() => setProgress(null));
+    loadProviderStatus().then((status) => setProvidersReady(Boolean(status.llm_ready && status.embedding_ready))).catch(() => setProvidersReady(false));
+  }, []);
+  if (!progress) return null;
+  const items: { key: string; title: string; section: string; crm?: CRMSection }[] = [
+    { key: "profile", title: "Save the organization profile", section: "Settings" },
+    { key: "company", title: "Add the first company", section: "CRM", crm: "Companies" },
+    { key: "contact", title: "Add the first contact", section: "CRM", crm: "Contacts" },
+    { key: "lead", title: "Create the first lead", section: "CRM", crm: "Leads" },
+    { key: "inquiry", title: "Record the first customer inquiry", section: "CRM", crm: "Customer inquiries" },
+    { key: "workflow", title: "Complete a workflow run", section: "Workflows" },
+    { key: "knowledge", title: "Index the first document", section: "Knowledge" },
+    { key: "assistant", title: providersReady ? "Verify an answer with citations" : "Configure chat and embeddings", section: providersReady ? "Assistant" : "Integrations" },
+  ];
+  const completed = items.filter((item) => progress[item.key]).length;
+  return <section className="panel" aria-labelledby="setup-checklist"><div className="panel-header"><div><h2 id="setup-checklist">Setup checklist</h2><p role="status">{completed} of {items.length} steps completed</p></div></div><div className="pipeline-list">{items.map((item) => <button className="pipeline-row" key={item.key} onClick={() => onOpen(item.section, item.crm)}><span className={`status-dot ${progress[item.key] ? "dot-green" : "dot-amber"}`} /><span className="pipeline-label">{item.title}</span><strong>{progress[item.key] ? "Done" : "Open"}</strong><ChevronRight size={14} /></button>)}</div></section>;
 }
 
 function WorkspaceSearch({ open, onClose, onNavigate, onRecord }: { open: boolean; onClose: () => void; onNavigate: (label: string) => void; onRecord: (section: CRMSection, query: string) => void }) {
@@ -370,11 +392,13 @@ function Overview({
   organizationName,
   firstName,
   onApproved,
+  onOpenSetup,
 }: {
   organizationId: string;
   organizationName: string;
   firstName: string;
   onApproved: () => void;
+  onOpenSetup: (section: string, crm?: CRMSection) => void;
 }) {
   const [period, setPeriod] = useState("30d");
   const [data, setData] = useState<OverviewSnapshot | null>(null);
@@ -497,6 +521,7 @@ function Overview({
           <MetricCard label="Open inquiries" value={String(data.openInquiries)} meta="Awaiting response" icon={MessageSquareText} onClick={() => setDrilldown("Open inquiries")} />
           <MetricCard label="Pending approvals" value={String(data.pendingApprovals)} meta="Needs review" icon={BadgeCheck} onClick={() => setDrilldown("Pending approvals")} />
         </section>
+        <SetupChecklist onOpen={onOpenSetup} />
         <div className="overview-grid">
           <section className="panel pipeline-panel">
             <div className="panel-header">

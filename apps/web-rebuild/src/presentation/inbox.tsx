@@ -27,7 +27,7 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import { archiveInbox, assignInbox, draftInbox, failureMessage, getWidget, inboxAssignees, loadInbox, loadInboxThread, saveWidget, submitInboxReply, takeOverInbox, updateInboxStatus, type InboxItem } from "@/data/resources";
+import { archiveInbox, assignInbox, draftInbox, failureMessage, getWidget, inboxAssignees, loadInbox, loadInboxThread, recordInboxInquiry, saveWidget, submitInboxReply, takeOverInbox, updateInboxStatus, type InboxItem } from "@/data/resources";
 import { appConfig } from "./appConfig";
 import { Avatar, Badge, Button, Modal, type Tone } from "./components";
 
@@ -90,9 +90,9 @@ function useInboxModel(onToast: (message: string) => void) {
     setConversations((current) => current.map((item) => (item.id === id ? { ...item, ...values } : item)));
   const send = () => {
     if (!draft.trim() || !selected.id) return;
-    const recipient = selected.email || "";
+    const recipient = selected.replyRecipient || "";
     if (!recipient) {
-      onToast("This conversation has no reply address, so the message was not submitted.");
+      onToast(selected.channel === "Website chat" ? "Website chat has no email or phone recipient, so the message was not submitted." : "This conversation has no reply address for its channel, so the message was not submitted.");
       return;
     }
     const body = draft.trim();
@@ -102,6 +102,13 @@ function useInboxModel(onToast: (message: string) => void) {
         setDraft("");
         onToast("Reply submitted for approval. It was not sent to the customer.");
       })
+      .catch((error: unknown) => onToast(failureMessage(error)));
+  };
+  const recordInquiry = () => {
+    if (!selected.id) return;
+    void recordInboxInquiry(selected.id, selected.subject || "Customer inquiry")
+      .then(() => loadInboxThread(selected.id))
+      .then((thread) => { patch(selected.id, thread); onToast("Inquiry recorded for this conversation"); })
       .catch((error: unknown) => onToast(failureMessage(error)));
   };
   const draftReply = () => {
@@ -124,7 +131,7 @@ function useInboxModel(onToast: (message: string) => void) {
   return {
     conversations, filtered, selected, selectedId, setSelectedId, search, setSearch, channel, setChannel,
     status, setStatus, assignee, setAssignee, draft, setDraft, humanOnly, setHumanOnly, greeting, setGreeting, settingsOpen,
-    setSettingsOpen, contextOpen, setContextOpen,     assignees, patch, send, draftReply, saveSettings, archive,
+    setSettingsOpen, contextOpen, setContextOpen, assignees, patch, send, recordInquiry, draftReply, saveSettings, archive,
   };
 }
 
@@ -183,7 +190,9 @@ export function InboxWorkspace({ onToast, onOpenCrm, focusQuery = "" }: { onToas
           </div>
           <div className="composer">
             <textarea value={model.draft} onChange={(event) => model.setDraft(event.target.value)} placeholder="Write a reply…" aria-label="Reply message" />
-            <div><span>{model.draft.length}/1,000</span><Button variant="primary" disabled={!model.draft.trim() || !model.selected.id} onClick={model.send}><Send size={14} /> Submit for approval</Button></div>
+            {model.selected.id && model.selected.inquiryId === null ? <div className="state-banner warning"><span><strong>Inquiry required</strong><small>Record the customer request before submitting a reply for approval.</small></span><Button size="sm" onClick={model.recordInquiry}>Record inquiry</Button></div> : null}
+            {model.selected.id && model.selected.replyRecipient === null ? <div className="state-banner warning"><span><strong>No reply address</strong><small>This channel has no stored email or phone for the linked contact.</small></span></div> : null}
+            <div><span>{model.draft.length}/1,000</span><Button variant="primary" disabled={!model.draft.trim() || !model.selected.replyRecipient} onClick={model.send}><Send size={14} /> Submit for approval</Button></div>
           </div>
         </section>
 

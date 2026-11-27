@@ -9,6 +9,7 @@ export function BillingWorkspace({ onToast }: { onToast: (message: string) => vo
   const [plans, setPlans] = useState<{ code: string; name: string }[]>([]);
   const [notice, setNotice] = useState("");
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
+  const [interval, setInterval] = useState<"monthly" | "yearly">("monthly");
   const [working, setWorking] = useState(false);
   const refresh = () => loadBilling().then(setBilling).catch((error: unknown) => setNotice(failureMessage(error)));
   useEffect(() => {
@@ -19,7 +20,7 @@ export function BillingWorkspace({ onToast }: { onToast: (message: string) => vo
   const startCheckout = (planCode: string) => {
     if (billing?.mode === "stripe") {
       setWorking(true);
-      void checkoutBilling(planCode).then((result) => {
+      void checkoutBilling(planCode, interval).then((result) => {
         if (result.checkout_url?.startsWith("http")) {
           window.location.assign(result.checkout_url);
           return;
@@ -34,7 +35,7 @@ export function BillingWorkspace({ onToast }: { onToast: (message: string) => vo
   const confirmCheckout = () => {
     if (!pendingPlan) return;
     setWorking(true);
-    void checkoutBilling(pendingPlan).then((result) => {
+    void checkoutBilling(pendingPlan, interval).then((result) => {
       setNotice(result.mode === "sandbox" ? `Sandbox plan recorded as ${result.status}.` : "Checkout returned a provider session.");
       setPendingPlan(null);
       setUnavailable(null);
@@ -63,7 +64,7 @@ export function BillingWorkspace({ onToast }: { onToast: (message: string) => vo
       <section className="settings-card"><div className="settings-card-title"><CircleGauge size={17} /><div><strong>Usage availability</strong><p>Usage recorded for the current plan.</p></div></div><div className="usage-list">{Object.entries(billing?.usage || {}).map(([key, value]) => <div key={key}><span>{key.replaceAll("_", " ")}</span><strong>{value}</strong></div>)}</div></section>
       <section className="settings-card"><div className="settings-card-title"><PackageCheck size={17} /><div><strong>Entitlements</strong><p>What this workspace can do with the current plan.</p></div></div><ul className="entitlement-list"><li><Check size={15} /> CRM, inbox, knowledge, and assistant <Badge tone="green">Available</Badge></li><li><Check size={15} /> Workflows and approvals <Badge tone="blue">Recorded</Badge></li><li><LockKeyhole size={15} /> Live customer messaging <Badge>Disabled</Badge></li><li><LockKeyhole size={15} /> Card checkout <Badge>{billing?.checkout_available ? "Available" : "Unavailable"}</Badge></li></ul></section>
     </div>
-    <section className="available-plans"><div className="settings-heading"><h2>Available plans</h2><p>Plans returned by the billing catalog. A disabled plan cannot start a payment.</p></div><div className="plan-grid">{plans.map((plan) => <article className="settings-card" key={plan.code}><Badge tone={plan.code === billing?.subscription.plan_code ? "blue" : "neutral"}>{plan.code === billing?.subscription.plan_code ? "Current" : plan.code}</Badge><h3>{plan.name}</h3><p>Stored catalog entry.</p><Button disabled={!billing?.checkout_available || plan.code === billing?.subscription.plan_code} onClick={() => startCheckout(plan.code)}>{plan.code === billing?.subscription.plan_code ? "Current" : billing?.mode === "stripe" ? "Review checkout" : "Update sandbox plan"}</Button></article>)}</div></section>
+    <section className="available-plans"><div className="settings-heading"><h2>Available plans</h2><p>Plans returned by the billing catalog. Checkout opens the provider and does not charge this screen.</p></div><label className="field billing-interval"><span>Billing interval</span><select aria-label="Billing interval" value={interval} onChange={(event) => setInterval(event.target.value === "yearly" ? "yearly" : "monthly")}><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><div className="plan-grid">{plans.map((plan) => <article className="settings-card" key={plan.code}><Badge tone={plan.code === billing?.subscription.plan_code ? "blue" : "neutral"}>{plan.code === billing?.subscription.plan_code ? "Current" : plan.code}</Badge><h3>{plan.name}</h3><p>Stored catalog entry.</p><Button disabled={!billing?.checkout_available || plan.code === billing?.subscription.plan_code || working} onClick={() => startCheckout(plan.code)}>{plan.code === billing?.subscription.plan_code ? "Current" : billing?.mode === "stripe" ? "Review checkout" : "Update sandbox plan"}</Button></article>)}</div></section>
     {(unavailable || pendingPlan) && <><button className="drawer-backdrop" aria-label="Close billing" onClick={() => { setUnavailable(null); setPendingPlan(null); }} /><aside className="drawer billing-drawer" aria-label="Billing action"><div className="drawer-header"><div><h2>{pendingPlan ? `Update ${pendingPlan}` : unavailable === "checkout" ? "Checkout unavailable" : "Billing portal unavailable"}</h2><p>{notice || "No payment is started from this screen."}</p></div><Button size="icon" variant="ghost" aria-label="Close billing" onClick={() => { setUnavailable(null); setPendingPlan(null); }}><X size={17} /></Button></div><div className="drawer-content"><div className="module-empty"><CreditCard size={25} /><strong>{pendingPlan ? "Confirm the sandbox plan change" : `Unable to open ${unavailable}`}</strong><p>{pendingPlan ? "This records the selected plan in the workspace. It does not charge a card." : notice || "The billing provider did not accept this request."}</p><div className="plan-actions">{pendingPlan && <Button variant="primary" disabled={working} onClick={confirmCheckout}>{working ? "Saving…" : "Record plan"}</Button>}<Button onClick={() => { setUnavailable(null); setPendingPlan(null); }}>Return to billing</Button></div></div></div></aside></>}
   </main>;
 }

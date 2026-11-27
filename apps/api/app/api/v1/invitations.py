@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter
 from sqlalchemy import select
 
@@ -5,7 +7,11 @@ from app.domains.billing.service import enforce_limit
 from app.domains.demo.guards import refuse_visitor_organization
 from app.domains.identity.dependencies import Admin, CsrfAdmin, DbSession
 from app.domains.identity.invitation_models import OrganizationInvitation
-from app.domains.identity.invitation_service import accept_invitation, create_invitation
+from app.domains.identity.invitation_service import (
+    accept_invitation,
+    create_invitation,
+    resend_invitation,
+)
 from app.domains.identity.schemas import (
     InvitationAccept,
     InvitationCreate,
@@ -39,6 +45,26 @@ def create(body: InvitationCreate, admin: CsrfAdmin, db: DbSession) -> Invitatio
     refuse_visitor_organization(admin.organization)
     enforce_limit(db, admin.organization.id, "seats")
     invitation, token = create_invitation(db, admin.organization.id, admin.user.id, str(body.email))
+    return InvitationCreated(
+        id=invitation.id,
+        email=invitation.email,
+        role=invitation.role.value,
+        expires_at=invitation.expires_at,
+        token=token,
+    )
+
+
+@router.post(
+    "/organizations/{organization_id}/invitations/{invitation_id}/resend",
+    response_model=InvitationCreated,
+)
+def resend(
+    invitation_id: uuid.UUID, admin: CsrfAdmin, db: DbSession
+) -> InvitationCreated:
+    refuse_visitor_organization(admin.organization)
+    invitation, token = resend_invitation(
+        db, admin.organization.id, admin.user.id, invitation_id
+    )
     return InvitationCreated(
         id=invitation.id,
         email=invitation.email,

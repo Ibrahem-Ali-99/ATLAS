@@ -659,7 +659,31 @@ def submit_for_approval(
     expected_recipient = (
         (contact.email if row.channel == "email" else contact.phone) if contact else None
     )
-    if lead is None or inquiry is None or contact is None or expected_recipient != body.recipient:
+    if lead is None:
+        raise AppError(
+            422,
+            "approval_requires_lead",
+            "Link this conversation to a CRM lead before requesting approval",
+        )
+    if contact is None:
+        raise AppError(
+            422,
+            "reply_contact_required",
+            "Link a contact before requesting approval",
+        )
+    if inquiry is None:
+        raise AppError(
+            422,
+            "reply_inquiry_required",
+            "Record a customer inquiry before requesting approval",
+        )
+    if not expected_recipient:
+        raise AppError(
+            422,
+            "reply_address_missing",
+            "This conversation has no reply address for its channel",
+        )
+    if expected_recipient != body.recipient:
         raise AppError(
             422,
             "recipient_not_owned",

@@ -20,6 +20,7 @@ from app.domains.identity.models import User, UserSession
 from app.domains.identity.schemas import (
     AuthResponse,
     LoginRequest,
+    PasswordChange,
     PasswordResetConfirm,
     PasswordResetRequest,
     membership_out,
@@ -28,6 +29,7 @@ from app.domains.identity.schemas import (
 from app.domains.identity.service import (
     authenticate,
     create_password_reset,
+    change_password,
     list_memberships,
     normalize_email,
     reset_password,
@@ -91,6 +93,16 @@ def logout(db: DbSession, session: CsrfSession) -> Response:
 @router.get("/me", response_model=AuthResponse)
 def me(db: DbSession, user: CurrentUser, session: CurrentSession) -> AuthResponse:
     return _auth_response(db, user, session)
+
+
+@router.post("/password", status_code=204)
+def update_password(body: PasswordChange, db: DbSession, session: CsrfSession) -> Response:
+    user = db.get(User, session.user_id)
+    if user is None or not user.is_active:
+        raise AppError(401, "unauthenticated", "Sign in to continue")
+    change_password(db, user, session.id, body.current_password, body.new_password)
+    logger.info("password_changed", user_id=str(user.id))
+    return Response(status_code=204)
 
 
 @router.post("/forgot-password", status_code=202)

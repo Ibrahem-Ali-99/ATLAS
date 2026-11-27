@@ -63,6 +63,47 @@ def create_invitation(
     return invitation, token
 
 
+def resend_invitation(
+    db: Session, organization_id: uuid.UUID, actor_id: uuid.UUID, invitation_id: uuid.UUID
+) -> tuple[OrganizationInvitation, str]:
+    invitation = db.scalar(
+        select(OrganizationInvitation)
+        .where(
+            OrganizationInvitation.id == invitation_id,
+            OrganizationInvitation.organization_id == organization_id,
+        )
+        .with_for_update()
+    )
+    if invitation is None:
+        raise AppError(404, "invitation_not_found", "Invitation not found")
+    if invitation.accepted_at is not None:
+        raise AppError(409, "invitation_closed", "This invitation has already been accepted")
+    existing = db.scalar(select(User).where(User.email == invitation.email))
+    if (
+        existing is not None
+        and db.scalar(
+            select(Membership).where(
+                Membership.user_id == existing.id, Membership.organization_id == organization_id
+            )
+        )
+        is not None
+    ):
+        raise AppError(409, "already_member", "This user is already a member of the organization")
+    token = secrets.token_urlsafe(32)
+    invitation.token_hash = _hash_token(token)
+    invitation.expires_at = datetime.now(UTC) + INVITATION_TTL
+    record_event(
+        db,
+        organization_id,
+        "organization_invitation_resent",
+        {"invitation_id": str(invitation.id)},
+        actor_id=actor_id,
+    )
+    db.commit()
+    db.refresh(invitation)
+    return invitation, token
+
+
 def accept_invitation(
     db: Session, token: str, *, full_name: str, password: str
 ) -> tuple[User, Organization]:

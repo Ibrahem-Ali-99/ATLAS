@@ -148,3 +148,70 @@ def test_archive_keeps_messages_and_a_new_customer_message_returns_the_thread(
     returned = client.get(root, params={"channel": "whatsapp"})
     assert [item["id"] for item in returned.json()] == [str(whatsapp.id)]
     assert returned.json()[0]["unread_count"] == 2
+
+
+def test_reply_approval_uses_the_channel_recipient_and_does_not_send(
+    client: TestClient, db: Session
+) -> None:
+    owner = make_user(db, "reply-owner@example.com", full_name="Reply Owner")
+    organization = make_organization(db, "Reply Workspace", f"reply-{uuid.uuid4().hex[:8]}")
+    make_membership(db, owner, organization, MembershipRole.admin)
+    session = login(client, owner.email, PASSWORD)
+    headers = _csrf(session)
+    root = f"/api/v1/organizations/{_org(session)}"
+    conversation = _thread(db, organization.id, subject="Fictional quay note")
+    body = {"recipient": "fictional@example.com", "subject": "Fictional quay note", "body": "We can review this internally."}
+
+    missing_lead = client.post(f"{root}/inbox/{conversation.id}/submit-for-approval", json=body, headers=headers)
+    assert missing_lead.status_code == 422
+    assert missing_lead.json()["error"]["code"] == "approval_requires_lead"
+
+    company = client.post(f"{root}/companies", json={"name": "Fictional Quay"}, headers=headers)
+    assert company.status_code == 201, company.text
+    contact = client.post(
+        f"{root}/contacts",
+        json={"full_name": "Fictional Recipient", "email": "fictional@example.com", "company_id": company.json()["id"]},
+        headers=headers,
+    )
+    assert contact.status_code == 201, contact.text
+    lead = client.post(
+        f"{root}/leads",
+        json={"title": "Fictional quay request", "company_id": company.json()["id"], "contact_id": contact.json()["id"]},
+        headers=headers,
+    )
+    assert lead.status_code == 201, lead.text
+    linked = client.patch(f"{root}/inbox/{conversation.id}/lead", json={"lead_id": lead.json()["id"]}, headers=headers)
+    assert linked.status_code == 200, linked.text
+
+    missing_inquiry = client.post(f"{root}/inbox/{conversation.id}/submit-for-approval", json=body, headers=headers)
+    assert missing_inquiry.status_code == 422
+    assert missing_inquiry.json()["error"]["code"] == "reply_inquiry_required"
+    inquiry = client.post(
+        f"{root}/inquiries",
+        json={"subject": "Fictional quay note", "body": "Please review the quay note.", "lead_id": lead.json()["id"]},
+        headers=headers,
+    )
+    assert inquiry.status_code == 201, inquiry.text
+
+    mismatched = client.post(
+        f"{root}/inbox/{conversation.id}/submit-for-approval",
+        json={**body, "recipient": "other@example.com"},
+        headers=headers,
+    )
+    assert mismatched.status_code == 422
+    assert mismatched.json()["error"]["code"] == "recipient_not_owned"
+
+    detail = client.get(f"{root}/inbox/{conversation.id}")
+    assert detail.json()["reply_recipient"] == "fictional@example.com"
+    created = client.post(
+        f"{root}/inbox/{conversation.id}/submit-for-approval",
+        json={**body, "recipient": detail.json()["reply_recipient"]},
+        headers=headers,
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["status"] == "pending"
+    approval = client.get(f"{root}/approvals/{created.json()['approval_id']}")
+    assert approval.status_code == 200
+    assert approval.json()["status"] == "pending"
+    assert approval.json()["action_type"] == "prepare_customer_response"
+    assert "sent" not in approval.json()["status"]

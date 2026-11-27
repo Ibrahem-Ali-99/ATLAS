@@ -185,3 +185,40 @@ def test_logout_requires_csrf_and_revokes_session(client: TestClient, db: Sessio
     record = db.scalar(select(UserSession))
     assert record is not None
     assert record.revoked_at is not None
+
+
+def test_password_change_checks_the_current_password_and_keeps_this_session(
+    client: TestClient, db: Session
+) -> None:
+    user = make_user(db, "change-password@example.com")
+    session = login(client, user.email, PASSWORD)
+    headers = {"X-CSRF-Token": str(session["csrf_token"])}
+    missing = client.post(
+        "/api/v1/auth/password",
+        json={"current_password": PASSWORD, "new_password": "replacement-password"},
+    )
+    assert missing.status_code == 403
+    wrong = client.post(
+        "/api/v1/auth/password",
+        json={"current_password": "not-the-password", "new_password": "replacement-password"},
+        headers=headers,
+    )
+    assert wrong.status_code == 400
+    assert wrong.json()["error"]["code"] == "current_password_incorrect"
+    assert PASSWORD not in wrong.text
+    same = client.post(
+        "/api/v1/auth/password",
+        json={"current_password": PASSWORD, "new_password": PASSWORD},
+        headers=headers,
+    )
+    assert same.status_code == 422
+    changed = client.post(
+        "/api/v1/auth/password",
+        json={"current_password": PASSWORD, "new_password": "replacement-password"},
+        headers=headers,
+    )
+    assert changed.status_code == 204
+    assert client.get("/api/v1/auth/me").status_code == 200
+    client.cookies.clear()
+    assert client.post("/api/v1/auth/login", json={"email": user.email, "password": PASSWORD}).status_code == 401
+    assert login(client, user.email, "replacement-password")["user"]["email"] == user.email
