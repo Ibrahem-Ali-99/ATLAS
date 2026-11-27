@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { Command, Search } from "lucide-react";
 import Link from "next/link";
 import { useDeferredValue, useEffect, useState } from "react";
 
@@ -59,7 +59,7 @@ export function WorkspaceSearch() {
         <button type="button" className="command-search" aria-label="Search workspace" aria-keyshortcuts="Control+K Meta+K">
           <Search size={15} aria-hidden="true" />
           <span>Search workspace</span>
-          <kbd>Ctrl K</kbd>
+          <kbd><Command size={11} aria-hidden="true" /> K</kbd>
         </button>
       </DialogTrigger>
       <DialogContent className="max-h-[75dvh] overflow-y-auto">

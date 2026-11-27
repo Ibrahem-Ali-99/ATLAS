@@ -1,0 +1,10 @@
+{
+  "description": "An enterprise workspace for teams to manage customer relationships, communications, approvals, workflows, and business insights in one place.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

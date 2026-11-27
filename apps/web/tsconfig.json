@@ -80,7 +80,13 @@
     ".next-portfolio/types/**/*.ts",
     ".next-portfolio/dev/types/**/*.ts",
     ".next-e2e-harbor/types/**/*.ts",
-    ".next-e2e-harbor/dev/types/**/*.ts"
+    ".next-e2e-harbor/dev/types/**/*.ts",
+    ".next-review/types/**/*.ts",
+    ".next-review/dev/types/**/*.ts",
+    ".next-qa-acceptance/types/**/*.ts",
+    ".next-qa-acceptance/dev/types/**/*.ts",
+    ".next-harbor/types/**/*.ts",
+    ".next-harbor/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

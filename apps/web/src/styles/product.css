@@ -1,14 +1,5 @@
-/* Premium workspace composition. Loaded after the reference sheet so these rules win. */
-
-.app-shell {
-  background:
-    radial-gradient(1200px 420px at 10% -10%, color-mix(in srgb, var(--primary) 8%, transparent), transparent 60%),
-    var(--bg);
-}
-.app-shell main { max-width: 1320px; padding: 22px 28px 40px; }
-.app-shell .page-heading { margin-bottom: 16px; align-items: flex-end; }
-.app-shell .page-heading h1 { font-size: 30px; letter-spacing: -0.045em; font-weight: 640; }
-.app-shell .page-heading p { font-size: 14px; max-width: 46rem; }
+/* Page compositions for screens that have not been migrated back to the original shell.
+   Shell, heading, and Overview metrics stay in atlas-reference.css. */
 
 .saas-overview { display: flex; flex-direction: column; gap: 14px; }
 .saas-split { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.7fr); gap: 14px; align-items: start; }
@@ -203,6 +194,5 @@
 }
 @media (max-width: 720px) {
   .kpi-band, .stage-board, .compare-strip ul, .provider-board { grid-template-columns: 1fr; }
-  .app-shell main { padding: 16px 12px 28px; }
   .answer-turn.user { align-self: stretch; max-width: none; }
 }

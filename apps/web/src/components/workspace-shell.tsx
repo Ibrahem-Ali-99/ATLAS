@@ -1,12 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Menu, Moon, Settings, Sun, Users } from "lucide-react";
+import { Bell, ChevronDown, ChevronRight, Menu, Moon, Settings, Sun, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { DemoSessionBadge, useDemoRestart } from "@/components/demo-session-bar";
+import { useDemoRestart } from "@/components/demo-session-bar";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { WorkspaceSearch } from "@/components/workspace-search";
 import { SignOutDialog } from "@/components/sign-out-dialog";
@@ -107,7 +107,7 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
   const crumb = titleForPath(pathname);
 
   return (
-    <div className={cn("app-shell", collapsed && "sidebar-collapsed")}>
+    <div className="app-shell">
       <a href="#main" className="sr-only">Skip to content</a>
       {navOpen ? <button type="button" className="mobile-backdrop" aria-label="Close navigation" onClick={() => setNavOpen(false)} /> : null}
       <aside className={cn("sidebar", collapsed && "sidebar-collapsed", navOpen && "sidebar-mobile-open")}>
@@ -134,12 +134,15 @@ function WorkspaceShellContent({ children }: { children: ReactNode }) {
               <ChevronRight size={13} aria-hidden="true" />
               <strong>{crumb}</strong>
             </div>
-            <DemoSessionBadge session={session.data} />
           </div>
           <div className="topbar-actions">
             <WorkspaceSearch />
             <button type="button" className="button button-ghost button-icon" onClick={theme.toggleTheme} aria-label={`Switch to ${theme.theme === "dark" ? "light" : "dark"} theme`}>
               {theme.theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+            <button type="button" className="button button-ghost button-icon notification-button" aria-label="Notifications">
+              <Bell size={17} />
+              <span />
             </button>
             <div className="profile-wrap">
               <button type="button" className="profile-button" aria-label="Open profile menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((value) => !value)}>

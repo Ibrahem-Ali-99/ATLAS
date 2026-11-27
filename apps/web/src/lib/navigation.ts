@@ -1,10 +1,11 @@
 import {
-  BarChart3,
+  Blocks,
   BookOpen,
+  ChartNoAxesCombined,
+  CircleGauge,
   LayoutDashboard,
   Settings,
   ListChecks,
-  Plug,
   Activity,
   Users,
   Workflow,
@@ -12,7 +13,6 @@ import {
   Megaphone,
   BadgeCheck,
   Bot,
-  Gauge,
   CreditCard,
   type LucideIcon,
 } from "lucide-react";
@@ -37,9 +37,9 @@ const campaigns = { href: "/campaigns", label: "Campaigns", icon: Megaphone };
 const agentRuns = { href: "/agent-runs", label: "Agent Runs", icon: Activity };
 const approvals = { href: "/approvals", label: "Approvals", icon: BadgeCheck };
 const automations = { href: "/workflows", label: "Workflows", icon: Workflow };
-const integrations = { href: "/integrations", label: "Integrations", icon: Plug };
-const analytics = { href: "/analytics", label: "Analytics", icon: BarChart3 };
-const monitoring = { href: "/monitoring", label: "Monitoring", icon: Gauge };
+const integrations = { href: "/integrations", label: "Integrations", icon: Blocks };
+const analytics = { href: "/analytics", label: "Analytics", icon: ChartNoAxesCombined };
+const monitoring = { href: "/monitoring", label: "Monitoring", icon: CircleGauge };
 const settings = { href: "/settings", label: "Settings", icon: Settings };
 const billing = { href: "/billing", label: "Billing", icon: CreditCard };
 const setup = { href: "/setup", label: "Setup", icon: ListChecks };

@@ -1,16 +1,17 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronDown, ChevronRight, X } from "lucide-react";
 
+import { listAgentRuns, listApprovals } from "@/lib/agent-api";
+import { listInbox } from "@/lib/inbox";
 import { navigationGroups } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
-const demoHidden = new Set(["/billing", "/settings", "/setup"]);
-
 function mark(name: string): string {
-  const letters = name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("");
+  const letters = name.trim().split(/\s+/).filter((part) => /[A-Za-z0-9]/.test(part[0] ?? "")).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("");
   return letters || "AT";
 }
 
@@ -36,11 +37,15 @@ export function SidebarNav({
   demo?: boolean;
 }) {
   const pathname = usePathname();
-  const groups = demo
-    ? navigationGroups
-        .map((group) => ({ ...group, items: group.items.filter((item) => !demoHidden.has(item.href)) }))
-        .filter((group) => group.items.length > 0)
-    : navigationGroups;
+  const groups = navigationGroups;
+  const inbox = useQuery({ queryKey: ["nav-inbox-count", organizationId], queryFn: () => listInbox(organizationId ?? ""), enabled: Boolean(organizationId) });
+  const pendingApprovals = useQuery({ queryKey: ["nav-approvals-count", organizationId], queryFn: () => listApprovals(organizationId ?? "", { status: "pending" }), enabled: Boolean(organizationId) });
+  const running = useQuery({ queryKey: ["nav-runs-count", organizationId], queryFn: () => listAgentRuns(organizationId ?? "", { status: "running" }), enabled: Boolean(organizationId) });
+  const counts: Record<string, number> = {
+    "/inbox": (inbox.data ?? []).reduce((sum, item) => sum + item.unread_count, 0),
+    "/approvals": pendingApprovals.data?.total ?? 0,
+    "/agent-runs": running.data?.total ?? 0,
+  };
   const orgs = memberships ?? [];
   const current = organizationName ?? "ATLAS";
 
@@ -71,13 +76,13 @@ export function SidebarNav({
                   <option key={membership.organization_id} value={membership.organization_id}>{membership.organization_name}</option>
                 ))}
               </select>
-              <small>{demo ? "Demonstration" : "Workspace"}</small>
+              <small>Primary organization</small>
             </span>
           ) : null}
           {!collapsed ? <ChevronDown size={15} aria-hidden="true" /> : null}
         </label>
       </div>
-      <nav className="sidebar-nav" aria-label="Workspace">
+      <nav className="sidebar-nav" aria-label="Primary navigation">
         {groups.map((group) => (
           <div key={group.label}>
             {!collapsed ? <p className="nav-section">{group.label}</p> : null}
@@ -95,6 +100,7 @@ export function SidebarNav({
                 >
                   <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
                   {!collapsed ? <span>{item.label}</span> : null}
+                  {!collapsed && counts[item.href] !== undefined ? <span className="nav-count">{counts[item.href]}</span> : null}
                 </Link>
               );
             })}
