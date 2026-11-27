@@ -5,7 +5,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.domains.assistant.prompts import MAX_HISTORY_MESSAGES, render_history
-from app.domains.assistant.routing import Intent, parse_classifier_intent, route_question
+from app.domains.assistant.routing import (
+    Intent,
+    operation_intents,
+    parse_classifier_intent,
+    route_question,
+)
 from app.domains.assistant.service import NO_RECORDS
 from app.domains.identity.models import MembershipRole
 from app.integrations.language import get_chat_client, get_embedding_client
@@ -40,6 +45,10 @@ def test_clear_questions_route_without_a_model() -> None:
         route_question("Create a follow-up task for Harbor Desk", has_history=False) is Intent.task
     )
     assert route_question("Send the customer an email", has_history=False) is Intent.mutation
+    contact_email = "Show me a contact and their email"
+    assert route_question(contact_email, has_history=False) is Intent.grounded
+    assert operation_intents(contact_email) == []
+    assert Intent.follow_up in operation_intents("Book a visit and email her the closing note")
     assert route_question("Hello", has_history=False) is Intent.greeting
     named = "Name one company stored in this workspace"
     assert route_question(named, has_history=True) is Intent.grounded

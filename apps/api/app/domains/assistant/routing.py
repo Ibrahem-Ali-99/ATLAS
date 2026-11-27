@@ -75,7 +75,10 @@ _FOLLOW_UP = re.compile(
 _APPOINTMENT = re.compile(r"\b(request|schedule|book|propose)\b.{0,40}\b(appointment|meeting)\b")
 _BOOK_PERSON = re.compile(r"\b(book|schedule|arrange)\b")
 _NOT_APPOINTMENT = re.compile(r"\b(campaign|delivery|invoice|report)\b")
-_DRAFT_EMAIL = re.compile(r"\b(e-mail|email)\b")
+_DRAFT_EMAIL = re.compile(
+    r"\b(draft|write|prepare|compose)\b.{0,40}\b(e-mail|email)\b|"
+    r"\b(e-mail|email)\s+(him|her|them|the|a|an|customer|lead|contact)\b"
+)
 _TASK = re.compile(r"\b(create|add|make)\b.{0,40}\btask\b")
 _EXTERNAL_SEND = re.compile(
     r"\b(send|email|text)\b.{0,40}\b(message|email|customer|lead|contact)\b"

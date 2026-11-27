@@ -101,7 +101,49 @@ _REFERENCE = re.compile(r"\b(that|this|those|them|it|mentioned|earlier)\b")
 _NOISE = re.compile(
     r"\b(what|whats|what's|is|the|a|an|of|our|my|please|show|me|list|who|are|does|do|"
     r"how|many|tell|about|can|you|there|any|which|in|for|to|with|status|names|name|"
-    r"should|i|we|need|attention|does|did|that|this|those|them|same|earlier|mentioned)\b"
+    r"should|i|we|need|attention|does|did|that|this|those|them|same|earlier|mentioned|"
+    r"find|give|pick|choose|return|cite)\b"
+)
+_CLOSED = frozenset(
+    {
+        "and",
+        "or",
+        "its",
+        "their",
+        "his",
+        "her",
+        "from",
+        "by",
+        "also",
+        "plus",
+        "including",
+        "along",
+        "well",
+        "into",
+        "than",
+        "have",
+        "has",
+        "had",
+    }
+)
+_FIELD = frozenset(
+    {
+        "industry",
+        "industries",
+        "website",
+        "websites",
+        "email",
+        "emails",
+        "phone",
+        "phones",
+        "role",
+        "roles",
+        "title",
+        "titles",
+        "address",
+        "addresses",
+        "notes",
+    }
 )
 _GENERIC = {
     "customer",
@@ -380,21 +422,29 @@ def _query(question: str) -> str:
     return " ".join(cleaned.split())[:200]
 
 
-def _generic(query: str) -> bool:
-    words = set(query.split())
-    return not query or words <= _GENERIC
-
-
 def _lookup_query(query: str) -> str:
+    """Keep words that can identify a record.
+
+    A request for a column, such as industry or email, is not itself a search.
+    Connective words stay when they sit inside a name and are dropped when
+    nothing identifying remains.
+    """
+
     words = [
         word
         for word in query.split()
-        if word not in _FILLER and word not in _GENERIC and not word.isdigit()
+        if word not in _FILLER
+        and word not in _GENERIC
+        and word not in _FIELD
+        and not word.isdigit()
     ]
-    cleaned = " ".join(words)
-    if _generic(cleaned):
+    while words and words[0] in _CLOSED:
+        words.pop(0)
+    while words and words[-1] in _CLOSED:
+        words.pop()
+    if not any(word not in _CLOSED for word in words):
         return ""
-    return cleaned
+    return " ".join(words)
 
 
 def _with_limit(arguments: dict[str, Any], count: int | None) -> dict[str, Any]:

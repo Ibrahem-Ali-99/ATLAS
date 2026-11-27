@@ -220,6 +220,19 @@ def test_compare_and_overdue_select_business_tools() -> None:
     assert asks_for_stored_appointment("Which appointments are stored?")
     one = plan_request("Name one company stored in this workspace", [])
     assert one.tools == [("list_companies", {"query": "", "limit": 1})]
+    industry = plan_request(
+        "Name one company stored in this workspace and its industry.", []
+    )
+    assert industry.tools[0] == ("list_companies", {"query": "", "limit": 1})
+    contact = plan_request("Show me a contact and their email", [])
+    assert contact.tools == [("list_contacts", {"query": ""})]
+    leads = plan_request("Which leads are stored in this workspace?", [])
+    assert leads.tools == [("list_leads", {"query": "", "needs_attention": False})]
+    named = plan_request("Find the company Brine and Barrel", [])
+    assert named.tools[0][0] == "list_companies"
+    assert named.tools[0][1]["query"] == "brine and barrel"
+    industries = plan_request("List our companies and their industries", [])
+    assert industries.tools == [("list_companies", {"query": ""})]
     assert one.general is False
     hello = plan_request("Hello", [])
     assert hello.general is True
@@ -259,6 +272,93 @@ def test_compare_and_overdue_select_business_tools() -> None:
     )
     assert follow.general is True
     assert follow.tools == []
+
+
+def test_field_requests_list_the_callers_records(client: TestClient, db: Session) -> None:
+    owner = make_user(db, "owner@example.com", full_name="Owner One")
+    neighbor = make_user(db, "neighbor@example.com", full_name="Neighbor Two")
+    empty_owner = make_user(db, "empty@example.com", full_name="Empty Owner")
+    populated = make_organization(db, "Harbor visitor", "harbor-visitor-populated")
+    other = make_organization(db, "Other tenant", "harbor-visitor-other")
+    empty = make_organization(db, "Empty visitor", "harbor-visitor-empty")
+    make_membership(db, owner, populated, MembershipRole.admin)
+    make_membership(db, neighbor, other, MembershipRole.admin)
+    make_membership(db, empty_owner, empty, MembershipRole.admin)
+    client.app.dependency_overrides[get_chat_client] = lambda: ForbiddenChat()
+    client.app.dependency_overrides[get_embedding_client] = lambda: HashEmbeddingClient()
+
+    owner_login = login(client, "owner@example.com", PASSWORD)
+    headers = _csrf(owner_login)
+    org = _org(owner_login)
+    company = client.post(
+        f"/api/v1/organizations/{org}/companies",
+        json={"name": "Brine & Barrel", "industry": "Beverages"},
+        headers=headers,
+    )
+    assert company.status_code == 201, company.text
+    contact = client.post(
+        f"/api/v1/organizations/{org}/contacts",
+        json={"full_name": "Mina Patel", "email": "mina@brine.example"},
+        headers=headers,
+    )
+    assert contact.status_code == 201, contact.text
+    lead = client.post(
+        f"/api/v1/organizations/{org}/leads",
+        json={"title": "North pier expansion", "status": "new"},
+        headers=headers,
+    )
+    assert lead.status_code == 201, lead.text
+
+    industry = _ask(
+        client,
+        org,
+        headers,
+        "Name one company stored in this workspace and its industry.",
+    )
+    assert "Brine & Barrel" in industry["content"]
+    assert "Beverages" in industry["content"]
+    assert industry["tools"] == ["list_companies"]
+
+    customer = _ask(client, org, headers, "Which customer is stored in this workspace?")
+    assert "Brine & Barrel" in customer["content"]
+    person = _ask(client, org, headers, "Show me a contact and their email")
+    assert "Mina Patel" in person["content"]
+    assert any(
+        "mina@brine.example" in str(source.get("excerpt") or "")
+        or "mina@brine.example" in person["content"]
+        for source in person["sources"]
+    )
+    stored_leads = _ask(client, org, headers, "What leads do we have?")
+    assert "North pier expansion" in stored_leads["content"]
+
+    neighbor_login = login(client, "neighbor@example.com", PASSWORD)
+    neighbor_headers = _csrf(neighbor_login)
+    neighbor_org = _org(neighbor_login)
+    other_company = client.post(
+        f"/api/v1/organizations/{neighbor_org}/companies",
+        json={"name": "Other Yard", "industry": "Storage"},
+        headers=neighbor_headers,
+    )
+    assert other_company.status_code == 201, other_company.text
+    isolated = _ask(
+        client,
+        neighbor_org,
+        neighbor_headers,
+        "Name one company stored in this workspace and its industry.",
+    )
+    assert "Other Yard" in isolated["content"]
+    assert "Brine & Barrel" not in isolated["content"]
+    assert "Mina Patel" not in isolated["content"]
+
+    empty_login = login(client, "empty@example.com", PASSWORD)
+    vacant = _ask(
+        client,
+        _org(empty_login),
+        _csrf(empty_login),
+        "Name one company stored in this workspace and its industry.",
+    )
+    assert vacant["content"] == "No companies are stored in this workspace."
+    assert vacant["tools"] == ["list_companies"]
 
 
 def _ask(
