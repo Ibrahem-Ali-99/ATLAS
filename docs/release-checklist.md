@@ -1,5 +1,7 @@
 # Release checklist
 
+The public portfolio gate is [portfolio-release-checklist.md](portfolio-release-checklist.md). This file remains the product regression record.
+
 Prepared 26 November 2026 on `feature/atlas-product-completion`. The accepted regression predates the Harbor demo commits `3bc9684`, `e77d5a1`, and `bb7d10a`. This checklist does not create a tag. Deployment configuration may still be uncommitted and is not certified here.
 
 ## Commits on the branch
@@ -70,7 +72,7 @@ Checked at `44631e1` without staging the dirty tree:
 
 ## Deployment prerequisites
 
-A public host is one API process and one Next.js app behind one browser origin. PostgreSQL with pgvector and the upload disk persist. Migrations run before traffic. Session cookies stay HttpOnly. A shared demo sets the public-demo flag and must refuse a paid model key, live email, and an n8n URL. The portfolio Compose files still being edited are not certified here.
+A public host is one API process and the replacement Next.js app behind one browser origin. PostgreSQL with pgvector and the upload disk persist. Migrations run before traffic. Session cookies stay HttpOnly. A shared demo sets the public-demo flag and must refuse a paid model key, live email, and an n8n URL. The portfolio procedure and its remaining prerequisites are in [portfolio-release-checklist.md](portfolio-release-checklist.md). Do not publish until that list is accepted.
 
 ## Deployment-blocking defects
 

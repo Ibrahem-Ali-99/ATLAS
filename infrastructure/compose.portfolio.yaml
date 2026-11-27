@@ -1,7 +1,7 @@
 # Public portfolio demo. Production is infrastructure/compose.production.yaml.
-# This file does not publish Postgres, Mailpit, or the API.
-# It does not run n8n or Ollama: a public demo cannot call n8n, and the
-# deterministic provider keeps retrieval inside the API process.
+# This file does not publish Postgres, Mailpit, Ollama, or the API.
+# It does not run n8n. Visitor chat uses a keyless local model on this network.
+# Visitor retrieval stays on the deterministic stand-in.
 # The database name is fixed. Do not point this stack at another workspace.
 
 name: atlas-portfolio
@@ -48,10 +48,13 @@ services:
 
   web:
     build:
-      context: ../apps/web
+      context: ../apps/web-rebuild
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: same-origin
+        ATLAS_API_URL: http://api:8000
+        ATLAS_PUBLIC_SITE: "1"
+    environment:
+      ATLAS_PUBLIC_SITE: "1"
     networks:
       - private
     depends_on:
@@ -83,11 +86,19 @@ services:
       context: ../apps/api
       dockerfile: Dockerfile
     environment:
-      # Production rejects the deterministic provider, and a public demo rejects a
-      # paid model key. Development plus the public-demo flag is the combination
-      # the application currently allows for a sandboxed assistant.
+      # Production rejects the deterministic embedding provider, which visitor
+      # retrieval still uses. Development plus the public-demo flag keeps paid
+      # keys, live email, and n8n from booting. Visitor chat uses the local model.
       ATLAS_ENVIRONMENT: development
       ATLAS_PUBLIC_DEMO: "true"
+      ATLAS_PUBLIC_INFERENCE_ENABLED: "true"
+      ATLAS_PUBLIC_INFERENCE_SESSION_LIMIT: "8"
+      ATLAS_PUBLIC_INFERENCE_GLOBAL_LIMIT: "200"
+      ATLAS_PUBLIC_INFERENCE_WINDOW_SECONDS: "3600"
+      ATLAS_PUBLIC_INFERENCE_MAX_INPUT_CHARS: "2000"
+      ATLAS_PUBLIC_INFERENCE_MAX_OUTPUT_TOKENS: "256"
+      ATLAS_PUBLIC_INFERENCE_MIN_INTERVAL_SECONDS: "2"
+      ATLAS_PUBLIC_INFERENCE_MAX_CONCURRENCY: "2"
       ATLAS_SECRET_KEY: ${PORTFOLIO_SECRET_KEY:?Set PORTFOLIO_SECRET_KEY}
       ATLAS_CREDENTIAL_ENCRYPTION_KEYS: ${PORTFOLIO_CREDENTIAL_ENCRYPTION_KEYS:?Set PORTFOLIO_CREDENTIAL_ENCRYPTION_KEYS}
       ATLAS_DATABASE_URL: postgresql+psycopg://${PORTFOLIO_POSTGRES_USER:-atlas}:${PORTFOLIO_POSTGRES_PASSWORD:?Set PORTFOLIO_POSTGRES_PASSWORD}@postgres:5432/atlas_portfolio
@@ -100,10 +111,10 @@ services:
       ATLAS_LOGIN_WINDOW_SECONDS: "900"
       ATLAS_WEBHOOK_RATE_LIMIT: "10"
       ATLAS_WEBHOOK_MAX_BYTES: "32768"
-      ATLAS_LLM_PROVIDER: double
-      ATLAS_LLM_BASE_URL: http://double.invalid/v1
+      ATLAS_LLM_PROVIDER: openai
+      ATLAS_LLM_BASE_URL: http://ollama:11434/v1
       ATLAS_LLM_API_KEY: ""
-      ATLAS_LLM_MODEL: double
+      ATLAS_LLM_MODEL: llama3.2:1b
       ATLAS_LLM_MAX_OUTPUT_TOKENS: "256"
       ATLAS_EMBEDDING_PROVIDER: double
       ATLAS_EMBEDDING_BASE_URL: http://double.invalid/v1
@@ -141,6 +152,10 @@ services:
       postgres:
         condition: service_healthy
       mailpit:
+        condition: service_healthy
+      chat-model:
+        condition: service_completed_successfully
+      ollama:
         condition: service_healthy
     healthcheck:
       test:
@@ -212,6 +227,46 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  ollama:
+    image: ollama/ollama:0.12.6
+    volumes:
+      - portfolio_ollama:/root/.ollama
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "/bin/ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 1792M
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  chat-model:
+    image: ollama/ollama:0.12.6
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "llama3.2:1b"]
+    networks:
+      - private
+    depends_on:
+      ollama:
+        condition: service_healthy
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
 networks:
   private:
 
@@ -222,3 +277,4 @@ volumes:
   model_data:
   postgres_data:
   mailpit_data:
+  portfolio_ollama:

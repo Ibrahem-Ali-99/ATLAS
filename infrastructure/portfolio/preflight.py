@@ -73,7 +73,7 @@ def problems(settings: dict[str, str]) -> list[str]:
     get = settings.get
     if get("PORTFOLIO_ENVIRONMENT") != "development":
         issues.append(
-            "PORTFOLIO_ENVIRONMENT must be development until production accepts a keyless chat provider"
+            "PORTFOLIO_ENVIRONMENT must be development because visitor retrieval still uses the deterministic embedding provider"
         )
     if get("PORTFOLIO_PUBLIC_DEMO", "").lower() != "true":
         issues.append("PORTFOLIO_PUBLIC_DEMO must be true")

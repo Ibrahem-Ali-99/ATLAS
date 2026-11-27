@@ -2,22 +2,24 @@
 
 This is the public Upwork demonstration: one fictional workspace a visitor can open in a browser. It is not the customer production stack in [production.md](production.md). No server, domain, or paid account was purchased for this procedure.
 
-The public website and the signed-in application stay on one origin. Caddy sends `/api` and `/api/*` to the API and every other path to the Next.js app. The website session already serves `/`, `/demo`, `/case-study`, and `/portfolio/*` from that app. Workspace pages such as `/overview` stay on the same origin. Do not put the website on a second host. The session cookie is HttpOnly and SameSite=Lax, and a browser will not send it across sites.
+The public website and the signed-in application stay on one origin. Caddy sends `/api` and `/api/*` to the API and every other path to the Next.js app. That app is the replacement client in `apps/web-rebuild`. The image is built with `ATLAS_PUBLIC_SITE=1`, so `/` is the presentation, `/demo` and `/case-study` explain the session, and `/login` opens the workspace. Do not put the website on a second host. The session cookie is HttpOnly and SameSite=Lax, and a browser will not send it across sites. The earlier client in `apps/web` is not the image this file builds.
 
 ## Configuration the website session already requires
 
 These rules come from the current application and from `docs/portfolio-demo.md`. This deployment does not change them.
 
 - The serving process sets `ATLAS_PUBLIC_DEMO=true`. That process refuses a paid model key, live email, and an n8n URL.
-- Production refuses the deterministic provider. A public demo refuses a paid chat key. Together, those two rules leave no chat provider that `ATLAS_ENVIRONMENT=production` will boot. The portfolio process therefore uses `ATLAS_ENVIRONMENT=development` with the public-demo flag. Caddy answers `/docs`, `/openapi.json`, and `/redoc` with 404, so the development schema is not on the public origin.
+- Visitor chat is a keyless call to Ollama on the Compose network, model `llama3.2:1b`, and only when `ATLAS_PUBLIC_INFERENCE_ENABLED=true`. An empty key is accepted only for a visitor and only when the host is `ollama`, loopback, or `host.docker.internal`. A keyless call to a public model host is refused. A workspace that is not a visitor cannot obtain that client.
+- Visitor document search stays on the deterministic embedding stand-in. Production rejects that provider, so this file keeps `ATLAS_ENVIRONMENT=development`. Caddy answers `/docs`, `/openapi.json`, and `/redoc` with 404, so the development schema is not on the public origin.
+- Each visitor session may receive 8 model replies per hour. The process may receive 200. Replies wait at least 2 seconds, at most 2 run at once, and each reply is capped at 256 tokens. Input over 2,000 characters, a repeated-character run, more than three links, or a prompt-injection pattern is rejected before the model is called. The counters live in the one API process and reset when that process restarts.
 - The prepared records are written only by `python -m app.scripts.portfolio_demo`, only into a database named `atlas_portfolio`, and only from a one-off process with `ATLAS_PUBLIC_DEMO=false`. The serving process refuses that command.
 - The one-off writes the knowledge file outside its own upload directory. The serving process mounts that directory as `ATLAS_STORAGE_DIR`, so the API can index the file after it restarts.
 - Public entry is `POST /api/v1/demo/sessions` from Launch interactive demo. That session is a separate organization. The seeded staff account remains an operator login and cannot approve an external action. Do not publish the administrator or staff password.
-- Assistant answers use the deterministic provider. The stored sentence is the fixed grounded sentence. Retrieval uses the in-process embedding at 1536 dimensions. Nothing is sent to Groq or OpenAI.
+- Visitor assistant answers may call the local model under the budgets above. Retrieval for that visitor uses the in-process embedding at 1536 dimensions. Nothing is sent to Groq or OpenAI. A non-visitor on this process still cannot call an external model.
 - The seeded organization stays on the Free plan until a confirmed subscription changes it: 2 seats, 100 assistant requests, 1 GB of knowledge files, and 2 active workflows. This stack also caps a model response at 256 tokens and an upload at 2 MiB.
 - Login failures are limited to 5 per email and 120 per client address inside the one API process, over 15 minutes. Demo launches are limited to 8 per direct client address per 15 minutes, and to 40 active visitor organizations. Behind Caddy every visitor shares Caddy's address, so the per-email login limit is the one that isolates an account, and the launch limit is shared by the whole site. A client-supplied forwarded address does not open another bucket. Webhook calls are limited to 10 per key per minute. Do not run a second API container. The counters are not shared, and a second process would recover the same rows.
 
-If the application later accepts a keyless local chat model in production, the environment can move to production. Until that change exists, do not set `ATLAS_ENVIRONMENT=production` on this file. The API will not start.
+Do not set `ATLAS_ENVIRONMENT=production` on this file. Production rejects the deterministic embedding provider, and visitor retrieval still uses it. Chat for a visitor is already the keyless local model. Moving the whole process to production waits until visitor retrieval no longer needs that stand-in.
 
 ## What this stack leaves out
 
@@ -28,13 +30,13 @@ If the application later accepts a keyless local chat model in production, the e
 | PostgreSQL `atlas_portfolio` | Kept. 512 MB. The development database is not mounted. |
 | Mailpit | Kept private, capped at 200 messages. Sandbox SMTP stays on the Compose network. |
 | n8n | Omitted. A public demo cannot call it. |
-| Ollama and the embedding pull | Omitted. The deterministic embedding does not need a model download. |
+| Ollama | Kept private, for the visitor chat model only. No host port. The pull is `llama3.2:1b`. |
 | Groq, Stripe, WhatsApp, Google Calendar | Omitted. The compose file sets those keys empty. |
 | Off-host backup bucket, registry, Redis, GPU | Omitted. |
 
-Memory limits are 64 MB for Caddy, 384 MB for the web app, 768 MB for the API, 512 MB for PostgreSQL, and 64 MB for Mailpit. That is under 2 GB. The production file reserves about 5.4 GB because it also runs Ollama and n8n.
+Memory limits are 64 MB for Caddy, 384 MB for the web app, 768 MB for the API, 512 MB for PostgreSQL, 64 MB for Mailpit, 1,792 MB for Ollama, and 256 MB for the one-shot model pull. That is under 4 GB of container limits. The model is resident only inside the Ollama limit.
 
-Use one amd64 Ubuntu LTS virtual machine with 2 vCPU, 4 GB RAM, and 40 GB disk. That is enough to build the images and run this stack. Do not rent the 4 vCPU / 8 GB production shape for the demonstration. Do not add a GPU.
+Use one amd64 Ubuntu LTS virtual machine with 2 vCPU, 8 GB RAM, and 40 GB disk. The extra memory is for the local chat model. Do not add a GPU. Do not point this stack at the development database, `atlas_harbor`, or the Harbor upload directory.
 
 ## Install the host
 
@@ -125,7 +127,7 @@ Visitors use Launch interactive demo on the public site. That writes a short-liv
 
 ## What the interactive session can do
 
-A visitor can open overview, CRM, inbox, knowledge, the assistant, workflows, analytics, campaigns, and approvals. The records are Harbor & Co. The assistant heading says demonstration mode. Answers and document search use the deterministic stand-in. The provider line on the assistant says the same thing, including when the process would otherwise report a paid model.
+A visitor can open overview, CRM, inbox, knowledge, the assistant, workflows, analytics, campaigns, and approvals. The records are Harbor & Co. Assistant replies for that visitor can call the local model inside the budgets above. Document search for that visitor stays on the deterministic stand-in. The private Harbor review, including its verified provider connections, is not this database and is not opened by Launch interactive demo.
 
 Restart deletes that visitor organization and opens another. Expired visitor organizations are removed when a later launch runs. Cleanup deletes a slug only when it starts with `harbor-visitor-`. Atlas Demo, Northwind, and any other slug stay, including one that merely begins with `harbor-`. The visitor address cannot sign in or reset a password.
 
@@ -197,6 +199,8 @@ python infrastructure/production/prove_stack.py
 The result files are `var/portfolio-proof/result.json` and `var/production-stack-proof/result.json`. They are not committed.
 
 ## What was verified on this machine
+
+The notes below are the earlier proof, when the web image was `apps/web` and the assistant was the deterministic stand-in. They are not a proof of the replacement client or of the local model. `prove.py` was not run again for this revision. Nothing was published, and no host, domain, or paid account was purchased.
 
 The portfolio proof used project `atlas-portfolio-proof` on `127.0.0.1:19380` and `:19343`. Caddy served the public home page, `/demo`, `/case-study`, `/login`, and the overview capture. `/api/v1/health` and `/api/v1/ready` came from the API. `/api/v1/auth/me` and a failed login returned 401 and did not set a session cookie. `/docs`, `/openapi.json`, and `/redoc` returned 404. HTTP redirected to HTTPS. Postgres, Mailpit, the API, and the web app published no host ports.
 

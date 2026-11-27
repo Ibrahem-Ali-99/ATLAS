@@ -4,6 +4,7 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 import structlog
@@ -16,6 +17,14 @@ HttpTransport = httpx.BaseTransport
 _MAX_PROVIDER_ATTEMPTS = 3
 _MAX_RETRY_WAIT = 8.0
 _TRANSIENT_LLM = {"llm_rate_limited", "llm_timeout"}
+_LOCAL_MODEL_HOSTS = frozenset({"ollama", "localhost", "127.0.0.1", "host.docker.internal", "::1"})
+
+
+def local_model_endpoint(url: str) -> bool:
+    """True when the chat URL stays on the private network or loopback."""
+
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    return host in _LOCAL_MODEL_HOSTS
 
 
 def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
@@ -112,18 +121,36 @@ class OpenAICompatibleChatClient:
         self._settings = settings
         self._transport = transport
         self._output_limit: int | None = None
+        self._reasoning_effort: str | None = None
         self._retry_delay = 0.0
+        self._keyless_local = False
+        self.last_usage: tuple[int | None, int | None] | None = None
+
+    def permit_keyless_local(self) -> None:
+        """Allow an empty key for a visitor call to a private model endpoint."""
+
+        self._keyless_local = True
+
+    def prefer_brief_reply(self) -> None:
+        """Cap a conversational reply so a greeting does not wait on a long trace."""
+
+        if self._output_limit is None:
+            self._output_limit = 400
+        self._reasoning_effort = "low"
 
     def limit_output(self, tokens: int) -> None:
         self._output_limit = tokens
 
     def ensure_configured(self) -> None:
-        if not self._settings.llm_api_key.strip():
-            raise AppError(
-                503,
-                "llm_unconfigured",
-                "The language model is not configured. Set ATLAS_LLM_API_KEY.",
-            )
+        if self._settings.llm_api_key.strip():
+            return
+        if self._keyless_local and local_model_endpoint(self._settings.llm_base_url):
+            return
+        raise AppError(
+            503,
+            "llm_unconfigured",
+            "The language model is not configured. Set ATLAS_LLM_API_KEY.",
+        )
 
     def complete(self, system: str, user: str) -> str:
         chunks = list(self.stream(system, user))
@@ -170,6 +197,7 @@ class OpenAICompatibleChatClient:
             output_limit = self._settings.llm_max_output_tokens
         if output_limit is not None:
             body["max_tokens"] = output_limit
+        _set_reasoning(body, self._settings.llm_model, self._reasoning_effort)
         if "json" in system.lower():
             body["response_format"] = {"type": "json_object"}
         if self._transport is None:
@@ -213,6 +241,7 @@ class OpenAICompatibleChatClient:
                         502, "llm_failed", "The language model returned an unexpected response"
                     )
                 _log_usage("llm_usage", payload, self._settings.llm_provider)
+                self.last_usage = _usage_pair(payload)
                 if isinstance(payload.get("error"), dict):
                     raise AppError(
                         502, "llm_failed", "The language model returned an unexpected response"
@@ -233,6 +262,7 @@ class OpenAICompatibleChatClient:
         tools: list[dict[str, Any]],
         *,
         tool_choice: str = "auto",
+        reasoning_effort: str | None = None,
     ) -> ModelToolResult:
         """One non-streaming tool-calling turn. Reasoning fields are discarded."""
 
@@ -248,6 +278,7 @@ class OpenAICompatibleChatClient:
             output_limit = self._settings.llm_max_output_tokens
         if output_limit is not None:
             body["max_tokens"] = output_limit
+        _set_reasoning(body, self._settings.llm_model, reasoning_effort or self._reasoning_effort)
         response: httpx.Response | None = None
         for attempt in range(_MAX_PROVIDER_ATTEMPTS):
             try:
@@ -374,6 +405,23 @@ def _embedding_vectors(payload: object, count: int, dimensions: int) -> list[lis
             502, "embedding_failed", "The embedding provider returned an unexpected response"
         )
     return vectors
+
+
+def _set_reasoning(body: dict[str, Any], model: str, effort: str | None) -> None:
+    if effort and "gpt-oss" in model:
+        body["reasoning_effort"] = effort
+
+
+def _usage_pair(payload: dict[str, Any]) -> tuple[int | None, int | None] | None:
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    prompt = usage.get("prompt_tokens")
+    completion = usage.get("completion_tokens")
+    return (
+        prompt if isinstance(prompt, int) else None,
+        completion if isinstance(completion, int) else None,
+    )
 
 
 def _log_usage(event: str, payload: dict[str, Any], provider: str) -> None:
@@ -525,6 +573,7 @@ def get_chat_client(
 
                 return DeterministicChatClient()
             client = OpenAICompatibleChatClient(settings)
+            client.permit_keyless_local()
             client.limit_output(
                 max_output_tokens
                 if max_output_tokens is not None

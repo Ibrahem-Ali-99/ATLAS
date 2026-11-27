@@ -8,15 +8,17 @@ from pathlib import Path
 
 COMPOSE_FILE = Path(__file__).resolve().parents[1] / "compose.portfolio.yaml"
 CADDY_FILE = Path(__file__).resolve().parents[1] / "caddy" / "Caddyfile"
-REQUIRED_SERVICES = ("caddy", "web", "api", "postgres", "mailpit")
-ABSENT_SERVICES = ("n8n", "ollama", "embedding-model")
-HEALTHCHECKED = REQUIRED_SERVICES
+REQUIRED_SERVICES = ("caddy", "web", "api", "postgres", "mailpit", "ollama", "chat-model")
+ABSENT_SERVICES = ("n8n", "embedding-model")
+HEALTHCHECKED = tuple(name for name in REQUIRED_SERVICES if name != "chat-model")
 LIMITED = {
     "caddy": "64M",
     "web": "384M",
     "api": "768M",
     "postgres": "512M",
     "mailpit": "64M",
+    "ollama": "1792M",
+    "chat-model": "256M",
 }
 
 
@@ -81,8 +83,12 @@ def problems(text: str, caddy: str) -> list[str]:
         "ATLAS_ENVIRONMENT: development",
         'ATLAS_PUBLIC_DEMO: "true"',
         'ATLAS_COOKIE_SECURE: "true"',
-        "ATLAS_LLM_PROVIDER: double",
+        "ATLAS_LLM_PROVIDER: openai",
+        "ATLAS_LLM_BASE_URL: http://ollama:11434/v1",
+        "ATLAS_LLM_MODEL: llama3.2:1b",
         'ATLAS_LLM_API_KEY: ""',
+        'ATLAS_PUBLIC_INFERENCE_ENABLED: "true"',
+        "context: ../apps/web-rebuild",
         "ATLAS_EMBEDDING_PROVIDER: double",
         'ATLAS_EMBEDDING_API_KEY: ""',
         "ATLAS_EMAIL_MODE: sandbox",
@@ -110,6 +116,10 @@ def problems(text: str, caddy: str) -> list[str]:
         issues.append("Caddy must hide the API schema on the public origin")
     if "reverse_proxy api:8000" not in caddy or "reverse_proxy web:3000" not in caddy:
         issues.append("Caddy must send /api to the API and other paths to the web app")
+    if re.search(r"(?m)^      context: \.\./apps/web$", text):
+        issues.append("the web image must not build the previous frontend")
+    if "ollama" in blocks and re.search(r"(?m)^    ports:", blocks["ollama"]):
+        issues.append("ollama publishes a host port")
     return issues
 
 

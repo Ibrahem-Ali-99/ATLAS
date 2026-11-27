@@ -139,3 +139,65 @@ def test_visitor_assistant_uses_the_public_budget(
     assert denied.chat is None
     assert denied.held is False
     assert denied.denied is not None
+
+
+def test_visitor_public_inference_accepts_a_keyless_local_model(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = Organization(
+        name="Harbor visitor", slug=f"harbor-visitor-{uuid.uuid4().hex[:8]}"
+    )
+    db.add(organization)
+    db.commit()
+    enabled = get_settings().model_copy(
+        update={
+            "public_demo": True,
+            "public_inference_enabled": True,
+            "llm_provider": "openai",
+            "llm_base_url": "http://ollama:11434/v1",
+            "llm_api_key": "",
+        }
+    )
+    monkeypatch.setattr("app.integrations.language.get_settings", lambda: enabled)
+    client = get_chat_client(db, organization.id, public_inference=True)
+    assert isinstance(client, OpenAICompatibleChatClient)
+    client.ensure_configured()
+
+
+def test_keyless_public_model_host_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    enabled = get_settings().model_copy(
+        update={
+            "public_inference_enabled": True,
+            "llm_provider": "openai",
+            "llm_base_url": "https://api.openai.com/v1",
+            "llm_api_key": "",
+        }
+    )
+    monkeypatch.setattr("app.integrations.language.get_settings", lambda: enabled)
+    client = OpenAICompatibleChatClient(enabled)
+    client.permit_keyless_local()
+    with pytest.raises(AppError) as caught:
+        client.ensure_configured()
+    assert caught.value.code == "llm_unconfigured"
+
+
+def test_public_demo_does_not_hand_the_local_model_to_a_workspace(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = Organization(name="Atlas Demo", slug=f"atlas-demo-{uuid.uuid4().hex[:8]}")
+    db.add(organization)
+    db.commit()
+    enabled = get_settings().model_copy(
+        update={
+            "public_demo": True,
+            "public_inference_enabled": True,
+            "llm_provider": "openai",
+            "llm_base_url": "http://ollama:11434/v1",
+            "llm_api_key": "",
+        }
+    )
+    monkeypatch.setattr("app.integrations.language.get_settings", lambda: enabled)
+    monkeypatch.setattr("app.integrations.resolver.get_settings", lambda: enabled)
+    with pytest.raises(AppError) as caught:
+        get_chat_client(db, organization.id, public_inference=True)
+    assert caught.value.code == "llm_unconfigured"

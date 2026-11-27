@@ -4,6 +4,8 @@ Harbor & Co. is fictional. The interactive demo writes this workspace into a vis
 
 The same writer can fill a database named `atlas_harbor`. It refuses every other database, including the development database, `atlas_portfolio`, and `atlas_test`.
 
+The public portfolio stack is a different database and a different web image. Do not point it at `atlas_harbor`, this password, or `var/harbor-storage`. Launch interactive demo must not be used against this review API. The connected providers stay on this private process.
+
 ## What is stored
 
 | Records | Count | How they stay honest |

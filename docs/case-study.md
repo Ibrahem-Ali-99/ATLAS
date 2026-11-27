@@ -18,7 +18,7 @@ Workflows are a visual definition with all or any conditions, two ordered paths,
 
 ## System architecture
 
-The web client is Next.js App Router, React, TypeScript, Tailwind, Radix UI, and TanStack Query. The API is a Python 3.12 FastAPI modular monolith using Pydantic, SQLAlchemy, Alembic, PostgreSQL, and pgvector. LangGraph coordinates inquiry processing. Domain services own the business rules. Routes validate the contract and call the service. A read-only MCP process supplies scoped CRM and knowledge context. Ingestion, workflow recovery, and training run inside the one API process.
+The public portfolio client is the replacement Next.js 16 app in `apps/web-rebuild`. The earlier client in `apps/web` remains the development application. The API is a Python 3.12 FastAPI modular monolith using Pydantic, SQLAlchemy, Alembic, PostgreSQL, and pgvector. LangGraph coordinates inquiry processing. Domain services own the business rules. Routes validate the contract and call the service. A read-only MCP process supplies scoped CRM and knowledge context. Ingestion, workflow recovery, and training run inside the one API process.
 
 ```text
 Browser → Next.js → FastAPI → PostgreSQL
@@ -28,9 +28,9 @@ FastAPI → n8n, when a webhook URL is configured
 
 ## Engineering decisions
 
-External side effects wait for a person. The model does not approve itself and does not choose the organization. Failed logins share one error and are limited inside the process. A public demo cannot hold a paid model key, live email, or an n8n URL. Seeding resets development passwords, so it does not run in production or in that demo. Provider keys that are empty fail closed. The deterministic provider is a stand-in for tests and a public demo, not a measure of a hosted model.
+External side effects wait for a person. The model does not approve itself and does not choose the organization. Failed logins share one error and are limited inside the process. A public demo cannot hold a paid model key, live email, or an n8n URL. Seeding resets development passwords, so it does not run in production or in that demo. Provider keys that are empty fail closed. The deterministic provider remains the stand-in for tests and for visitor document search. It is not a measure of a hosted model.
 
-An isolated visitor database is prepared with `app.scripts.portfolio_demo`, described in [portfolio-demo.md](portfolio-demo.md). That command refuses the development database.
+An isolated visitor database is prepared with `app.scripts.portfolio_demo`, described in [portfolio-demo.md](portfolio-demo.md). That command refuses every database name other than `atlas_portfolio`, including the development database and `atlas_harbor`.
 
 ## Intelligent retrieval
 
@@ -40,7 +40,7 @@ The assistant default is `answerable` in `apps/api/app/domains/knowledge/retriev
 
 A stored citation is a row that contains a number, code, email, or distinctive word the answer states. The model does not choose the stored ids. `80000` and `80,000` are the same figure. `9` and `09` are the same clock component. `19` is not accepted as `9`. A specific fact that appears in none of the supplied rows is replaced, in the stored message, with a sentence that the fact could not be confirmed. If neither documents nor CRM records qualify, the assistant stores a refusal and does not call the model.
 
-Anonymous website chat and a visitor Assistant session do not call Groq or Ollama unless `ATLAS_PUBLIC_INFERENCE_ENABLED` is true. The default is false. The deterministic stand-in is the public path, not a measure of the hosted model.
+Anonymous website chat and a visitor Assistant session do not call a model unless `ATLAS_PUBLIC_INFERENCE_ENABLED` is true. The default is false. The portfolio stack turns it on and points chat at a keyless Ollama model on the private network, `llama3.2:1b`, with 8 replies per session and 200 for the process inside one hour, a 2 second gap, 2 in flight, and 256 output tokens. An empty key is accepted only for a visitor and only for a loopback or `ollama` host. A public model host with an empty key is refused. A non-visitor on that process cannot obtain the client. Visitor document search stays on the deterministic stand-in, so a public question does not call a paid embedding API. The deterministic stand-in is not a measure of a hosted model.
 
 ## Retrieval evaluation
 
@@ -107,7 +107,7 @@ The API skip does not call Groq or Ollama. The browser skips are design screensh
 
 Production is one API process and one Next.js app behind one browser origin. The session cookie is HttpOnly and SameSite=Lax, and CSRF expects the browser to call the API that issued the token. PostgreSQL with pgvector holds the rows. Uploads live on a persistent disk. Staging HTTPS is served by Caddy. Migrations run before traffic. A second copy of the API would recover the same rows, so ingestion and workflow recovery stay in the one API process.
 
-A shared demo sets the public-demo flag. The process then refuses to start with a paid model key, live email, or an n8n webhook URL. Anonymous requests still need a session.
+A shared demo sets the public-demo flag. The process then refuses to start with a paid model key, live email, or an n8n webhook URL. The public image is `apps/web-rebuild`. The connected provider demonstration stays on `atlas_harbor` and is not mounted by this stack. Anonymous requests still need a session.
 
 ## Limits
 
