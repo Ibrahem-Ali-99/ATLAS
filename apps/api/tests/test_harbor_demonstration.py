@@ -29,6 +29,7 @@ from app.domains.demo.harbor_catalog import (
     SPAN_DAYS,
     TASK_COUNT,
     WORKFLOW_COUNT,
+    visitor_documents,
 )
 from app.domains.inbox.models import InboxConversation, InboxMessage
 from app.domains.knowledge.models import Document, EvaluationQuestion
@@ -106,7 +107,7 @@ def test_visitor_workspace_is_a_connected_harbor_dataset(client: TestClient, db)
     documents = client.get(
         f"/api/v1/organizations/{organization_id}/documents", params={"page_size": 20}
     )
-    assert documents.json()["total"] == 15
+    assert documents.json()["total"] == len(visitor_documents())
     assert all(item["origin"] == "demo" for item in documents.json()["items"])
 
     workflows = client.get(f"/api/v1/organizations/{organization_id}/workflow-definitions")
@@ -247,7 +248,7 @@ def test_visitor_workspace_is_a_connected_harbor_dataset(client: TestClient, db)
             .select_from(Document)
             .where(Document.organization_id == org, Document.origin == Origin.demo)
         )
-        == 15
+        == len(visitor_documents())
     )
     assert (
         db.scalar(

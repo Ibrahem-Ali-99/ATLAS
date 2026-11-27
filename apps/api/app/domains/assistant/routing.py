@@ -467,6 +467,8 @@ def is_open_conversation(question: str) -> bool:
         return True
     if _WORKSPACE_SCOPE.search(text) or _RECORD_FACT.search(text):
         return False
+    if re.search(r"\bstatus of\b", text):
+        return False
     return bool(
         re.search(
             r"\b(explain|why|what is|what's|who is|how does|how do i|brainstorm)\b",

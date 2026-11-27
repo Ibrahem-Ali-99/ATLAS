@@ -39,7 +39,9 @@ def clean_tables() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE TABLE assistant_proposals, message_sources, messages, conversations, chunks, documents, "
+                "TRUNCATE TABLE assistant_proposals, message_sources, messages, conversations, "
+                "chunks, documents, worker_heartbeats, public_inference_spend, "
+                "public_inference_control, "
                 "ingestion_jobs, "
                 "lead_predictions, evaluation_runs, operation_traces, model_versions, "
                 "email_messages, calendar_bookings, execution_attempts, execution_intents, "
