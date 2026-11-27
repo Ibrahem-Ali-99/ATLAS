@@ -8,8 +8,18 @@ The procedure is [portfolio-deployment.md](portfolio-deployment.md). The private
 
 - The public pages are `/`, `/demo`, and `/case-study` in `apps/web-rebuild`. The workspace is `/login`. The portfolio image sets `ATLAS_PUBLIC_SITE=1`. A local product server leaves that flag unset, so `/` stays the workspace.
 - Product pictures in `apps/web-rebuild/public/portfolio/` are viewport captures of that client reading the Harbor & Co. workspace. They are not drawings. The integrations picture is the private review. It does not show a secret, and the public stack does not mount that database.
-- `infrastructure/compose.portfolio.yaml` builds `apps/web-rebuild`. Visitor chat points at Ollama `llama3.2:1b` with an empty API key. Visitor retrieval stays on the deterministic stand-in. Live email, campaigns, WhatsApp, Stripe, Google Calendar, and n8n stay off.
+- `infrastructure/compose.portfolio.yaml` builds `apps/web-rebuild`. The file still points visitor chat at Ollama `llama3.2:1b`. That model was measured on 27 November 2026 and is not an acceptable public assistant. Leave the paid key empty until a Groq-backed change is explicitly accepted. Visitor retrieval stays on the deterministic stand-in. Live email, campaigns, WhatsApp, Stripe, Google Calendar, and n8n stay off.
 - Public replies are off unless `ATLAS_PUBLIC_INFERENCE_ENABLED` is set. The portfolio file sets it. Limits are 8 replies per session and 200 per process inside one hour, 2 seconds apart, 2 at a time, 256 output tokens, and 2,000 input characters. Abuse patterns are rejected before the model is called. A non-visitor cannot use that client. A keyless call to a public model host is refused.
+
+## Qualification recorded on 27 November 2026
+
+`infrastructure/portfolio/prove.py` exited 0 for project `atlas-portfolio-proof`. The detail is in [portfolio-deployment.md](portfolio-deployment.md). The proof stack was removed afterward. The private Harbor API was still answering `/api/v1/health` on port 8014.
+
+- [x] Caddy served the public site, `/demo`, `/case-study`, `/login`, and the overview capture. Hidden API docs returned 404. Anonymous auth routes returned 401 without a session cookie.
+- [x] Every long-running service became healthy, and the model pull completed before the API started.
+- [x] A visitor launch was isolated from Atlas Demo, refused integration configuration and checkout, stopped at eight replies, refused a second immediate reply, and was deleted after the session expired.
+- [x] Resident memory with the model loaded was about 2.0 GiB. Ollama used 1.65 GiB of its 1.75 GiB cap. The 8 GB host recommendation stands for this compose file.
+- [ ] Do not rent a host for `llama3.2:1b` as the public assistant. The replacement, if accepted, is Groq `openai/gpt-oss-20b` behind the same budgets and a key that is not the Harbor key. That path is not implemented: a public demo still refuses a paid key.
 
 ## Before a machine is rented
 
