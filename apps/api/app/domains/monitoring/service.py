@@ -19,6 +19,7 @@ from app.domains.automation.models import (
 from app.domains.crm.models import Inquiry
 from app.domains.integrations.calendar_models import GoogleCalendarConnection
 from app.domains.integrations.models import IntegrationConfig
+from app.domains.integrations.resend_test import test_status
 from app.domains.knowledge.models import Document, DocumentStatus, IngestionJob, IngestionJobStatus
 from app.domains.observability.models import OperationTrace, WorkerHeartbeat
 from app.domains.provenance.origin import DataScope, scope_clause
@@ -249,6 +250,7 @@ def _activity(
     if pending:
         oldest = round((now - _aware(pending[0].created_at)).total_seconds() / 3600, 1)
     connections, incidents = _integration_health(db, organization_id, now)
+    resend = test_status(db, organization_id)
     return {
         "notice": _ACTIVITY_NOTICE,
         "assistant": {
@@ -289,6 +291,11 @@ def _activity(
             "failed": email_counts.get(EmailStatus.failed.value, 0),
             "needs_attention": email_counts.get(EmailStatus.needs_attention.value, 0),
         },
+        "resend": {
+            "acceptance": resend.provider_confirmation,
+            "last_event": resend.provider_last_event,
+            "production_enabled": resend.production_delivery_enabled,
+        },
         "approvals": {
             "pending": len(pending),
             "delayed": len(delayed),
@@ -304,6 +311,26 @@ def _integration_health(
     db: Session, organization_id: uuid.UUID, now: datetime
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     cutoff = now - _RECENT
+    configs = list(
+        db.scalars(
+            select(IntegrationConfig)
+            .where(IntegrationConfig.organization_id == organization_id)
+            .order_by(IntegrationConfig.integration_type)
+        )
+    )
+    confirmed_at = {
+        item.provider: item.verified_at
+        for item in configs
+        if item.verified_at is not None and item.status.value != "verification_failed"
+    }
+    calendar = db.get(GoogleCalendarConnection, organization_id)
+    if (
+        calendar is not None
+        and calendar.encrypted_token
+        and not calendar.connection_error
+        and calendar.connected_at is not None
+    ):
+        confirmed_at.setdefault("google", calendar.connected_at)
     traces = list(
         db.scalars(
             select(OperationTrace)
@@ -320,25 +347,14 @@ def _integration_health(
     incidents: list[dict[str, Any]] = []
     for trace in traces:
         provider = trace.provider or ""
+        confirmed = confirmed_at.get(provider)
+        if confirmed is not None and _aware(trace.started_at) <= _aware(confirmed):
+            _remember_incident(incidents, trace)
+            continue
         if _aware(trace.started_at) >= cutoff:
             recent_errors.setdefault(provider, trace.error_code)
             continue
-        if len(incidents) < 10:
-            incidents.append(
-                {
-                    "provider": provider,
-                    "operation": trace.operation,
-                    "error_code": trace.error_code,
-                    "at": trace.started_at,
-                }
-            )
-    configs = list(
-        db.scalars(
-            select(IntegrationConfig)
-            .where(IntegrationConfig.organization_id == organization_id)
-            .order_by(IntegrationConfig.integration_type)
-        )
-    )
+        _remember_incident(incidents, trace)
     rows = [
         _connection_row(
             item.integration_type.value,
@@ -350,7 +366,6 @@ def _integration_health(
         )
         for item in configs
     ]
-    calendar = db.get(GoogleCalendarConnection, organization_id)
     if calendar is not None:
         verified_at = calendar.connected_at if calendar.encrypted_token else None
         stored_status = "disabled" if not calendar.encrypted_token else "configured"
@@ -369,6 +384,19 @@ def _integration_health(
     return rows, incidents
 
 
+def _remember_incident(incidents: list[dict[str, Any]], trace: OperationTrace) -> None:
+    if len(incidents) >= 10:
+        return
+    incidents.append(
+        {
+            "provider": trace.provider or "",
+            "operation": trace.operation,
+            "error_code": trace.error_code,
+            "at": trace.started_at,
+        }
+    )
+
+
 def _connection_row(
     kind: str,
     provider: str,
@@ -378,7 +406,7 @@ def _connection_row(
     recent_error: str | None,
 ) -> dict[str, Any]:
     health = _connection_health(stored_status, verified_at, detail, recent_error)
-    recovery, href = _connection_recovery(health)
+    recovery, href = _connection_recovery(health, detail)
     return {
         "type": kind,
         "provider": provider,
@@ -415,7 +443,12 @@ def _contains_any(value: str, needles: tuple[str, ...]) -> bool:
     return any(needle in value for needle in needles)
 
 
-def _connection_recovery(health: str) -> tuple[str | None, str | None]:
+def _connection_recovery(health: str, detail: str | None = None) -> tuple[str | None, str | None]:
+    if detail and "expired" in detail.lower():
+        return (
+            "Replace the expired access token in Integrations. Do not change the webhook callback.",
+            "/integrations",
+        )
     if health == "authentication_required":
         return "Open Integrations and sign in again. This does not send a message.", "/integrations"
     if health == "failed":

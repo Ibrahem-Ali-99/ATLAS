@@ -300,6 +300,71 @@ def test_replacing_the_sending_key_clears_test_verification(
     assert "replacement-key" not in status.text
 
 
+def test_a_replacement_key_reads_the_previous_test_without_sending(
+    client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization_id, headers = _admin(client, db)
+    created = _save_email(client, organization_id, headers)
+    _accepted(monkeypatch)
+    sent = client.post(
+        f"/api/v1/organizations/{organization_id}/integration-configs/email/resend-test",
+        headers=headers,
+        json={"recipient": "delivered@resend.dev"},
+    )
+    assert sent.status_code == 200, sent.text
+    rotated = client.put(
+        f"/api/v1/organizations/{organization_id}/integration-configs/email",
+        headers=headers,
+        json={
+            "provider": "smtp",
+            "config": {
+                "host": "127.0.0.1",
+                "port": 1025,
+                "from_address": "atlas@localhost",
+            },
+            "credentials": json.dumps({"resend_api_key": "full-access-key"}),
+            "merge_email_credentials": True,
+            "expected_version": created.json()["credential_version"],
+        },
+    )
+    assert rotated.status_code == 200, rotated.text
+    calls: list[str] = []
+
+    def handler(method: str, url: str, **kwargs: object) -> httpx.Response:
+        del url, kwargs
+        calls.append(method)
+        return httpx.Response(
+            200,
+            json={
+                "id": MESSAGE_ID,
+                "from": "onboarding@resend.dev",
+                "to": ["delivered@resend.dev"],
+                "last_event": "delivered",
+            },
+        )
+
+    monkeypatch.setattr("app.domains.integrations.resend_test.httpx.request", handler)
+    from app.domains.integrations.resend_test import refresh_delivery
+    from app.domains.monitoring.service import diagnostics
+    from app.domains.provenance.origin import DataScope
+
+    event = refresh_delivery(db, uuid.UUID(organization_id), attempts=1)
+    assert event == "delivered"
+    assert calls == ["GET"]
+    status = client.get(
+        f"/api/v1/organizations/{organization_id}/integration-configs/email/resend-test",
+        headers=headers,
+    )
+    body = status.json()
+    assert body["provider_last_event"] == "delivered"
+    assert body["provider_confirmation"] == "accepted"
+    assert body["production_delivery_enabled"] is False
+    assert "full-access-key" not in status.text
+    activity = diagnostics(db, uuid.UUID(organization_id), DataScope.all)["activity"]
+    assert activity["resend"]["last_event"] == "delivered"
+    assert activity["resend"]["production_enabled"] is False
+
+
 def test_staff_and_missing_csrf_cannot_send(client: TestClient, db: Session) -> None:
     user = make_user(db, "staff@example.com")
     organization = make_organization(db, "Atlas", "atlas-staff-resend")

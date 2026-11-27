@@ -16,6 +16,14 @@ def test_harbor_callback_origin_does_not_replace_the_operational_api() -> None:
     )
 
 
+def test_expired_token_recovery_does_not_change_the_webhook() -> None:
+    from app.domains.monitoring.service import _connection_recovery
+
+    text, href = _connection_recovery("authentication_required", "WhatsApp access token expired")
+    assert text is not None and "webhook callback" in text
+    assert href == "/integrations"
+
+
 def test_an_unchecked_calendar_slot_is_not_described_as_booked() -> None:
     text = _calendar({"available": None, "provider": "google", "needs_time": False})
     assert "not treated as open" in text

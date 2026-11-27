@@ -711,6 +711,85 @@ def record_billing(harbor: Session) -> list[StepResult]:
     return steps
 
 
+def accept_whatsapp(harbor: Session) -> list[StepResult]:
+    """Confirm the stored WhatsApp token with Graph and record that result.
+
+    This reads the phone number. It does not send a message or change a webhook.
+    """
+
+    settings = get_settings()
+    _refuse_unsafe(settings)
+    showcase = _showcase(harbor)
+    user = _admin(harbor, showcase.id)
+    _lead, inquiry = _operational_case(harbor, showcase.id, user.id)
+    run_row = _open_run(harbor, showcase.id, user.id, inquiry.id)
+    steps = [_whatsapp(harbor, showcase.id, run_row)]
+    _finish_run(run_row, steps)
+    harbor.commit()
+    return steps
+
+
+def refresh_resend(harbor: Session) -> list[StepResult]:
+    """Read delivery feedback for the stored Resend test. Does not send again."""
+
+    from app.domains.integrations.resend_test import refresh_delivery, test_status
+
+    _refuse_unsafe(get_settings())
+    showcase = _showcase(harbor)
+    user = _admin(harbor, showcase.id)
+    _lead, inquiry = _operational_case(harbor, showcase.id, user.id)
+    run_row = _open_run(harbor, showcase.id, user.id, inquiry.id)
+    status = test_status(harbor, showcase.id)
+    if not status.credential_configured:
+        steps = [
+            _note(
+                harbor,
+                showcase.id,
+                run_row,
+                StepResult(
+                    "resend",
+                    "blocked",
+                    "resend_test_unconfigured",
+                    "Harbor has no Resend sending key. No test was sent",
+                ),
+                provider="resend",
+            )
+        ]
+    else:
+        try:
+            event = refresh_delivery(harbor, showcase.id)
+        except AppError as exc:
+            blocked = exc.code == "resend_test_unconfirmed"
+            steps = [
+                _note(
+                    harbor,
+                    showcase.id,
+                    run_row,
+                    StepResult(
+                        "resend",
+                        "blocked" if blocked else "failed",
+                        exc.code,
+                        exc.message if blocked else exc.message,
+                    ),
+                    provider="resend",
+                )
+            ]
+        else:
+            refreshed = test_status(harbor, showcase.id)
+            steps = [
+                _note(
+                    harbor,
+                    showcase.id,
+                    run_row,
+                    _resend_feedback(refreshed.provider_confirmation or "accepted", event),
+                    provider="resend",
+                )
+            ]
+    _finish_run(run_row, steps)
+    harbor.commit()
+    return steps
+
+
 def continue_journeys(harbor: Session) -> list[StepResult]:
     """Finish Harbor routes that do not copy grants or repeat a completed provider call.
 
@@ -977,32 +1056,46 @@ def _whatsapp(db: Session, organization_id: uuid.UUID, run_row: AgentRun) -> Ste
     record.verification_detail = "Meta confirmed the configured phone number"
     record.status = IntegrationStatus.configured
     db.commit()
+    accepted = _note(
+        db,
+        organization_id,
+        run_row,
+        StepResult(
+            "whatsapp",
+            "succeeded",
+            None,
+            "Meta confirmed the configured phone number. No message was sent",
+        ),
+        provider="meta",
+        latency_ms=_ms(started),
+    )
     inbound = db.scalar(
         select(InboxMessage.id).where(
             InboxMessage.organization_id == organization_id,
             InboxMessage.channel == "whatsapp",
             InboxMessage.direction == "inbound",
+            InboxMessage.provider_message_id.notlike("harbor-%"),
         )
     )
     if inbound is None:
-        return _note(
+        _note(
             db,
             organization_id,
             run_row,
             StepResult(
-                "whatsapp",
+                "whatsapp_inbound",
                 "blocked",
                 "whatsapp_inbound_required",
-                "Meta accepted the connection. An inbound message is stored only when Meta posts a signed webhook to this Harbor workspace. No reply was sent",
+                "Meta accepted the connection. Inbound stays on the operational webhook. No reply was sent",
             ),
             provider="meta",
-            latency_ms=_ms(started),
         )
+        return accepted
     return _note(
         db,
         organization_id,
         run_row,
-        StepResult("whatsapp", "succeeded", None, "Meta confirmed the number and Harbor has an inbound message"),
+        StepResult("whatsapp_inbound", "succeeded", None, "Meta confirmed the number and Harbor has an inbound message"),
         provider="meta",
         latency_ms=_ms(started),
     )

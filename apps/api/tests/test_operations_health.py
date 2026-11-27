@@ -139,6 +139,38 @@ def test_connection_health_uses_stored_verification_not_a_live_call(db: Session)
     assert rows["resend"]["recovery_href"] == "/integrations"
 
 
+def test_a_later_verification_moves_the_expired_token_to_history(db: Session) -> None:
+    organization = make_organization(db, "Harbor Token", "harbor-token")
+    now = datetime.now(UTC)
+    db.add(
+        IntegrationConfig(
+            organization_id=organization.id,
+            integration_type=IntegrationType.whatsapp,
+            provider="meta",
+            config={},
+            status=IntegrationStatus.configured,
+            verified_at=now,
+            verification_detail="Meta confirmed the configured phone number",
+        )
+    )
+    db.add(
+        OperationTrace(
+            organization_id=organization.id,
+            operation="whatsapp",
+            status="failed",
+            provider="meta",
+            error_code="whatsapp_credentials_expired",
+            started_at=now - timedelta(hours=2),
+        )
+    )
+    db.commit()
+
+    activity = diagnostics(db, organization.id, DataScope.all)["activity"]
+    row = next(item for item in activity["integrations"] if item["provider"] == "meta")
+    assert row["health"] == "connected"
+    assert activity["connection_incidents"][0]["error_code"] == "whatsapp_credentials_expired"
+
+
 def test_hidden_platform_diagnostics_still_return_workspace_activity(db: Session) -> None:
     organization = make_organization(db, "Harbor Staff View", "harbor-staff-view")
     db.add(

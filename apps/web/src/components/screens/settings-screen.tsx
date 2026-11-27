@@ -641,13 +641,14 @@ function WhatsAppSettingsCard({ organizationId, isAdmin, record, onChanged }: { 
         </> : null}
       </form>
       {save.error ? <div className="mt-3"><RequestError error={save.error} /></div> : null}
+      {record?.verification_detail ? <p className="mt-3 text-xs text-muted-foreground">{record.verification_detail}</p> : null}
       {record?.last_inbound_at ? <p className="mt-3 text-xs text-muted-foreground">Last customer message {new Date(record.last_inbound_at).toLocaleString()}</p> : null}
       {record && isAdmin ? <MessagingConnectionControls organizationId={organizationId} type="whatsapp" record={record} onChanged={onChanged} onVersion={setVersion} /> : null}
       <details className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">
         <summary className="cursor-pointer font-medium text-foreground">Connection steps</summary>
         <ol className="mt-2 list-decimal space-y-1 pl-4">
           <li>Enter the Business Account ID, phone number ID, and access token from Meta, then save and test the connection.</li>
-          <li>Give Meta this callback path on the public HTTPS address your operator provides.</li>
+          <li>Give Meta this callback path only for a WhatsApp app that is not already calling the operational workspace. Do not replace that existing callback.</li>
           <li>The verification token and app secret stay on the server. They are not entered here.</li>
           <li>Approve one test recipient to send a single session reply. That does not enable customer messaging or paid templates.</li>
         </ol>
@@ -770,7 +771,8 @@ function ResendAdministratorTest({ organizationId, credentialVersion }: { organi
   ];
   const states = status.data ? [
     ["Sending key", status.data.credential_configured ? "Configured" : "Not configured"],
-    ["Test delivery", status.data.test_delivery_verified ? "Verified" : "Not verified"],
+    ["Provider acceptance", status.data.test_delivery_verified ? "Accepted" : "Not accepted"],
+    ["Delivery feedback", resendDeliveryLabel(status.data.provider_last_event)],
     ["Sending domain", status.data.sending_domain_verified ? "Verified" : "Not verified"],
     ["Production delivery", status.data.production_delivery_enabled ? "Enabled" : "Disabled"],
   ] : [];
@@ -798,8 +800,26 @@ function ResendAdministratorTest({ organizationId, credentialVersion }: { organi
     </div>
     {approve.error || send.error ? <div className="mt-3"><RequestError error={approve.error ?? send.error} /></div> : null}
     {notice ? <p className="mt-3 text-xs text-muted-foreground" role="status">{notice}</p> : null}
-    {status.data?.last_test_message_id ? <p className="mt-2 text-xs text-muted-foreground">Last accepted test to {status.data.last_test_recipient} · {status.data.provider_confirmation === "retrieved" ? "Resend returned the message" : "Resend accepted the message"} · {status.data.last_test_message_id}</p> : null}
+    {status.data?.last_test_message_id ? <p className="mt-2 text-xs text-muted-foreground">{resendDeliveryCopy(status.data)} · {status.data.last_test_message_id}</p> : null}
   </section>;
+}
+
+function resendDeliveryLabel(event: string | null | undefined): string {
+  if (event === "delivered" || event === "opened" || event === "clicked") return "Reported";
+  if (event === "unavailable") return "Not readable";
+  return "Not confirmed";
+}
+
+function resendDeliveryCopy(status: { last_test_recipient: string | null; provider_confirmation: string | null; provider_last_event: string | null }): string {
+  const event = status.provider_last_event;
+  if (event === "delivered" || event === "opened" || event === "clicked") {
+    return `Resend reported ${event} for ${status.last_test_recipient}. That is delivery feedback, separate from acceptance`;
+  }
+  if (event === "unavailable") {
+    return `Resend accepted the test to ${status.last_test_recipient}. This key cannot read delivery events, so delivery is not confirmed`;
+  }
+  const acceptance = status.provider_confirmation === "retrieved" ? "returned the message" : "accepted the message";
+  return `Resend ${acceptance} for ${status.last_test_recipient}. The latest event is ${event ?? "not reported"}, which is not delivery confirmation`;
 }
 
 function reindexFailure(code: string) {

@@ -3,7 +3,9 @@
 Set ATLAS_HARBOR_CONNECTIONS=apply and ATLAS_HARBOR_DATABASE_URL to
 atlas_harbor. `continue` runs the website, Resend feedback, n8n callback, and
 WhatsApp checks. `billing` only records the subscription Stripe already
-reports. Neither command prints a secret or a checkout address.
+reports. `whatsapp` confirms the stored token and does not send. `resend`
+reads delivery feedback for the stored test and does not send again.
+Neither command prints a secret or a checkout address.
 """
 
 from __future__ import annotations
@@ -17,7 +19,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
-from app.domains.demo.harbor_operations import continue_journeys, record_billing
+from app.domains.demo.harbor_operations import (
+    accept_whatsapp,
+    continue_journeys,
+    record_billing,
+    refresh_resend,
+)
 from app.scripts.harbor_demonstration import assert_harbor_target
 
 
@@ -29,8 +36,14 @@ def main() -> int:
         )
         return 1
     mode = sys.argv[1] if len(sys.argv) > 1 else "continue"
-    if mode not in {"continue", "billing"}:
-        print("Use continue or billing.", file=sys.stderr)
+    runners = {
+        "continue": continue_journeys,
+        "billing": record_billing,
+        "whatsapp": accept_whatsapp,
+        "resend": refresh_resend,
+    }
+    if mode not in runners:
+        print("Use continue, billing, whatsapp, or resend.", file=sys.stderr)
         return 1
     target_url = os.environ.get("ATLAS_HARBOR_DATABASE_URL", "")
     try:
@@ -39,7 +52,7 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 1
     engine = create_engine(target_url, pool_pre_ping=True)
-    runner = continue_journeys if mode == "continue" else record_billing
+    runner = runners[mode]
     try:
         with Session(engine) as harbor:
             steps = runner(harbor)

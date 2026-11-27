@@ -193,13 +193,19 @@ def refresh_delivery(db: Session, organization_id: uuid.UUID, *, attempts: int =
     credentials = _credentials(record)
     evidence = _evidence(credentials)
     key = _key(credentials)
-    if record is None or evidence is None or key is None:
+    prior = None if evidence is not None else _prior_verified_test(db, organization_id, record)
+    if record is None or key is None or (evidence is None and prior is None):
         raise AppError(
             409,
             "resend_test_unconfirmed",
             "Resend has not accepted an administrator test for this key",
         )
-    message_id, recipient = evidence[0], evidence[1]
+    if evidence is not None:
+        message_id, recipient = evidence[0], evidence[1]
+        confirmation = evidence[3]
+    else:
+        assert prior is not None
+        message_id, recipient, _verified_at, confirmation = prior
     observed = "not_reported"
     for attempt in range(max(1, attempts)):
         retrieved = _request(
@@ -223,12 +229,22 @@ def refresh_delivery(db: Session, organization_id: uuid.UUID, *, attempts: int =
         if not pending or attempt + 1 == max(1, attempts):
             break
         time.sleep(3)
-    if not _store_last_event(record, observed, key):
+    if prior is None:
+        saved = _store_last_event(record, observed, key)
+    else:
+        saved = _remember_prior_test(record, prior, observed, key)
+    if not saved:
         raise AppError(
             409,
             "resend_test_key_changed",
             "Resend returned a delivery event, but the sending key changed before it was saved.",
         )
+    record_event(
+        db,
+        organization_id,
+        "resend_test_delivery_read",
+        {"recipient": recipient, "provider_confirmation": confirmation, "last_event": observed},
+    )
     db.commit()
     return observed
 
@@ -465,6 +481,71 @@ def _event_name(value: object) -> str | None:
     if isinstance(value, str) and re.fullmatch(r"[a-z0-9._-]{1,40}", value):
         return value
     return None
+
+
+def _prior_verified_test(
+    db: Session, organization_id: uuid.UUID, record: IntegrationConfig | None
+) -> tuple[str, str, str, str] | None:
+    """Return the last administrator test after a key rotation removed its receipt."""
+
+    event = db.scalar(
+        select(AuditEvent)
+        .where(
+            AuditEvent.organization_id == organization_id,
+            AuditEvent.action == "resend_test_email_verified",
+        )
+        .order_by(AuditEvent.created_at.desc())
+        .limit(1)
+    )
+    if event is None or not isinstance(event.details, dict):
+        return None
+    details = event.details
+    if details.get("sender") != TEST_SENDER or details.get("provider_confirmation") not in {
+        "accepted",
+        "retrieved",
+    }:
+        return None
+    recipient = details.get("recipient")
+    if not isinstance(recipient, str):
+        return None
+    try:
+        normalized = str(_ADDRESS.validate_python(recipient)).casefold()
+    except ValidationError:
+        return None
+    approved = _approved_recipient(record)
+    allowed = normalized in OFFICIAL_TEST_RECIPIENTS or (
+        approved is not None and normalized == approved.casefold()
+    )
+    if not allowed:
+        return None
+    try:
+        message_id = str(uuid.UUID(str(details.get("message_id"))))
+    except (TypeError, ValueError):
+        return None
+    verified_at = event.created_at
+    if verified_at.tzinfo is None:
+        return None
+    confirmation = str(details.get("provider_confirmation"))
+    return message_id, normalized, verified_at.isoformat(), confirmation
+
+
+def _remember_prior_test(
+    record: IntegrationConfig,
+    prior: tuple[str, str, str, str],
+    event: str,
+    key_used: str,
+) -> bool:
+    credentials = _credentials(record)
+    if _key(credentials) != key_used:
+        return False
+    message_id, recipient, verified_at, confirmation = prior
+    credentials["resend_test_message_id"] = message_id
+    credentials["resend_test_recipient"] = recipient
+    credentials["resend_test_verified_at"] = verified_at
+    credentials["resend_test_confirmation"] = confirmation
+    credentials["resend_test_last_event"] = event
+    record.encrypted_credentials = seal_integration_secret(json.dumps(credentials))
+    return True
 
 
 def _store_last_event(record: IntegrationConfig, event: str, key_used: str) -> bool:

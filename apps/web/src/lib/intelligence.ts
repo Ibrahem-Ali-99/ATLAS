@@ -150,6 +150,11 @@ export type WorkspaceActivity = {
   }[];
   connection_incidents?: { provider: string; operation: string; error_code: string | null; at: string }[];
   delivery: { sent: number; failed: number; needs_attention: number };
+  resend?: {
+    acceptance: "accepted" | "retrieved" | null;
+    last_event: string | null;
+    production_enabled: boolean;
+  };
   approvals: { pending: number; delayed: number; oldest_pending_hours: number | null };
   recoverable: { kind: string; id: string | null; summary: string }[];
 };

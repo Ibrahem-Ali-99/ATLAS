@@ -177,6 +177,7 @@ export type ResendTestStatus = {
   last_test_message_id: string | null;
   last_test_at: string | null;
   provider_confirmation: "accepted" | "retrieved" | null;
+  provider_last_event: string | null;
 };
 
 export function getResendTestStatus(organizationId: string) {

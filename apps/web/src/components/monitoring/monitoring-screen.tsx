@@ -278,7 +278,7 @@ function ActivityHealth({ activity }: { activity: WorkspaceActivity }) {
         <HealthCard
           title="Message delivery"
           value={String(activity.delivery.sent + activity.delivery.failed + activity.delivery.needs_attention)}
-          detail={`${activity.delivery.sent} sent, ${activity.delivery.failed} failed, ${activity.delivery.needs_attention} need attention. Simulated campaign rows are not included.`}
+          detail={`${activity.delivery.sent} sent, ${activity.delivery.failed} failed, ${activity.delivery.needs_attention} need attention. ${resendFeedback(activity.resend)} Simulated campaign rows are not included.`}
         />
         <HealthCard
           title="Approval delays"
@@ -307,6 +307,21 @@ function ActivityHealth({ activity }: { activity: WorkspaceActivity }) {
       </div>
     </section>
   );
+}
+
+function resendFeedback(feedback: WorkspaceActivity["resend"]): string {
+  const event = feedback?.last_event;
+  const production = feedback?.production_enabled ? "enabled" : "disabled";
+  if (event === "delivered" || event === "opened" || event === "clicked") {
+    return `Resend reported ${event}. Production delivery is ${production}.`;
+  }
+  if (event === "unavailable") {
+    return "Resend accepted a test, but this key cannot read delivery events. Production delivery is disabled.";
+  }
+  if (event) {
+    return `Resend's latest event is ${event}, which is not delivery confirmation. Production delivery is ${production}.`;
+  }
+  return "No Resend delivery event is stored. Production delivery is disabled.";
 }
 
 function connectionSummary(activity: WorkspaceActivity): string {
