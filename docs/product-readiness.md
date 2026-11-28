@@ -3,7 +3,7 @@
 Status date: 2026-11-28  
 Phase: Engineering foundation and canonical product baseline  
 Branch: `feature/atlas-product-readiness`  
-Qualification commit: recorded after this evidence update
+Qualification commit: `328977a7595db28dd32b97be7ee6c58ab176cd51`
 
 ## Decision record
 
@@ -25,6 +25,7 @@ Qualification commit: recorded after this evidence update
 | Canonical frontend typecheck | Passing | `npm run typecheck --prefix apps/web-rebuild`. |
 | Canonical frontend production build | Passing | Production build completed; routes `/`, `/case-study`, `/demo`, `/invite/accept`, `/login`, `/reset-password`, `/site`. |
 | Canonical Playwright | Passing | 11 passed; live providers and paid inference disabled. |
+| GitHub CI | Failing with dispositioned blockers | Run 20: canonical web, browser, containers, dependency audit, and secrets passed; API stopped at the existing Ruff gate; retained legacy lint failed but is explicitly non-blocking. |
 | Legacy frontend safety coverage | Passing | Existing legacy unit/typecheck coverage remains; its CI job is now explicitly non-blocking for canonical releases. |
 | Configuration contracts | Passing | Development, staging, production, and portfolio Compose config; staging 3 passed; production 10 passed; portfolio 12 passed. |
 | Portfolio isolated deployment proof | Passing | Owned network/volumes/containers, Caddy health, public routes, document readiness, backup/restore, Harbor/demo isolation, and live-project preservation all passed. |
@@ -35,7 +36,8 @@ Qualification commit: recorded after this evidence update
 
 ## Defect corrections
 
-- Corrected canonical workflow run state handling: the UI now polls the bounded asynchronous run transition instead of rendering a stale `pending` record after dispatch. This fixed the approval-flow browser failure and produced 11/11 Playwright passes.
+- Corrected canonical workflow run state handling: the UI now polls the bounded asynchronous run transition, refreshes run details when opened, and requests a lead matching the configured workflow condition instead of rendering a stale or wrong-branch `pending` record after dispatch. This fixed the approval-flow browser failure and produced 11/11 Playwright passes locally and in CI.
+- Corrected the Linux browser-proof interpreter selection to use the API project virtualenv, so CI exercises the same installed runtime as local qualification.
 - Marked the retained legacy frontend CI job non-blocking for canonical releases while preserving its tests and source.
 - No Assistant or RAG algorithm was modified, and no frontend redesign was performed.
 
