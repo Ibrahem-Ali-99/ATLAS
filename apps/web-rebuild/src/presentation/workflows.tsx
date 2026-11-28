@@ -157,20 +157,29 @@ export function WorkflowsWorkspace({ onToast }: { onToast: (message: string) => 
       setRunOpen(false);
       setRunDetail(true);
       onToast(dryRun ? "Dry run recorded. No records were changed." : "Local run recorded.");
-      return listWorkflowRunRows(selected.id).then(setRuns);
+      return refreshRunsUntilSettled(selected.id);
     }).catch((error: unknown) => onToast(failureMessage(error))).finally(() => setLoading(false));
   };
   const testRun = () => {
     if (!selected.id) return;
     if (!needsLead) {
       setLoading(true);
-      void startWorkflow(selected.id, true).then(() => { setRunDetail(true); onToast("Dry run recorded. No records were changed."); return listWorkflowRunRows(selected.id).then(setRuns); }).catch((error: unknown) => onToast(failureMessage(error))).finally(() => setLoading(false));
+      void startWorkflow(selected.id, true).then(() => { setRunDetail(true); onToast("Dry run recorded. No records were changed."); return refreshRunsUntilSettled(selected.id); }).catch((error: unknown) => onToast(failureMessage(error))).finally(() => setLoading(false));
       return;
     }
     listLeadChoices().then((rows) => { setLeads(rows); setRunLead(rows[0]?.id || ""); setRunOpen(true); }).catch((error: unknown) => onToast(failureMessage(error)));
   };
   const review = (runId: string, decision: "approve" | "reject") => {
     void reviewWorkflowRun(selected.id, runId, decision).then(() => { onToast(decision === "approve" ? "Internal step approved" : "Workflow run rejected"); return listWorkflowRunRows(selected.id).then(setRuns); }).catch((error: unknown) => onToast(failureMessage(error)));
+  };
+  const refreshRunsUntilSettled = async (workflowId: string): Promise<void> => {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const next = await listWorkflowRunRows(workflowId);
+      setRuns(next);
+      if (next[0] && !["pending", "dispatching"].includes(next[0].status)) return;
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
   };
   return (
     <main className="module-main operations-main workflows-main">

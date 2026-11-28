@@ -621,7 +621,7 @@ export function workflowCommand(id: string, action: "activate" | "pause" | "dupl
 }
 
 export function startWorkflow(id: string, dryRun: boolean, context?: { leadId?: string; opportunityId?: string }) {
-  return apiFetch(orgPath(`/workflow-definitions/${id}/runs`), {
+  return apiFetch<WorkflowRunDetail>(orgPath(`/workflow-definitions/${id}/runs`), {
     method: "POST",
     body: JSON.stringify({
       request_id: crypto.randomUUID(),

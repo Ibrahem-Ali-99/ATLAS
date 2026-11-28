@@ -19,5 +19,8 @@ regexes = [
   '''replace-with-a-long-random-string''',
   '''change-me-(admin|staff|outsider)''',
   '''test-secret-key-must-be-32-chars-min''',
+  '''sk_(test|live)_disposable''',
+  '''rk_test_disposable''',
+  '''legacy-test-secret-key-with-32-chars''',
   '''postgresql\+psycopg://atlas:atlas@''',
 ]
