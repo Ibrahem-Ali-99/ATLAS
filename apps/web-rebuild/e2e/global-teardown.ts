@@ -10,7 +10,7 @@ const apiPort = process.env.ATLAS_E2E_API_PORT ?? "8012";
 function projectPython(): string {
   return process.platform === "win32"
     ? path.join(apiRoot, ".venv", "Scripts", "python.exe")
-    : "python";
+    : path.join(apiRoot, ".venv", "bin", "python");
 }
 
 function stopRecordedProcess(pid: number): Promise<void> {

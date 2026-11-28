@@ -13,7 +13,7 @@ const nameFile = path.join(repoRoot, "var", `e2e-rebuild-${apiPort}.name`);
 function projectPython(): string {
   return process.platform === "win32"
     ? path.join(apiRoot, ".venv", "Scripts", "python.exe")
-    : "python";
+    : path.join(apiRoot, ".venv", "bin", "python");
 }
 
 function redacted(value: string): string {
