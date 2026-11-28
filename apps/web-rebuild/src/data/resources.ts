@@ -639,8 +639,9 @@ export function reviewWorkflowRun(workflowId: string, runId: string, decision: "
   });
 }
 
-export function listLeadChoices() {
-  return apiFetch<Page<{ id: string; title: string }>>(orgPath("/leads?page=1&page_size=100")).then((pageResult) => pageResult.items);
+export function listLeadChoices(status?: string) {
+  const statusQuery = status ? `&status=${encodeURIComponent(status)}` : "";
+  return apiFetch<Page<{ id: string; title: string; status: string }>>(orgPath(`/leads?page=1&page_size=100${statusQuery}`)).then((pageResult) => pageResult.items);
 }
 
 export type WorkflowRunDetail = {

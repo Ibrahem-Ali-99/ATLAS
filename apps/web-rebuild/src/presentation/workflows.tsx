@@ -76,7 +76,7 @@ export function WorkflowsWorkspace({ onToast }: { onToast: (message: string) => 
   const [condition, setCondition] = useState("qualified");
   const [otherwiseTitle, setOtherwiseTitle] = useState("");
   const [runOpen, setRunOpen] = useState(false);
-  const [leads, setLeads] = useState<{ id: string; title: string }[]>([]);
+  const [leads, setLeads] = useState<{ id: string; title: string; status: string }[]>([]);
   const [runLead, setRunLead] = useState("");
   const [runDetail, setRunDetail] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -167,10 +167,19 @@ export function WorkflowsWorkspace({ onToast }: { onToast: (message: string) => 
       void startWorkflow(selected.id, true).then(() => { setRunDetail(true); onToast("Dry run recorded. No records were changed."); return refreshRunsUntilSettled(selected.id); }).catch((error: unknown) => onToast(failureMessage(error))).finally(() => setLoading(false));
       return;
     }
-    listLeadChoices().then((rows) => { setLeads(rows); setRunLead(rows[0]?.id || ""); setRunOpen(true); }).catch((error: unknown) => onToast(failureMessage(error)));
+    const matchingStatus = selected.conditions[0]?.value;
+    listLeadChoices(matchingStatus).then((rows) => {
+      setLeads(rows);
+      setRunLead(rows.find((lead) => lead.status === matchingStatus)?.id || rows[0]?.id || "");
+      setRunOpen(true);
+    }).catch((error: unknown) => onToast(failureMessage(error)));
   };
   const review = (runId: string, decision: "approve" | "reject") => {
     void reviewWorkflowRun(selected.id, runId, decision).then(() => { onToast(decision === "approve" ? "Internal step approved" : "Workflow run rejected"); return listWorkflowRunRows(selected.id).then(setRuns); }).catch((error: unknown) => onToast(failureMessage(error)));
+  };
+  const openRunDetails = () => {
+    if (!selected.id) return;
+    void listWorkflowRunRows(selected.id).then((next) => { setRuns(next); setRunDetail(true); }).catch((error: unknown) => onToast(failureMessage(error)));
   };
   const refreshRunsUntilSettled = async (workflowId: string): Promise<void> => {
     const deadline = Date.now() + 30_000;
@@ -203,7 +212,7 @@ export function WorkflowsWorkspace({ onToast }: { onToast: (message: string) => 
           </div>
           <div className="workflow-bottom-grid">
             <section><div className="section-title"><h3>Schedule</h3><CalendarClock size={15} /></div>{selected.trigger === "Schedule" ? <div className="schedule-card"><strong>{intervalLabel(selected.interval)}</strong><span>Stored repeat interval</span></div> : <div className="module-empty compact"><Clock3 size={20} /><strong>Event-triggered</strong><p>No recurring schedule is stored.</p></div>}</section>
-            <section><div className="section-title"><h3>Execution history</h3><button onClick={() => setRunDetail(true)}>View run</button></div>{runs.length ? runs.slice(0, 4).map((run) => <div className="mini-run" key={run.id}><span className={`status-dot ${run.error ? "dot-red" : "dot-green"}`} /><div><strong>{run.status}{run.dry_run ? " · dry run" : ""}</strong><small>{run.created_at.slice(0, 16).replace("T", " ")}</small></div><ChevronRight size={14} /></div>) : <div className="module-empty compact"><Clock3 size={20} /><strong>No runs yet</strong><p>A dry run records a preview and does not change customer records.</p></div>}</section>
+            <section><div className="section-title"><h3>Execution history</h3><button onClick={openRunDetails}>View run</button></div>{runs.length ? runs.slice(0, 4).map((run) => <div className="mini-run" key={run.id}><span className={`status-dot ${run.error ? "dot-red" : "dot-green"}`} /><div><strong>{run.status}{run.dry_run ? " · dry run" : ""}</strong><small>{run.created_at.slice(0, 16).replace("T", " ")}</small></div><ChevronRight size={14} /></div>) : <div className="module-empty compact"><Clock3 size={20} /><strong>No runs yet</strong><p>A dry run records a preview and does not change customer records.</p></div>}</section>
           </div>
         </section>
       </div>
