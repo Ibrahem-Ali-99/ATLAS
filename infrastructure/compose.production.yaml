@@ -48,10 +48,14 @@ services:
 
   web:
     build:
-      context: ../apps/web
+      context: ../apps/web-rebuild
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: same-origin
+        ATLAS_API_URL: http://api:8000
+        ATLAS_PUBLIC_SITE: "0"
+    environment:
+      ATLAS_API_URL: http://api:8000
+      ATLAS_PUBLIC_SITE: "0"
     networks:
       - private
     depends_on:

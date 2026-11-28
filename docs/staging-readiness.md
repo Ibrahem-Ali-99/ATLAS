@@ -20,7 +20,7 @@ py -3 infrastructure/staging/preflight.py --env-file infrastructure/staging/.env
 
 Caddy is the only published service in `infrastructure/compose.staging.yaml`. It forwards `/api/` and `/api` to FastAPI without stripping the prefix, because the application routes are already `/api/v1/...`. Every other path goes to Next.js. Postgres, n8n, Mailpit, and Ollama are on the `private` network and have no host ports.
 
-The web image used by that file is built with `NEXT_PUBLIC_API_URL=same-origin`. The browser then calls `/api/v1` on the host that served the page. Changing the staging hostname does not require another web build. Local `next dev` and the demo Compose profile still use `http://127.0.0.1:8000` when the variable is unset or set to that URL.
+The web image used by that file is the canonical `apps/web-rebuild` image, built with `ATLAS_API_URL=http://api:8000` and `ATLAS_PUBLIC_SITE=0`. Browser calls remain same-origin `/api/v1` requests and Next rewrites them to the internal API service, so changing the staging hostname does not require another web build. Local `next dev` and the demo Compose profile use `ATLAS_API_URL=http://127.0.0.1:8000`.
 
 The API entrypoint starts as root, gives `/var/lib/atlas/storage` and `/var/lib/atlas/models` to uid 10001, and runs migrations and uvicorn as `atlas`. The session cookie stays HttpOnly, `SameSite=Lax`, and `Secure` because staging sets `ATLAS_COOKIE_SECURE=true`. Production mode still refuses a placeholder secret and a `Secure=false` cookie.
 
@@ -148,7 +148,7 @@ This is simpler and cheaper than a managed split, and it is the only layout that
 
 | Service | Required in staging | How it runs today | Staging requirement |
 | --- | --- | --- | --- |
-| Next.js 16 | Yes | `apps/web/Dockerfile`. The development service `web` is behind profile `demo`. | The staging service builds with `NEXT_PUBLIC_API_URL=same-origin` and starts on every staging boot. |
+| Next.js 16 | Yes | `apps/web-rebuild/Dockerfile`. The development service `web` is behind profile `demo`. | The staging service builds with `ATLAS_API_URL=http://api:8000` and `ATLAS_PUBLIC_SITE=0` and starts on every staging boot. |
 | FastAPI | Yes | `apps/api/Dockerfile`. The entrypoint runs `alembic upgrade head` and then uvicorn on `0.0.0.0:8000` as uid 10001. | One replica. Persistent disk for uploads and model artifacts. |
 | PostgreSQL 17 + pgvector | Yes | `pgvector/pgvector:pg17` in `infrastructure/compose.yaml`. Named volume `atlas_postgres_data`. | Private. Migration `0001` runs `CREATE EXTENSION vector`. A server without that extension crash-loops the API. |
 | n8n 1.70.3 | Yes for lead processing and follow-up | Image is pinned. Workflow JSON is mounted read-only at `/workflows`. `provision_n8n.py` imports both files once and leaves them inactive. | Private. Set the encryption key before the first start. Activate only after the webhook key is in place. |
@@ -254,7 +254,7 @@ The API container interpolates `ATLAS_PUBLIC_API_URL` from `.env` when it is set
 | `ATLAS_CALENDAR_MODE` | `simulation` |
 | `ATLAS_STORAGE_DIR` | `/var/lib/atlas/storage` |
 | `ATLAS_MODEL_DIR` | `/var/lib/atlas/models` |
-| `NEXT_PUBLIC_API_URL` | `https://staging.example.com` as a **build argument**. Changing it requires a web image rebuild. |
+| `ATLAS_API_URL` | `http://api:8000` as the canonical web **build argument**. Browser requests remain same-origin through the Next rewrite. |
 | `N8N_ENCRYPTION_KEY` | Random, set before n8n's first start. The Compose default is the example placeholder. |
 | `N8N_HOST` | The private name operators use, or the staging hostname if the editor is ever proxied. Today it is hardcoded to `127.0.0.1`. |
 | `N8N_PROTOCOL` | `http` on the private network. `https` only if n8n itself terminates TLS. |
@@ -396,7 +396,7 @@ Phase 1 added the staging Compose file, Caddy, the same-origin web build, and th
 4. **Publish only Caddy.** `infrastructure/compose.staging.yaml` already keeps Postgres, n8n, Mailpit, Ollama, and the API off the host. On the VPS set `STAGING_HTTP_PORT=80` and `STAGING_HTTPS_PORT=443`. Add `extra_hosts` for the API only if Ollama stays on the host instead of the Compose service.
 5. **Confirm the volumes.** The API entrypoint gives `/var/lib/atlas/storage` and `/var/lib/atlas/models` to uid 10001. Confirm with a file create, not only with `/ready`.
 6. **Point Caddy at the public name.** The Caddyfile already routes `/api` unchanged to `api:8000` and every other path to `web:3000`, with no response buffering and 180 second proxy timeouts. Set `STAGING_HOST` to the public name so Caddy requests a Let's Encrypt certificate.
-7. **Use the staging web image as built.** `NEXT_PUBLIC_API_URL=same-origin` is already the staging build argument. Do not bake the public hostname into the image.
+7. **Use the staging web image as built.** `ATLAS_API_URL=http://api:8000` and `ATLAS_PUBLIC_SITE=0` are already the staging build arguments. Do not bake the public hostname into the image.
 8. **Let the embedding service install the model.** `docker compose up` runs `embedding-model` before the API. The first start pulls `nomic-embed-text:v1.5` into the Ollama volume. Confirm the log contains `embedding_ok` and `width=768`. A later start must say `pulled=false`. Set `STAGING_EMBEDDING_PROVIDER=openai` and `STAGING_EMBEDDING_DIMENSIONS=1536` only when the remote 1536 path was chosen on purpose. Add `-f infrastructure/compose.gpu.yaml` only on a host whose Docker daemon already exposes an NVIDIA GPU.
 9. **Bootstrap the first administrator.** Keep `STAGING_ENVIRONMENT=production`. Run `python -m app.scripts.bootstrap` inside the API container with the JSON on stdin. Confirm `--status` shows one user, one organization, one administrator, and zero companies. Run it again and confirm `administrator_exists`. Do not run the development seed.
 10. **Set the Groq key** in `.env` and recreate the API. Confirm provider status from a logged-in session. The status payload must not contain the key.

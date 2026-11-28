@@ -45,6 +45,25 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
+        working-directory: apps/web-rebuild
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web-rebuild/package-lock.json
+      - run: npm ci
+      - run: npm run test:unit
+      - run: npm run lint
+      # next build writes next-env.d.ts and .next/types, which tsc needs on a clean checkout.
+      - run: npm run build
+      - run: npm run typecheck
+
+  legacy-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
         working-directory: apps/web
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +75,6 @@ jobs:
       - run: npm ci
       - run: npm run test:unit
       - run: npm run lint
-      # next build writes next-env.d.ts and .next/types, which tsc needs on a clean checkout.
       - run: npm run build
       - run: npm run typecheck
 
@@ -100,17 +118,17 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/web/package-lock.json
+          cache-dependency-path: apps/web-rebuild/package-lock.json
       - name: Install API dependencies
         working-directory: apps/api
         run: uv sync --frozen
       - name: Install the web app and Playwright
-        working-directory: apps/web
+        working-directory: apps/web-rebuild
         run: |
           npm ci
           npx playwright install --with-deps chromium
       - name: Browser test
-        working-directory: apps/web
+        working-directory: apps/web-rebuild
         run: npx playwright test
 
   containers:
@@ -134,7 +152,7 @@ jobs:
       - name: Build the API image
         run: docker build -t atlas-api:ci apps/api
       - name: Build the web image
-        run: docker build -t atlas-web:ci apps/web
+        run: docker build -t atlas-web:ci apps/web-rebuild
 
   dependency-audit:
     runs-on: ubuntu-latest
@@ -147,7 +165,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Audit the JavaScript lockfile
-        working-directory: apps/web
+        working-directory: apps/web-rebuild
         run: npm audit --audit-level=high
       - name: Export locked Python runtime dependencies
         if: always()

@@ -1,4 +1,4 @@
-# Run the same quality checks CI runs. Secret scanning uses Docker when the image is available.
+# Run the canonical quality checks CI runs. Legacy frontend coverage is a separate CI job.
 $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 
@@ -18,7 +18,8 @@ Invoke-Checked "mypy" { uv run mypy }
 Invoke-Checked "pytest" { uv run pytest }
 Pop-Location
 
-Push-Location (Join-Path $Root "apps\web")
+Push-Location (Join-Path $Root "apps\web-rebuild")
+Invoke-Checked "unit" { npm run test:unit }
 Invoke-Checked "eslint" { npm run lint }
 Invoke-Checked "next build" { npm run build }
 Invoke-Checked "tsc" { npm run typecheck }

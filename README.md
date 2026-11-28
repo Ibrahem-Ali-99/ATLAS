@@ -6,7 +6,7 @@ A salesperson receives an inquiry. ATLAS keeps the company, the documents, and t
 
 The implementation is one Next.js app and one FastAPI process, with PostgreSQL and pgvector. It is a portfolio system with a local demo, not a hosted production service. Live model calls and Langfuse export stay off until keys are configured. See `docs/deployment.md` for hosting, `docs/architecture.md` for the data flow, and `docs/demo.md` for the walkthrough.
 
-[Engineering handoff](docs/ATLAS_ENGINEERING_HANDOFF.md) · [Product backlog](docs/product-completion-backlog.md) · [Provider activation](docs/provider-activation.md)
+[Engineering handoff](docs/ATLAS_ENGINEERING_HANDOFF.md) · [Product readiness](docs/product-readiness.md) · [Product backlog](docs/product-completion-backlog.md) · [Provider activation](docs/provider-activation.md)
 
 ## Stack
 
@@ -30,13 +30,13 @@ From the repository root in PowerShell:
 Copy-Item .env.example .env
 # Replace ATLAS_SECRET_KEY in .env with a random string of at least 32 characters.
 uv sync --directory apps\api
-npm ci --prefix apps\web
+npm ci --prefix apps\web-rebuild
 .\scripts\start-dev.ps1
 ```
 
 Open http://127.0.0.1:3000. This is the canonical local browser origin. The host API uses http://127.0.0.1:8000 and PostgreSQL is published on 127.0.0.1:5434. Use `.\scripts\diagnose-dev.ps1` for redacted port, Docker, Compose, and readiness diagnostics. Use `.\scripts\stop-dev.ps1` to stop only the ATLAS infrastructure services; it preserves volumes and databases. API docs are at http://127.0.0.1:8000/docs when `ATLAS_ENVIRONMENT` is not `production`.
 
-Container startup, health checks, and a single-origin hosting layout are in `docs/deployment.md`. Do not start the Compose `api` or `web` services while the host processes above are using ports 8000 and 3000.
+`apps/web-rebuild` is the canonical product frontend and deployment client. `apps/web` is retained as a legacy development/test client while its useful coverage is migrated; it is not the staging, production, or portfolio image. Container startup, health checks, and a single-origin hosting layout are in `docs/deployment.md`. Do not start the Compose `api` or `web` services while the host processes above are using ports 8000 and 3000.
 
 Normal development intentionally reserves host port 5434 to keep the application database separate from the default PostgreSQL port. Do not change only one of `POSTGRES_PORT` and `ATLAS_DATABASE_URL`; the startup script rejects a mismatch. The API container still reaches Postgres on the internal Docker port 5432.
 
@@ -118,13 +118,14 @@ npm run e2e
 - `ATLAS_PUBLIC_DEMO=true` refuses paid model keys, live email, an n8n URL, and the development seed.
 - Uploaded files must be PDF or TXT. Model artifacts are loaded only from the model directory, not from uploads.
 
-Webhook callbacks are rate limited inside each API process. The seeded passwords in `.env.example` are for local development. Playwright covers the signed-in workspace in `apps/web/e2e` with deterministic providers. That is not a penetration test. `docs/case-study.md` records the engineering limits.
+Webhook callbacks are rate limited inside each API process. The seeded passwords in `.env.example` are for local development. Playwright covers the canonical signed-in workspace in `apps/web-rebuild/e2e` with deterministic providers. The retained `apps/web/e2e` suite is historical/legacy coverage and is not a release gate. That is not a penetration test. `docs/case-study.md` records the engineering limits.
 
 ## Layout
 
 ```text
 apps/api          FastAPI application, migrations, and tests
-apps/web          Next.js dashboard
+apps/web-rebuild  Canonical Next.js dashboard and deployment client
+apps/web           Retained legacy Next.js client and migrated coverage
 infrastructure    Compose services and Postgres init SQL
 scripts           Seed wrapper and local quality checks
 .cursor           Engineering rules and the review skill

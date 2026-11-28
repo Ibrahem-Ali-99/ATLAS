@@ -2,7 +2,7 @@
 
 Date: 2026-11-25
 Reference: `design-reference/ATLAS Workspace Overview.zip`
-Authoritative implementation: `apps/web` (Next.js)
+Authoritative implementation: `apps/web-rebuild` (Next.js). `apps/web` is retained legacy coverage and is not the deployment client.
 
 ## Delivery status
 

@@ -1,6 +1,6 @@
 # Release verification
 
-The automated command is `.\scripts\verify-release.ps1`. Run it from the repository root on `feature/atlas-product-completion` only after `git status --porcelain` is empty. It refuses a dirty tree, uses disposable databases, writes the production build to `.next-release-check`, and does not restart the API on port 8000 or the web app on port 3000. It does not send a message, create a charge, or create a tag.
+The automated command is `.\scripts\verify-release.ps1`. Run it from the repository root on `codex/atlas-phase1-foundation` only after `git status --porcelain` is empty. It refuses a dirty tree, uses disposable databases, writes the production builds to `.next-release-check`, and does not restart the API on port 8000 or the web app on port 3000. It does not send a message, create a charge, or create a tag.
 
 The steps below are what that command runs. The counts in [release-checklist.md](release-checklist.md) were accepted on a dirty working tree and are not a substitute for this command.
 
@@ -15,7 +15,7 @@ git check-ignore -v .env apps/web/.env.local infrastructure/staging/.env var
 git ls-files -- "*.env" ".env" ".env.*" "**/.env" "**/.env.local"
 ```
 
-The branch is `feature/atlas-product-completion`. `.env`, the web local env, the staging env, and `var/` must be ignored. `git ls-files` may list `.env.example`. It must not list a filled env file, a database, or an upload.
+The branch is `codex/atlas-phase1-foundation`. `.env`, either frontend's local env, the staging env, and `var/` must be ignored. `git ls-files` may list `.env.example`. It must not list a filled env file, a database, or an upload.
 
 ## 2. Check dependency locks
 

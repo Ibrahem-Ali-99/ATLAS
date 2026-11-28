@@ -89,10 +89,14 @@ services:
   web:
     profiles: ["demo"]
     build:
-      context: ../apps/web
+      context: ../apps/web-rebuild
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
+        ATLAS_API_URL: ${ATLAS_API_URL:-http://api:8000}
+        ATLAS_PUBLIC_SITE: ${ATLAS_PUBLIC_SITE:-}
+    environment:
+      ATLAS_API_URL: ${ATLAS_API_URL:-http://api:8000}
+      ATLAS_PUBLIC_SITE: ${ATLAS_PUBLIC_SITE:-}
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:

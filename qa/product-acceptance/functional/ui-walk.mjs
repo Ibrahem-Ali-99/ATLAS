@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../..");
-const require = createRequire(path.join(repoRoot, "apps/web/package.json"));
+const require = createRequire(path.join(repoRoot, "apps/web-rebuild/package.json"));
 const { chromium } = require("@playwright/test");
 
 const sessionPath = process.argv[2];

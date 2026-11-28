@@ -21,7 +21,7 @@ from urllib.parse import quote_plus
 
 REPO = Path(__file__).resolve().parents[3]
 API = REPO / "apps" / "api"
-WEB = REPO / "apps" / "web"
+WEB = REPO / "apps" / "web-rebuild"
 QA = REPO / "qa" / "product-acceptance"
 sys.path.insert(0, str(API))
 sys.path.insert(0, str(QA))
@@ -159,7 +159,7 @@ def _start_api(api_port: int, web_port: int, database: str, log) -> subprocess.P
 
 def _start_web(web_port: int, api_port: int, log) -> subprocess.Popen:
     env = os.environ.copy()
-    env["NEXT_PUBLIC_API_URL"] = f"http://127.0.0.1:{api_port}"
+    env["ATLAS_API_URL"] = f"http://127.0.0.1:{api_port}"
     env["NEXT_DIST_DIR"] = ".next-qa-acceptance"
     return subprocess.Popen(
         ["npm.cmd" if os.name == "nt" else "npm", "run", "dev", "--", "--hostname", "127.0.0.1", "--port", str(web_port)],

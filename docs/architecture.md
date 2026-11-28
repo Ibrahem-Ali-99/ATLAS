@@ -54,11 +54,11 @@ Operation traces are stored locally. Langfuse export runs only when both keys ar
 
 ## Frontend
 
-`apps/web` is a Next.js App Router client of the API. Authenticated pages call `/api/v1/auth/me`. CRM, knowledge, the assistant, agent runs, approvals, workflows, analytics, and monitoring call the organization routes with the session cookie. Workflows shows automation status, recent runs, sandbox email, and simulated bookings. It does not embed the n8n editor. Analytics and overview counts come from the analytics endpoint. An organization with no leads or inquiries sees an empty state.
+`apps/web-rebuild` is the canonical Next.js App Router client of the API and the client used by staging, production, and portfolio Compose. Authenticated pages call `/api/v1/auth/me`. CRM, knowledge, the assistant, agent runs, approvals, workflows, analytics, and monitoring call the organization routes with the session cookie. Workflows shows automation status, recent runs, sandbox email, and simulated bookings. It does not embed the n8n editor. Analytics and overview counts come from the analytics endpoint. An organization with no leads or inquiries sees an empty state. `apps/web` is retained as a legacy client while useful coverage is migrated; it is not a deployment target.
 
 ## Engineering standards
 
-Cursor rules in `.cursor/rules` record the boundaries above. The review procedure is `.cursor/skills/engineering-review/SKILL.md`. Ruff, mypy, pytest, ESLint, the Next.js build, TypeScript, and gitleaks run in `.github/workflows/ci.yml` and `scripts/check.ps1`. The browser walkthrough is `npm run e2e` in `apps/web`. Deployment, the demo script, and the case study are in `docs/deployment.md`, `docs/demo.md`, and `docs/case-study.md`.
+Cursor rules in `.cursor/rules` record the boundaries above. The review procedure is `.cursor/skills/engineering-review/SKILL.md`. Ruff, mypy, pytest, ESLint, the Next.js build, TypeScript, and gitleaks run in `.github/workflows/ci.yml` and `scripts/check.ps1`. The canonical browser walkthrough is `npm run e2e` in `apps/web-rebuild`; retained legacy checks run separately in `apps/web`. Deployment, the demo script, and the case study are in `docs/deployment.md`, `docs/demo.md`, and `docs/case-study.md`.
 
 ## Diagrams
 

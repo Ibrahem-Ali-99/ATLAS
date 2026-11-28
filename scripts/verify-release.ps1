@@ -21,8 +21,8 @@ function Invoke-ReleaseStep {
 
 $branch = git rev-parse --abbrev-ref HEAD
 if ($LASTEXITCODE -ne 0) { throw "git rev-parse failed" }
-if ($branch -ne "feature/atlas-product-completion") {
-  throw "Release verification runs on feature/atlas-product-completion. Current branch: $branch"
+if ($branch -ne "codex/atlas-phase1-foundation") {
+  throw "Release verification runs on codex/atlas-phase1-foundation. Current branch: $branch"
 }
 
 $dirty = git status --porcelain
@@ -33,7 +33,7 @@ if ($dirty) {
 
 Write-Output "release_commit=$(git rev-parse HEAD)"
 
-foreach ($path in @(".env", "apps/web/.env.local", "infrastructure/staging/.env", "var")) {
+foreach ($path in @(".env", "apps/web/.env.local", "apps/web-rebuild/.env.local", "infrastructure/staging/.env", "var")) {
   git check-ignore -q -- $path
   if ($LASTEXITCODE -ne 0) {
     throw "$path is not ignored"
@@ -68,6 +68,12 @@ Invoke-ReleaseStep "api" {
 
 Invoke-ReleaseStep "web-unit" {
   npm run test:unit --prefix apps/web
+}
+Invoke-ReleaseStep "web-rebuild-unit" {
+  npm run test:unit --prefix apps/web-rebuild
+}
+Invoke-ReleaseStep "web-rebuild-lint" {
+  npm run lint --prefix apps/web-rebuild
 }
 Invoke-ReleaseStep "web-typecheck" {
   Push-Location apps/web

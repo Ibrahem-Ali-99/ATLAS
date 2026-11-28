@@ -42,7 +42,7 @@ $envKeys = @(
   "SEED_OUTSIDER_NAME", "ATLAS_STORAGE_DIR", "ATLAS_MODEL_DIR", "NEXT_DIST_DIR",
   "ATLAS_E2E_POSTGRES_HOST", "ATLAS_E2E_PRODUCTION", "ATLAS_E2E_API_PORT", "ATLAS_E2E_WEB_PORT",
   "ATLAS_E2E_EXTERNAL_WEB",
-  "NEXT_PUBLIC_API_URL", "ATLAS_E2E_SKIP_MAILPIT", "ATLAS_E2E_ARTIFACT_DIR", "PLAYWRIGHT_BROWSERS_PATH"
+  "ATLAS_API_URL", "ATLAS_E2E_SKIP_MAILPIT", "ATLAS_E2E_ARTIFACT_DIR", "PLAYWRIGHT_BROWSERS_PATH"
 )
 $previousEnv = @{}
 foreach ($key in $envKeys) { $previousEnv[$key] = [Environment]::GetEnvironmentVariable($key) }
@@ -88,13 +88,13 @@ try {
   if ($Mode -ne "Api") {
     $env:ATLAS_E2E_WEB_PORT = [string](Get-LoopbackPort)
     do { $env:ATLAS_E2E_API_PORT = [string](Get-LoopbackPort) } while ($env:ATLAS_E2E_API_PORT -eq $env:ATLAS_E2E_WEB_PORT)
-    $env:NEXT_PUBLIC_API_URL = "http://127.0.0.1:$($env:ATLAS_E2E_API_PORT)"
+    $env:ATLAS_API_URL = "http://127.0.0.1:$($env:ATLAS_E2E_API_PORT)"
     $env:NEXT_DIST_DIR = ".next-e2e-phase2d"
     $env:ATLAS_E2E_SKIP_MAILPIT = "1"
     $env:ATLAS_E2E_ARTIFACT_DIR = Join-Path $run "screenshots"
     $env:ATLAS_E2E_EXTERNAL_WEB = "1"
     if ($BrowserCache) { $env:PLAYWRIGHT_BROWSERS_PATH = (Resolve-Path -LiteralPath $BrowserCache).Path }
-    Push-Location (Join-Path $repo "apps\web")
+    Push-Location (Join-Path $repo "apps\web-rebuild")
     try {
       Invoke-AtlasNative -FilePath "node" -ArgumentList @(
         "node_modules/next/dist/bin/next", "build"

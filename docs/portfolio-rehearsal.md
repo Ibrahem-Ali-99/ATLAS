@@ -49,7 +49,7 @@ From `apps/api`, with the portfolio URL ending in `/atlas_portfolio`:
 2. Run `python -m alembic upgrade head` with `ALEMBIC_DATABASE_URL` pointed at `atlas_portfolio`.
 3. Run `python -m app.scripts.portfolio_demo` with `ATLAS_PORTFOLIO_DEMO=apply`, the portfolio URL, a storage directory outside the active upload store, and the sandbox overrides in `docs/portfolio-demo.md`. `ATLAS_PUBLIC_DEMO` stays false for this command.
 4. Start the API on port 8012 with `ATLAS_PUBLIC_DEMO=true`, `ATLAS_DATABASE_URL` set to `atlas_portfolio`, `ATLAS_STORAGE_DIR` set to the portfolio storage directory, `ATLAS_SESSION_COOKIE_NAME=atlas_portfolio_session`, CORS limited to `http://127.0.0.1:3012`, and the same sandbox provider overrides. Do not use `--reload`.
-5. Start the web app with `NEXT_PUBLIC_API_URL=http://127.0.0.1:8012`, `NEXT_DIST_DIR=.next-portfolio`, and `npx next dev --hostname 127.0.0.1 --port 3012`.
+5. Start the canonical web app from `apps/web-rebuild` with `ATLAS_API_URL=http://127.0.0.1:8012`, `NEXT_DIST_DIR=.next-portfolio`, and `npx next dev --hostname 127.0.0.1 --port 3012`.
 6. Sign in with the local seed accounts. Passwords stay in the local environment file.
 
 Running the portfolio command again without dropping the database updates the prepared rows and leaves extra rehearsal rows in place. A clean repeat drops `atlas_portfolio` first.

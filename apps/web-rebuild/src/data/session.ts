@@ -1,4 +1,4 @@
-import { apiFetch, setCsrfToken } from "@/data/client";
+import { apiFetch, setCsrfToken } from "./client.ts";
 
 export type Membership = {
   id: string;

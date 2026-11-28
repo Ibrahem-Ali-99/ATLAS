@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $api = Join-Path $repo "apps\api"
-$web = Join-Path $repo "apps\web"
+$web = Join-Path $repo "apps\web-rebuild"
 $state = Join-Path $repo "var\dev"
 New-Item -ItemType Directory -Force -Path $state | Out-Null
 . (Join-Path $PSScriptRoot "native-command.ps1")
@@ -125,7 +125,7 @@ try {
 } finally { Pop-Location }
 
 $apiCommand = "Set-Location '$api'; uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --no-access-log 2>&1 | Tee-Object '$state\api.log'"
-$webCommand = "Set-Location '$web'; `$env:NEXT_PUBLIC_API_URL='http://127.0.0.1:8000'; npm run dev -- --hostname 127.0.0.1 --port 3000 2>&1 | Tee-Object '$state\web.log'"
+$webCommand = "Set-Location '$web'; `$env:ATLAS_API_URL='http://127.0.0.1:8000'; npm run dev -- --hostname 127.0.0.1 --port 3000 2>&1 | Tee-Object '$state\web.log'"
 if ($NoNewWindows) {
   Write-Output "Start API: $apiCommand"
   Write-Output "Start web: $webCommand"

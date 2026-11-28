@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 # development/staging database name `atlas`.
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $api = Join-Path $repo "apps\api"
-$web = Join-Path $repo "apps\web"
+$web = Join-Path $repo "apps\web-rebuild"
 $python = Join-Path $api ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python)) { throw "ATLAS API virtualenv not found: $python" }
 $state = Join-Path $repo "var\dev"
@@ -16,7 +16,7 @@ New-Item -ItemType Directory -Force -Path $state | Out-Null
 . (Join-Path $PSScriptRoot "e2e-config.ps1")
 Set-AtlasE2EEnvironment
 
-Write-Output "E2E target database=per-run api_port=$($env:ATLAS_E2E_API_PORT) web_port=$($env:ATLAS_E2E_WEB_PORT) api_url=$($env:NEXT_PUBLIC_API_URL)"
+Write-Output "E2E target database=per-run api_port=$($env:ATLAS_E2E_API_PORT) web_port=$($env:ATLAS_E2E_WEB_PORT) api_url=$($env:ATLAS_API_URL)"
 
 $probe = Test-NetConnection -ComputerName 127.0.0.1 -Port 5434 -InformationLevel Quiet
 if (-not $probe) { throw "PostgreSQL is not reachable at 127.0.0.1:5434" }

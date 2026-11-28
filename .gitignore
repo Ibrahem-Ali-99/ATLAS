@@ -31,6 +31,10 @@ dist/
 /apps/web/ui-shots/
 /review/
 
+# Local portfolio production media and first-cut backups are preserved outside Git.
+/portfolio-media/
+/portfolio-media-backup/
+
 .DS_Store
 Thumbs.db
 .idea/

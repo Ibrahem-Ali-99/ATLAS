@@ -6,7 +6,7 @@ No public host was created for this release. The commands below are the deployme
 
 ## Local Windows workflow
 
-Postgres, Mailpit, and n8n come from Compose. The API and web stay on the host so they can use the existing checkout.
+Postgres, Mailpit, and n8n come from Compose. The API and canonical `apps/web-rebuild` frontend stay on the host so they can use the existing checkout.
 
 ```powershell
 docker compose up -d postgres mailpit n8n
@@ -26,7 +26,7 @@ The session cookie is HttpOnly and SameSite=Lax. A browser will not send it from
 
 Host the web and API behind one origin. A reverse proxy can forward `/api/` to the API and everything else to Next.js. Set `ATLAS_COOKIE_SECURE=true` only for HTTPS. Production refuses a placeholder `ATLAS_SECRET_KEY` and refuses `ATLAS_LLM_PROVIDER=double`.
 
-`NEXT_PUBLIC_API_URL=same-origin` builds a web image that calls `/api/v1` on the page's own host, so a new HTTPS hostname does not require a rebuild. The staging Compose file passes that value. An explicit URL is still baked at build time. Local development and the demo profile keep `http://127.0.0.1:8000`. The image sets `NEXT_STANDALONE=1` so Next emits a standalone server. A host checkout leaves that unset, so `npm run start` keeps working. Staging routing is `infrastructure/compose.staging.yaml`.
+`ATLAS_API_URL=http://api:8000` is the internal build-time fallback for the canonical `apps/web-rebuild` image. The staging and production Compose files build that image with the API service address and set `ATLAS_PUBLIC_SITE=0` so the product workspace remains the root experience; the portfolio Compose file alone enables the public site. The reverse proxy still publishes one browser origin and forwards `/api/` to the API. Local development uses `ATLAS_API_URL=http://127.0.0.1:8000`. The image sets `NEXT_STANDALONE=1` so Next emits a standalone server. A host checkout leaves that unset, so `npm run start` keeps working. Staging routing is `infrastructure/compose.staging.yaml`.
 
 The agent reads company documents through a short-lived process. That process receives the configured embedding provider, so `double` and a real key are not split between the API and the tool. A public demo should leave provider keys empty and leave the n8n URL empty. Empty keys fail closed. Do not give the seeded admin password to visitors if n8n, live email, or a paid model key is configured.
 

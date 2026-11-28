@@ -1,5 +1,5 @@
-import { ApiError, apiFetch, apiStream } from "@/data/client";
-import { workspace } from "@/presentation/appConfig";
+import { ApiError, apiFetch, apiStream } from "./client.ts";
+import { workspace } from "../presentation/appConfig.ts";
 
 export function orgPath(path: string): string {
   return `/api/v1/organizations/${workspace.organizationId}${path}`;

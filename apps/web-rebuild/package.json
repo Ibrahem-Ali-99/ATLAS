@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "lint": "eslint",
+    "test:unit": "node --experimental-strip-types --test src/data/client.test.ts src/data/session.test.ts src/data/resources.test.ts",
     "typecheck": "tsc --noEmit",
     "e2e": "playwright test"
   },
@@ -21,6 +23,8 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.6",
     "tailwindcss": "4.3.5",
     "typescript": "^5"
   }

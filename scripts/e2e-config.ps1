@@ -14,5 +14,5 @@ function Set-AtlasE2EEnvironment {
   $env:ATLAS_E2E_PRODUCTION = "1"
   $env:ATLAS_E2E_API_PORT = "8011"
   $env:ATLAS_E2E_WEB_PORT = "3011"
-  $env:NEXT_PUBLIC_API_URL = "http://127.0.0.1:8011"
+  $env:ATLAS_API_URL = "http://127.0.0.1:8011"
 }
